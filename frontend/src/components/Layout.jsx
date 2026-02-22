@@ -53,7 +53,7 @@ export default function Layout() {
               <optgroup key={proj} label={proj}>
                 {versions.map((r) => (
                   <option key={r.id} value={r.id}>
-                    {r.commit} — {r.node_count.toLocaleString()} nodes
+                    {proj} @ {r.commit} — {r.node_count.toLocaleString()} nodes
                   </option>
                 ))}
               </optgroup>
