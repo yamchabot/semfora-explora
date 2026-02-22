@@ -80,16 +80,19 @@ def list_repos():
     repos = []
     for db_file in sorted(DATA_DIR.glob("*.db")):
         repo_id = db_file.stem
-        conn = sqlite3.connect(db_file)
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) as n FROM nodes")
-        node_count = cur.fetchone()["n"]
-        cur.execute("SELECT COUNT(*) as n FROM edges")
-        edge_count = cur.fetchone()["n"]
-        cur.execute("SELECT COUNT(DISTINCT module) as n FROM nodes WHERE module IS NOT NULL")
-        module_count = cur.fetchone()["n"]
-        conn.close()
+        try:
+            conn = sqlite3.connect(db_file)
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) as n FROM nodes")
+            node_count = cur.fetchone()["n"]
+            cur.execute("SELECT COUNT(*) as n FROM edges")
+            edge_count = cur.fetchone()["n"]
+            cur.execute("SELECT COUNT(DISTINCT module) as n FROM nodes WHERE module IS NOT NULL")
+            module_count = cur.fetchone()["n"]
+            conn.close()
+        except Exception:
+            continue
         repos.append({
             "id": repo_id,
             "name": repo_id,
@@ -1028,6 +1031,14 @@ def detect_communities(repo_id: str, resolution: float = Query(1.0, ge=0.1, le=5
         key = (min(cu, cv), max(cu, cv))
         comm_edges[key] = comm_edges.get(key, 0) + data.get("weight", 1)
 
+    # Drop singleton communities — a lone node isn't a community
+    singleton_comm_ids = {
+        comm_id for comm_id, mod_counts in comm_module_counts.items()
+        if sum(mod_counts.values()) <= 1
+    }
+    comm_module_counts = {k: v for k, v in comm_module_counts.items() if k not in singleton_comm_ids}
+    valid_hashes = {h for h, c in hash_to_comm.items() if c not in singleton_comm_ids}
+
     communities_out = []
     for comm_id, mod_counts in comm_module_counts.items():
         total = sum(mod_counts.values())
@@ -1043,15 +1054,18 @@ def detect_communities(repo_id: str, resolution: float = Query(1.0, ge=0.1, le=5
         })
     communities_out.sort(key=lambda x: -x["size"])
 
+    # Drop edges that touch a singleton community
     max_comm_edge = max(comm_edges.values(), default=1)
     community_edges_out = [
         {"from": k[0], "to": k[1], "count": v, "weight": round(v / max_comm_edge, 3)}
         for k, v in comm_edges.items()
+        if k[0] not in singleton_comm_ids and k[1] not in singleton_comm_ids
     ]
 
     # Misaligned: declared module ≠ community's dominant module (only high-purity communities)
     misaligned = []
-    for h, comm_id in hash_to_comm.items():
+    for h in valid_hashes:
+        comm_id = hash_to_comm[h]
         nd = nodes_data[h]
         comm_mods = comm_module_counts[comm_id]
         dominant_mod = max(comm_mods, key=comm_mods.get)
@@ -1067,12 +1081,12 @@ def detect_communities(repo_id: str, resolution: float = Query(1.0, ge=0.1, le=5
             })
     misaligned.sort(key=lambda x: (x["declared_module"], x["name"]))
 
-    # Overall alignment score
+    # Alignment score only counts non-singleton nodes
     aligned = sum(
-        1 for h, comm_id in hash_to_comm.items()
-        if nodes_data[h]["module"] == max(comm_module_counts[comm_id], key=comm_module_counts[comm_id].get)
+        1 for h in valid_hashes
+        if nodes_data[h]["module"] == max(comm_module_counts[hash_to_comm[h]], key=comm_module_counts[hash_to_comm[h]].get)
     )
-    alignment_score = aligned / len(hash_to_comm) if hash_to_comm else 0.0
+    alignment_score = aligned / len(valid_hashes) if valid_hashes else 0.0
 
     conn.close()
     return {
@@ -1080,7 +1094,7 @@ def detect_communities(repo_id: str, resolution: float = Query(1.0, ge=0.1, le=5
         "community_edges": community_edges_out,
         "misaligned": misaligned[:200],
         "alignment_score": round(alignment_score, 3),
-        "total_nodes": len(hash_to_comm),
+        "total_nodes": len(valid_hashes),
         "community_count": len(communities_out),
     }
 
