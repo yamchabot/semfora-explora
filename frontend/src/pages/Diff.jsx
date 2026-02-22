@@ -129,7 +129,7 @@ export default function Diff() {
                   b: v.id,
                   label: `${proj}: ${vers[i + 1].commit.slice(0, 7)} → ${v.commit.slice(0, 7)}`,
                 }));
-              }).slice(0, 6).map(({ a, b, label }) => (
+              }).slice(0, 12).map(({ a, b, label }) => (
                 <button
                   key={label}
                   className="btn btn-ghost btn-sm"
