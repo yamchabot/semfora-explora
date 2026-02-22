@@ -200,6 +200,8 @@ def triage(repo_id: str):
         SELECT caller_module, callee_module, SUM(edge_count) AS total
         FROM module_edges
         WHERE caller_module != callee_module
+          AND caller_module != '__external__'
+          AND callee_module != '__external__'
         GROUP BY caller_module, callee_module
         ORDER BY total DESC
     """)
@@ -348,7 +350,10 @@ def list_modules(repo_id: str):
     """)
     modules_raw = {r["module"]: row_to_dict(r) for r in cur.fetchall()}
     # Cross-module edges
-    cur.execute("SELECT caller_module, callee_module, edge_count FROM module_edges")
+    cur.execute("""
+        SELECT caller_module, callee_module, edge_count FROM module_edges
+        WHERE caller_module != '__external__' AND callee_module != '__external__'
+    """)
     for row in cur.fetchall():
         cm, callee_m, cnt = row["caller_module"], row["callee_module"], row["edge_count"]
         if cm == callee_m:
@@ -381,7 +386,11 @@ def list_modules(repo_id: str):
 def module_edges(repo_id: str):
     conn = get_db(repo_id)
     cur = conn.cursor()
-    cur.execute("SELECT caller_module, callee_module, edge_count FROM module_edges ORDER BY edge_count DESC LIMIT 200")
+    cur.execute("""
+        SELECT caller_module, callee_module, edge_count FROM module_edges
+        WHERE caller_module != '__external__' AND callee_module != '__external__'
+        ORDER BY edge_count DESC LIMIT 200
+    """)
     edges = [row_to_dict(r) for r in cur.fetchall()]
     conn.close()
     return {"edges": edges}
@@ -695,9 +704,10 @@ def graph_diff(req: DiffRequest):
     removed = [nodes_a[k] for k in keys_a - keys_b]
     common = keys_a & keys_b
     # Module-level edge comparison
-    cur_a.execute("SELECT caller_module, callee_module, edge_count FROM module_edges")
+    _ext_filter = "WHERE caller_module != '__external__' AND callee_module != '__external__'"
+    cur_a.execute(f"SELECT caller_module, callee_module, edge_count FROM module_edges {_ext_filter}")
     mod_edges_a = {(r["caller_module"], r["callee_module"]): r["edge_count"] for r in cur_a.fetchall()}
-    cur_b.execute("SELECT caller_module, callee_module, edge_count FROM module_edges")
+    cur_b.execute(f"SELECT caller_module, callee_module, edge_count FROM module_edges {_ext_filter}")
     mod_edges_b = {(r["caller_module"], r["callee_module"]): r["edge_count"] for r in cur_b.fetchall()}
     new_mod_edges = [{"from": k[0], "to": k[1], "count": mod_edges_b[k]} for k in set(mod_edges_b) - set(mod_edges_a)]
     removed_mod_edges = [{"from": k[0], "to": k[1], "count": mod_edges_a[k]} for k in set(mod_edges_a) - set(mod_edges_b)]
@@ -1164,8 +1174,11 @@ def module_graph(repo_id: str, depth: int = Query(2, ge=1, le=6)):
         if r["module"] != rolled:
             rolled_stats[rolled]["submodules"].add(r["module"])
 
-    # Roll up module_edges
-    cur.execute("SELECT caller_module, callee_module, edge_count FROM module_edges")
+    # Roll up module_edges (exclude __external__ — not a real internal module)
+    cur.execute("""
+        SELECT caller_module, callee_module, edge_count FROM module_edges
+        WHERE caller_module != '__external__' AND callee_module != '__external__'
+    """)
     edge_map: dict = {}
     intra: dict = {}
     for r in cur.fetchall():
