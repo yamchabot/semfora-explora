@@ -13,6 +13,8 @@ from collections import defaultdict, deque
 import networkx as nx
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 app = FastAPI(title="Semfora Explorer API", version="0.1.0")
@@ -483,3 +485,17 @@ def load_bearing_analysis(repo_id: str, threshold: int = Query(5)):
         "unexpected_load_bearing": unexpected,
         "threshold_modules": threshold,
     }
+
+
+# ── Serve React frontend (must be last) ────────────────────────────────────
+
+FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"
+
+if FRONTEND_DIST.exists():
+    app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        """Serve React SPA — return index.html for all non-API routes."""
+        index = FRONTEND_DIST / "index.html"
+        return FileResponse(index)

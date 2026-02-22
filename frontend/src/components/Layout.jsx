@@ -38,10 +38,22 @@ export default function Layout() {
             onChange={(e) => setRepoId(e.target.value)}
             style={{ width: "100%", fontSize: 12 }}
           >
-            {data?.repos?.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name} ({r.node_count.toLocaleString()} nodes)
-              </option>
+            {Object.entries(
+              (data?.repos || []).reduce((acc, r) => {
+                const proj = r.id.includes("@") ? r.id.split("@")[0] : r.id;
+                const commit = r.id.includes("@") ? r.id.split("@")[1] : "HEAD";
+                if (!acc[proj]) acc[proj] = [];
+                acc[proj].push({ ...r, commit });
+                return acc;
+              }, {})
+            ).map(([proj, versions]) => (
+              <optgroup key={proj} label={proj}>
+                {versions.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.commit} — {r.node_count.toLocaleString()} nodes
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </select>
         </div>
