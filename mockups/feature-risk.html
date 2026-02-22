@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Feature Risk · Semfora Explorer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #e6edf3; }
+  header { padding: 16px 32px; border-bottom: 1px solid #21262d; display: flex; align-items: center; gap: 16px; }
+  .logo { font-size: 20px; font-weight: 700; color: #58a6ff; text-decoration: none; }
+  .logo span { color: #e6edf3; }
+  .breadcrumb { color: #8b949e; font-size: 14px; }
+  .main { display: grid; grid-template-columns: 240px 1fr; min-height: calc(100vh - 57px); }
+  nav { border-right: 1px solid #21262d; padding: 16px 0; }
+  nav a { display: flex; align-items: center; gap: 10px; padding: 8px 20px; color: #8b949e; text-decoration: none; font-size: 14px; border-left: 2px solid transparent; }
+  nav a:hover { color: #e6edf3; background: #161b22; }
+  nav a.active { color: #58a6ff; border-left-color: #58a6ff; background: #161b22; }
+  nav .section-label { padding: 16px 20px 6px; font-size: 11px; font-weight: 600; color: #484f58; text-transform: uppercase; letter-spacing: 0.08em; }
+  .content { padding: 24px 32px; }
+  h1 { font-size: 22px; font-weight: 600; margin-bottom: 4px; }
+  .subtitle { color: #8b949e; font-size: 13px; margin-bottom: 24px; }
+
+  .tabs { display: flex; gap: 0; border-bottom: 1px solid #21262d; margin-bottom: 24px; }
+  .tab { padding: 10px 20px; font-size: 13px; color: #8b949e; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tab.active { color: #58a6ff; border-bottom-color: #58a6ff; }
+
+  /* Feature list */
+  .feature-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 32px; }
+  .feature-row { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 0; overflow: hidden; transition: border-color 0.1s; cursor: pointer; }
+  .feature-row:hover { border-color: #388bfd44; }
+  .feature-row.selected { border-color: #58a6ff; }
+  .feature-header { display: flex; align-items: center; gap: 16px; padding: 14px 16px; }
+  .feature-name { font-size: 14px; font-weight: 600; flex: 1; }
+  .feature-sub { font-size: 12px; color: #8b949e; margin-top: 2px; }
+  
+  .risk-badge { font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 20px; white-space: nowrap; }
+  .risk-critical { background: #3d1f1f; color: #f85149; border: 1px solid #f8514944; }
+  .risk-high { background: #3d2c1e; color: #e3b341; border: 1px solid #e3b34144; }
+  .risk-medium { background: #1f3a5f; color: #58a6ff; border: 1px solid #58a6ff44; }
+  .risk-low { background: #1a3628; color: #3fb950; border: 1px solid #3fb95044; }
+
+  .test-indicators { display: flex; gap: 6px; align-items: center; }
+  .test-dot { width: 10px; height: 10px; border-radius: 50%; }
+  .test-label { font-size: 11px; color: #8b949e; }
+
+  /* Risk breakdown bars */
+  .risk-detail { padding: 0 16px 14px 16px; border-top: 1px solid #21262d; display: none; }
+  .feature-row.selected .risk-detail { display: block; padding-top: 14px; }
+  
+  .risk-signals { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+  .signal-item { background: #1c2128; border-radius: 6px; padding: 10px 12px; font-size: 12px; }
+  .signal-label { color: #8b949e; margin-bottom: 4px; }
+  .signal-val { font-weight: 600; }
+  .sig-bad { color: #f85149; }
+  .sig-warn { color: #e3b341; }
+  .sig-good { color: #3fb950; }
+
+  .test-list { margin-top: 8px; }
+  .test-list h4 { font-size: 12px; color: #8b949e; margin-bottom: 8px; font-weight: 500; }
+  .test-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #21262d; font-size: 12px; }
+  .test-item:last-child { border-bottom: none; }
+  .test-status { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .ts-pass { background: #3fb950; }
+  .ts-fail { background: #f85149; }
+  .ts-skip { background: #484f58; }
+  .test-name { font-family: monospace; color: #e6edf3; flex: 1; }
+  .test-depth { font-size: 11px; color: #484f58; }
+  .path-btn { font-size: 11px; background: #1f3a5f; color: #58a6ff; border: none; padding: 2px 8px; border-radius: 4px; cursor: pointer; }
+
+  /* Feature coupling matrix */
+  .coupling-section h2 { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+  .coupling-desc { font-size: 13px; color: #8b949e; margin-bottom: 16px; }
+  
+  .coupling-grid { overflow: auto; }
+  .coupling-table { border-collapse: collapse; font-size: 12px; }
+  .coupling-table th { padding: 8px 12px; background: #1c2128; border: 1px solid #21262d; color: #8b949e; font-weight: 500; white-space: nowrap; }
+  .coupling-table td { padding: 8px 12px; border: 1px solid #21262d; text-align: center; white-space: nowrap; }
+  .coupling-table .row-header { text-align: left; font-weight: 500; background: #1c2128; }
+  .coup-diag { background: #1c2128; color: #484f58; }
+  .coup-lb { background: #1a3628; color: #3fb950; font-size: 11px; }   /* load-bearing only - good */
+  .coup-warn { background: #3d2c1e; color: #e3b341; }                   /* some unexpected */
+  .coup-bad { background: #3d1f1f; color: #f85149; font-weight: 700; }  /* heavy unexpected */
+  .coup-none { color: #484f58; }
+  
+  .coupling-legend { display: flex; gap: 16px; margin-top: 12px; flex-wrap: wrap; }
+  .cl-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #8b949e; }
+  .cl-swatch { width: 16px; height: 16px; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<header>
+  <a class="logo" href="index.html">semfora<span>explorer</span></a>
+  <div class="breadcrumb">/ Feature Risk</div>
+</header>
+
+<div class="main">
+  <nav>
+    <div class="section-label">Overview</div>
+    <a href="index.html">📊 Dashboard</a>
+    <div class="section-label">Analysis Tools</div>
+    <a href="call-graph-diff.html">🔀 Call Graph Diff</a>
+    <a href="blast-radius.html">💥 Blast Radius</a>
+    <a href="module-coupling.html">🧩 Module Coupling</a>
+    <a href="dead-code.html">🪦 Dead Code</a>
+    <a href="legacy-planner.html">🏗️ Migration Planner</a>
+    <a href="feature-risk.html" class="active">⚠️ Feature Risk</a>
+    <a href="load-bearing-nodes.html">🏛️ Load-Bearing Nodes</a>
+  </nav>
+
+  <div class="content">
+    <h1>⚠️ Feature Risk & Integration Test Traceability</h1>
+    <p class="subtitle">User stories → integration tests → code paths → risk. See what's safe to ship.</p>
+
+    <div class="tabs">
+      <div class="tab active">Feature Risk Overview</div>
+      <div class="tab">Feature Coupling</div>
+      <div class="tab">Uncovered Paths</div>
+    </div>
+
+    <!-- Feature list -->
+    <div class="feature-list">
+
+      <!-- CRITICAL -->
+      <div class="feature-row selected">
+        <div class="feature-header">
+          <div>
+            <div class="feature-name">💳 Checkout & Payment</div>
+            <div class="feature-sub">US-041, US-042, US-047 · payments/, orders/, auth/</div>
+          </div>
+          <div class="test-indicators">
+            <div class="test-dot" style="background:#3fb950" title="passing"></div>
+            <div class="test-dot" style="background:#3fb950"></div>
+            <div class="test-dot" style="background:#f85149" title="failing"></div>
+            <div class="test-dot" style="background:#484f58" title="skipped"></div>
+            <div class="test-label">3/4 passing</div>
+          </div>
+          <div class="risk-badge risk-critical">CRITICAL RISK</div>
+        </div>
+        <div class="risk-detail">
+          <div class="risk-signals">
+            <div class="signal-item"><div class="signal-label">Integration test coverage</div><div class="signal-val sig-warn">Partial — 1 critical path uncovered</div></div>
+            <div class="signal-item"><div class="signal-label">Unexpected coupling</div><div class="signal-val sig-bad">High — 3 unexpected cross-domain edges</div></div>
+            <div class="signal-item"><div class="signal-label">Deepest call chain</div><div class="signal-val sig-warn">17 hops (high)</div></div>
+            <div class="signal-item"><div class="signal-label">Load-bearing node coverage</div><div class="signal-val sig-good">Passes through Queue, DB client ✓</div></div>
+            <div class="signal-item"><div class="signal-label">Shared path with other features</div><div class="signal-val sig-bad">6 other features share OrderRepository.save()</div></div>
+            <div class="signal-item"><div class="signal-label">Fossilized nodes in path</div><div class="signal-val sig-warn">2 nodes unmodified 3+ years</div></div>
+          </div>
+          <div class="test-list">
+            <h4>Integration Tests</h4>
+            <div class="test-item">
+              <div class="test-status ts-pass"></div>
+              <div class="test-name">e2e/checkout/happy-path.test.ts</div>
+              <div class="test-depth">depth 14 · 83 nodes</div>
+              <button class="path-btn">View path</button>
+            </div>
+            <div class="test-item">
+              <div class="test-status ts-pass"></div>
+              <div class="test-name">e2e/checkout/declined-card.test.ts</div>
+              <div class="test-depth">depth 11 · 61 nodes</div>
+              <button class="path-btn">View path</button>
+            </div>
+            <div class="test-item">
+              <div class="test-status ts-fail"></div>
+              <div class="test-name">integration/payments/refund-flow.test.ts</div>
+              <div class="test-depth">depth 9 · 44 nodes · <span style="color:#f85149">FAILING</span></div>
+              <button class="path-btn">View path</button>
+            </div>
+            <div class="test-item">
+              <div class="test-status ts-skip"></div>
+              <div class="test-name">e2e/checkout/international-card.test.ts</div>
+              <div class="test-depth">skipped · path unverified</div>
+              <button class="path-btn">View path</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- HIGH -->
+      <div class="feature-row">
+        <div class="feature-header">
+          <div>
+            <div class="feature-name">🔐 User Authentication & Sessions</div>
+            <div class="feature-sub">US-001, US-003, US-009 · auth/, users/, core/</div>
+          </div>
+          <div class="test-indicators">
+            <div class="test-dot" style="background:#3fb950"></div>
+            <div class="test-dot" style="background:#3fb950"></div>
+            <div class="test-dot" style="background:#3fb950"></div>
+            <div class="test-dot" style="background:#3fb950"></div>
+            <div class="test-dot" style="background:#3fb950"></div>
+            <div class="test-label">5/5 passing</div>
+          </div>
+          <div class="risk-badge risk-high">HIGH RISK</div>
+        </div>
+      </div>
+
+      <!-- MEDIUM -->
+      <div class="feature-row">
+        <div class="feature-header">
+          <div>
+            <div class="feature-name">📦 Order History & Tracking</div>
+            <div class="feature-sub">US-058, US-061 · orders/, notifications/</div>
+          </div>
+          <div class="test-indicators">
+            <div class="test-dot" style="background:#3fb950"></div>
+            <div class="test-dot" style="background:#3fb950"></div>
+            <div class="test-label">2/2 passing</div>
+          </div>
+          <div class="risk-badge risk-medium">MEDIUM RISK</div>
+        </div>
+      </div>
+
+      <!-- MEDIUM -->
+      <div class="feature-row">
+        <div class="feature-header">
+          <div>
+            <div class="feature-name">🔔 Notifications & Alerts</div>
+            <div class="feature-sub">US-072, US-074 · notifications/, core/</div>
+          </div>
+          <div class="test-indicators">
+            <div class="test-dot" style="background:#3fb950"></div>
+            <div class="test-label">1/1 passing</div>
+          </div>
+          <div class="risk-badge risk-medium">MEDIUM RISK</div>
+        </div>
+      </div>
+
+      <!-- LOW -->
+      <div class="feature-row">
+        <div class="feature-header">
+          <div>
+            <div class="feature-name">👤 User Profile Management</div>
+            <div class="feature-sub">US-012, US-013 · users/</div>
+          </div>
+          <div class="test-indicators">
+            <div class="test-dot" style="background:#3fb950"></div>
+            <div class="test-dot" style="background:#3fb950"></div>
+            <div class="test-dot" style="background:#3fb950"></div>
+            <div class="test-label">3/3 passing</div>
+          </div>
+          <div class="risk-badge risk-low">LOW RISK</div>
+        </div>
+      </div>
+
+      <!-- CRITICAL - no tests -->
+      <div class="feature-row">
+        <div class="feature-header">
+          <div>
+            <div class="feature-name">🏷️ Discount & Coupon Engine</div>
+            <div class="feature-sub">US-091 · payments/, utils/ · <span style="color:#f85149;">⚠ No integration tests found</span></div>
+          </div>
+          <div class="test-indicators">
+            <div class="test-label" style="color:#f85149;">0 tests</div>
+          </div>
+          <div class="risk-badge risk-critical">CRITICAL RISK</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Feature coupling matrix -->
+    <div class="coupling-section">
+      <h2>Feature Coupling Map</h2>
+      <p class="coupling-desc">How tightly are features coupled through shared code paths? Green = only through load-bearing nodes (healthy). Yellow/red = unexpected coupling through business logic.</p>
+      <div class="coupling-grid">
+        <table class="coupling-table">
+          <tr>
+            <th></th>
+            <th>Checkout</th>
+            <th>Auth</th>
+            <th>Orders</th>
+            <th>Notifications</th>
+            <th>Profiles</th>
+            <th>Discounts</th>
+          </tr>
+          <tr>
+            <td class="row-header">Checkout</td>
+            <td class="coup-diag">—</td>
+            <td class="coup-lb">✓ LB only</td>
+            <td class="coup-bad">⚠ 38 shared<br>business edges</td>
+            <td class="coup-warn">⚠ 4 unexpected</td>
+            <td class="coup-lb">✓ LB only</td>
+            <td class="coup-bad">⚠ 12 unexpected</td>
+          </tr>
+          <tr>
+            <td class="row-header">Auth</td>
+            <td class="coup-lb">✓ LB only</td>
+            <td class="coup-diag">—</td>
+            <td class="coup-lb">✓ LB only</td>
+            <td class="coup-lb">✓ LB only</td>
+            <td class="coup-lb">✓ LB only</td>
+            <td class="coup-none">—</td>
+          </tr>
+          <tr>
+            <td class="row-header">Orders</td>
+            <td class="coup-bad">⚠ 38 shared</td>
+            <td class="coup-lb">✓ LB only</td>
+            <td class="coup-diag">—</td>
+            <td class="coup-warn">⚠ 6 unexpected</td>
+            <td class="coup-none">—</td>
+            <td class="coup-warn">⚠ 8 unexpected</td>
+          </tr>
+          <tr>
+            <td class="row-header">Notifications</td>
+            <td class="coup-warn">⚠ 4 unexpected</td>
+            <td class="coup-lb">✓ LB only</td>
+            <td class="coup-warn">⚠ 6 unexpected</td>
+            <td class="coup-diag">—</td>
+            <td class="coup-none">—</td>
+            <td class="coup-none">—</td>
+          </tr>
+          <tr>
+            <td class="row-header">Profiles</td>
+            <td class="coup-lb">✓ LB only</td>
+            <td class="coup-lb">✓ LB only</td>
+            <td class="coup-none">—</td>
+            <td class="coup-none">—</td>
+            <td class="coup-diag">—</td>
+            <td class="coup-none">—</td>
+          </tr>
+          <tr>
+            <td class="row-header">Discounts</td>
+            <td class="coup-bad">⚠ 12 unexpected</td>
+            <td class="coup-none">—</td>
+            <td class="coup-warn">⚠ 8 unexpected</td>
+            <td class="coup-none">—</td>
+            <td class="coup-none">—</td>
+            <td class="coup-diag">—</td>
+          </tr>
+        </table>
+      </div>
+      <div class="coupling-legend">
+        <div class="cl-item"><div class="cl-swatch" style="background:#1a3628;border:1px solid #3fb95044;"></div> Load-bearing only — healthy</div>
+        <div class="cl-item"><div class="cl-swatch" style="background:#3d2c1e;border:1px solid #e3b34144;"></div> Some unexpected coupling — review</div>
+        <div class="cl-item"><div class="cl-swatch" style="background:#3d1f1f;border:1px solid #f8514944;"></div> Heavy unexpected coupling — decouple</div>
+        <div class="cl-item"><div class="cl-swatch" style="background:#1c2128;border:1px solid #21262d;"></div> No shared paths</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
