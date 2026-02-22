@@ -943,23 +943,55 @@ def diff_building(req: DiffRequest, max_nodes: int = Query(120, le=300)):
         n["calling_module_count"] = 0
         out_nodes.append(n)
 
-    # Edges from repo B for layout hints
-    if nodes_b:
-        ph = ",".join("?" * len(nodes_b))
+    # Edges: load from both repos so removed nodes have their connections too
+    added_hashes   = {keyed_b[k]["hash"] for k in added_keys}
+    removed_hashes = {keyed_a[k]["hash"] for k in removed_keys}
+    common_hashes  = {keyed_b[k]["hash"] for k in common_keys}
+    all_b_hashes   = added_hashes | common_hashes
+
+    edges_out = []
+
+    # Added-node edges (and added↔common) from repo B
+    if added_hashes:
+        ph_added = ",".join("?" * len(added_hashes))
+        ph_all_b = ",".join("?" * len(all_b_hashes))
         cur_b.execute(
-            f"SELECT caller_hash, callee_hash FROM edges WHERE caller_hash IN ({ph}) AND callee_hash IN ({ph}) AND callee_hash NOT LIKE 'ext:%'",
-            list(nodes_b.keys()) * 2
+            f"""SELECT caller_hash, callee_hash FROM edges
+                WHERE callee_hash NOT LIKE 'ext:%'
+                  AND (caller_hash IN ({ph_added}) OR callee_hash IN ({ph_added}))
+                  AND caller_hash IN ({ph_all_b})
+                  AND callee_hash IN ({ph_all_b})""",
+            list(added_hashes) + list(added_hashes) + list(all_b_hashes) + list(all_b_hashes)
         )
-        edges_b = [{"from": e["caller_hash"], "to": e["callee_hash"]} for e in cur_b.fetchall()]
-    else:
-        edges_b = []
+        edges_out.extend(
+            {"from": e["caller_hash"], "to": e["callee_hash"], "diff_status": "added"}
+            for e in cur_b.fetchall()
+        )
+
+    # Removed-node edges from repo A
+    if removed_hashes:
+        all_a_hashes = removed_hashes | {keyed_a[k]["hash"] for k in common_keys}
+        ph_removed = ",".join("?" * len(removed_hashes))
+        ph_all_a   = ",".join("?" * len(all_a_hashes))
+        cur_a.execute(
+            f"""SELECT caller_hash, callee_hash FROM edges
+                WHERE callee_hash NOT LIKE 'ext:%'
+                  AND (caller_hash IN ({ph_removed}) OR callee_hash IN ({ph_removed}))
+                  AND caller_hash IN ({ph_all_a})
+                  AND callee_hash IN ({ph_all_a})""",
+            list(removed_hashes) + list(removed_hashes) + list(all_a_hashes) + list(all_a_hashes)
+        )
+        edges_out.extend(
+            {"from": e["caller_hash"], "to": e["callee_hash"], "diff_status": "removed"}
+            for e in cur_a.fetchall()
+        )
 
     conn_a.close()
     conn_b.close()
 
     return {
         "nodes": out_nodes,
-        "edges": edges_b,
+        "edges": edges_out,
         "stats": {
             "added": len(added_keys),
             "removed": len(removed_keys),

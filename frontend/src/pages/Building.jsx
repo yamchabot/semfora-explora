@@ -209,9 +209,13 @@ export function BuildingCanvas({ nodes, edges, onNodeClick, selected, getDiffSta
         const na = nodes.find(n => n.hash === e.from);
         const nb = nodes.find(n => n.hash === e.to);
         if ((na?.layer ?? 0) === (nb?.layer ?? 0)) return null;
+        const edgeColor = e.diff_status === "added"   ? "#3fb950"
+                        : e.diff_status === "removed" ? "#f85149"
+                        : "#30363d";
+        const edgeOpacity = e.diff_status ? 0.55 : 0.35;
         return (
           <line key={i} x1={a.cx} y1={a.ltY + LAYER_H} x2={b.cx} y2={b.ltY}
-            stroke="#30363d" strokeWidth={1} opacity={0.35} />
+            stroke={edgeColor} strokeWidth={1} opacity={edgeOpacity} />
         );
       })}
 

@@ -249,17 +249,19 @@ export default function Diff() {
               )}
 
               {vizTab === "building" && buildingData && (
-                <div style={{ marginLeft: "auto", display: "flex", gap: 12, fontSize: 12 }}>
+                <div style={{ marginLeft: "auto", display: "flex", gap: 12, fontSize: 12, alignItems: "center" }}>
                   {[
                     { color: "#3fb950", label: `+${buildingData.stats.added} added` },
                     { color: "#f85149", label: `-${buildingData.stats.removed} removed` },
-                    { color: "#484f58", label: `${buildingData.stats.common} unchanged` },
                   ].map(({ color, label }) => (
                     <span key={label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
                       <span style={{ width: 10, height: 10, borderRadius: 2, background: color, display: "inline-block" }} />
                       <span style={{ color }}>{label}</span>
                     </span>
                   ))}
+                  <span style={{ fontSize: 11, color: "var(--text3)" }}>
+                    ({buildingData.stats.common} unchanged hidden)
+                  </span>
                 </div>
               )}
             </div>
@@ -291,12 +293,20 @@ export default function Diff() {
                     Building layout…
                   </div>
                 )}
-                {buildingData && !buildingLoading && (
+                {buildingData && !buildingLoading && (() => {
+                  // Only show changed nodes — common/unchanged are not what we're here to see
+                  const changedNodes = buildingData.nodes.filter(n => n.diff_status !== "common");
+                  const changedHashes = new Set(changedNodes.map(n => n.hash));
+                  // Include edges where at least one endpoint is changed (shows connections to context)
+                  const changedEdges = buildingData.edges.filter(
+                    e => changedHashes.has(e.from) && changedHashes.has(e.to)
+                  );
+                  return (
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 220px", gap: 12 }}>
                     <div style={{ overflow: "hidden" }}>
                       <BuildingCanvas
-                        nodes={buildingData.nodes}
-                        edges={buildingData.edges}
+                        nodes={changedNodes}
+                        edges={changedEdges}
                         onNodeClick={setSelectedBuildingNode}
                         selected={selectedBuildingNode?.hash}
                         getDiffStatus={(n) => n.diff_status}
@@ -331,7 +341,6 @@ export default function Diff() {
                         {[
                           { color: "#3fb950", label: "Green = added in newer snapshot" },
                           { color: "#f85149", label: "Red/strikethrough = removed" },
-                          { color: "#484f58", label: "Faded = unchanged context" },
                         ].map(({ color, label }) => (
                           <div key={label} style={{ display: "flex", gap: 7, alignItems: "flex-start", marginBottom: 6, fontSize: 11 }}>
                             <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0, marginTop: 2 }} />
@@ -339,12 +348,16 @@ export default function Diff() {
                           </div>
                         ))}
                         <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 6 }}>
-                          Layer shifts = architectural drift. A node moving from Features→Platform means it's becoming shared infrastructure.
+                          Only changed symbols shown. Layer = structural role: Foundation (most called) → Leaves (entry points).
+                        </div>
+                        <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 4 }}>
+                          Layer shifts = architectural drift (e.g. Features→Platform = accidentally became shared infra).
                         </div>
                       </div>
                     </div>
                   </div>
-                )}
+                  );
+                })()}
               </>
             )}
           </div>
