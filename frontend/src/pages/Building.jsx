@@ -245,23 +245,51 @@ export function BuildingCanvas({ nodes, edges, onNodeClick, selected, getDiffSta
         );
       })}
 
-      {/* Cross-layer edges */}
-      {edges.slice(0, 300).map((e, i) => {
-        const a = nodePos[e.from];
-        const b = nodePos[e.to];
-        if (!a || !b) return null;
-        const na = nodes.find(n => n.hash === e.from);
-        const nb = nodes.find(n => n.hash === e.to);
-        if ((na?.layer ?? 0) === (nb?.layer ?? 0)) return null;
-        const edgeColor = e.diff_status === "added"   ? "#3fb950"
-                        : e.diff_status === "removed" ? "#f85149"
-                        : "#30363d";
-        const edgeOpacity = e.diff_status ? 0.55 : 0.35;
-        return (
-          <line key={i} x1={a.cx} y1={a.ltY + LAYER_H} x2={b.cx} y2={b.ltY}
-            stroke={edgeColor} strokeWidth={1} opacity={edgeOpacity} />
-        );
-      })}
+      {/* Cross-layer edges — anchored to actual node positions, adjacent layers only */}
+      {(() => {
+        const allByHash = Object.fromEntries(nodes.map(n => [n.hash, n]));
+        return [...edges]
+          .sort((a, b) => (b.count || b.edge_count || 0) - (a.count || a.edge_count || 0))
+          .slice(0, 250)
+          .map((e, i) => {
+            const a = nodePos[e.from];
+            const b = nodePos[e.to];
+            if (!a || !b) return null;
+            const na = allByHash[e.from];
+            const nb = allByHash[e.to];
+            if (!na || !nb) return null;
+            const layerA = na.layer ?? 4;
+            const layerB = nb.layer ?? 0;
+            if (layerA === layerB) return null;
+            // Skip long-range edges (spanning > 2 layers) — they cut across everything
+            if (Math.abs(layerA - layerB) > 2) return null;
+
+            // Caller is the node in the higher layer (smaller Y in SVG = higher up in building)
+            const callerPos  = layerA > layerB ? a : b;
+            const calleePos  = layerA > layerB ? b : a;
+            const callerNode = layerA > layerB ? na : nb;
+            const calleeNode = layerA > layerB ? nb : na;
+
+            // Anchor y to actual node geometry:
+            // caller → bottom of block / bottom of column base
+            // callee → top of block / top of column cap
+            const y1 = callerNode.is_load_bearing
+              ? callerPos.ltY + LAYER_H - BASE_H - COL_PAD
+              : callerPos.y + callerPos.h;
+            const y2 = calleeNode.is_load_bearing
+              ? calleePos.ltY + COL_PAD + CAP_H
+              : calleePos.y;
+
+            const edgeColor = e.diff_status === "added"   ? "#3fb950"
+                            : e.diff_status === "removed" ? "#f85149"
+                            : "#58a6ff";
+            const edgeOpacity = e.diff_status ? 0.5 : 0.2;
+            return (
+              <line key={i} x1={callerPos.cx} y1={y1} x2={calleePos.cx} y2={y2}
+                stroke={edgeColor} strokeWidth={1} strokeOpacity={edgeOpacity} />
+            );
+          });
+      })()}
 
       {/* Nodes */}
       {nodes.map((n) => {
