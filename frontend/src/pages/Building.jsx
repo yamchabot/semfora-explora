@@ -1,5 +1,5 @@
 import { useContext, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { RepoContext } from "../App";
 import { api } from "../api";
 
@@ -260,15 +260,82 @@ export function BuildingCanvas({ nodes, edges, onNodeClick, selected, getDiffSta
   );
 }
 
+// ── Load-bearing node row (shared with bottom lists) ─────────────────────────
+function LBNodeRow({ node, onDeclare, onUndeclare }) {
+  const isExplicit = node.declaration === "explicit";
+  const isUnexpected = !node.is_load_bearing;
+  return (
+    <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)",
+      display: "flex", alignItems: "flex-start", gap: 12 }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 3, flexWrap: "wrap" }}>
+          <span style={{ fontFamily: "monospace", fontWeight: 700, fontSize: 13 }}>{node.name}</span>
+          {isExplicit && (
+            <span style={{ background: "var(--purple-bg)", color: "var(--purple)",
+              fontSize: 10, padding: "1px 7px", borderRadius: 12, fontWeight: 600 }}>
+              🏛 declared
+            </span>
+          )}
+          {!isExplicit && node.is_load_bearing && (
+            <span style={{ background: "var(--bg3)", color: "var(--text2)",
+              fontSize: 10, padding: "1px 7px", borderRadius: 12 }}>
+              auto-detected
+            </span>
+          )}
+          {isUnexpected && (
+            <span style={{ background: "var(--red-bg)", color: "var(--red)",
+              fontSize: 10, padding: "1px 7px", borderRadius: 12, fontWeight: 600 }}>
+              ⚠ unexpected
+            </span>
+          )}
+        </div>
+        <div style={{ fontSize: 11, color: "var(--text3)" }}>
+          {node.module}
+          <span style={{ margin: "0 6px", opacity: 0.4 }}>·</span>
+          <span style={{ color: node.calling_module_count >= 5 ? "var(--red)" : "var(--yellow)" }}>
+            {node.calling_module_count} modules
+          </span>
+          <span style={{ margin: "0 6px", opacity: 0.4 }}>·</span>
+          {node.caller_count} callers
+        </div>
+      </div>
+      <div style={{ flexShrink: 0 }}>
+        {isExplicit ? (
+          <button className="btn btn-sm btn-ghost"
+            style={{ borderColor: "var(--red)", color: "var(--red)", fontSize: 11 }}
+            onClick={() => onUndeclare(node.hash)}>
+            undeclare
+          </button>
+        ) : (
+          <button className="btn btn-sm"
+            style={{ background: "var(--purple-bg)", color: "var(--purple)",
+              border: "1px solid var(--purple)", fontSize: 11 }}
+            onClick={() => onDeclare(node.hash)}>
+            🏛 declare
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Main BuildingPage ────────────────────────────────────────────────────────
 export default function BuildingPage() {
   const { repoId } = useContext(RepoContext);
+  const qc = useQueryClient();
   const [selected, setSelected] = useState(null);
   const [selectedNode, setSelectedNode] = useState(null);
+  const [lbThreshold, setLbThreshold] = useState(3);
+  const [moduleInput, setModuleInput] = useState("");
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["building", repoId],
     queryFn: () => api.building(repoId),
+  });
+
+  const { data: lbData } = useQuery({
+    queryKey: ["load-bearing", repoId, lbThreshold],
+    queryFn: () => api.loadBearing(repoId, lbThreshold),
   });
 
   const { data: nodeDetail } = useQuery({
@@ -277,9 +344,22 @@ export default function BuildingPage() {
     enabled: !!selected,
   });
 
+  const declare = useMutation({
+    mutationFn: ({ hash, module, remove }) => api.lbDeclare(repoId, hash, module, remove),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["load-bearing", repoId] });
+      qc.invalidateQueries({ queryKey: ["building", repoId] });
+    },
+  });
+
   function handleNodeClick(node) {
     setSelected(node.hash);
     setSelectedNode(node);
+  }
+
+  function declareModule() {
+    const m = moduleInput.trim();
+    if (m) { declare.mutate({ module: m, remove: false }); setModuleInput(""); }
   }
 
   if (isLoading) return <div className="loading">Computing structural layout…</div>;
@@ -291,10 +371,21 @@ export default function BuildingPage() {
   const unexpectedCount = nodes.filter(n => !n.is_load_bearing && n.calling_module_count >= 3).length;
   const layerCounts = [0, 1, 2, 3, 4].map(l => nodes.filter(n => n.layer === l).length);
 
+  const declaredNodes  = lbData?.declared_load_bearing || [];
+  const unexpectedNodes = lbData?.unexpected_load_bearing || [];
+  const declaredModules = lbData?.config?.declared_modules || [];
+
+  // Live declaration status for selected node (from lbData, more up-to-date than building snapshot)
+  const selectedLbInfo = selectedNode
+    ? [...declaredNodes, ...unexpectedNodes].find(n => n.hash === selectedNode.hash)
+    : null;
+  const isExplicitlyDeclared = selectedLbInfo?.declaration === "explicit"
+    || selectedNode?.declaration === "explicit";
+
   return (
     <div>
       <div className="page-header">
-        <h1>🏗️ Structural Building View</h1>
+        <h1>🏗️ Building View</h1>
         <p>
           The codebase as a building cross-section. Foundation at the bottom (most depended-upon),
           leaves at the top. Load-bearing nodes shown as architectural columns.
@@ -322,6 +413,7 @@ export default function BuildingPage() {
         ))}
       </div>
 
+      {/* ── Main canvas + sidebar ── */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 260px", gap: 16 }}>
         <div className="card" style={{ overflow: "hidden", padding: 0 }}>
           <BuildingCanvas
@@ -332,15 +424,35 @@ export default function BuildingPage() {
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {/* ── Node detail + declare button ── */}
           {selectedNode ? (
             <div className="card" style={{ padding: 14 }}>
-              <div style={{ fontSize: 11, color: selectedNode.is_load_bearing ? "var(--purple)" : "var(--text2)", fontWeight: 600, marginBottom: 6 }}>
-                {selectedNode.is_load_bearing ? "🏛 LOAD-BEARING" : "📦 NODE"}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 11,
+                  color: selectedNode.is_load_bearing ? "var(--purple)" : "var(--text2)",
+                  fontWeight: 600 }}>
+                  {selectedNode.is_load_bearing ? "🏛 LOAD-BEARING" : "📦 NODE"}
+                </span>
+                {selectedNode.declaration === "explicit" && (
+                  <span style={{ fontSize: 10, background: "var(--purple-bg)", color: "var(--purple)",
+                    padding: "1px 7px", borderRadius: 12, fontWeight: 600 }}>
+                    declared
+                  </span>
+                )}
+                {selectedNode.declaration === "auto" && (
+                  <span style={{ fontSize: 10, background: "var(--bg3)", color: "var(--text3)",
+                    padding: "1px 7px", borderRadius: 12 }}>
+                    auto
+                  </span>
+                )}
               </div>
-              <div style={{ fontFamily: "monospace", fontWeight: 700, marginBottom: 8, wordBreak: "break-all" }}>
+
+              <div style={{ fontFamily: "monospace", fontWeight: 700, marginBottom: 8,
+                wordBreak: "break-all", fontSize: 13 }}>
                 {selectedNode.name}
               </div>
-              <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.8 }}>
+
+              <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.9, marginBottom: 12 }}>
                 <div><strong>Module:</strong> {selectedNode.module}</div>
                 <div><strong>Layer:</strong> {LAYER_COLORS[selectedNode.layer ?? 4]?.label}</div>
                 <div><strong>Callers:</strong> {selectedNode.caller_count}</div>
@@ -349,14 +461,34 @@ export default function BuildingPage() {
                     {selectedNode.calling_module_count}
                   </span>
                 </div>
-                <div><strong>Declaration:</strong> {selectedNode.declaration}</div>
               </div>
+
+              {/* ── Declare / Undeclare button ── */}
+              {isExplicitlyDeclared ? (
+                <button className="btn btn-sm btn-ghost" style={{ width: "100%",
+                  borderColor: "var(--red)", color: "var(--red)", fontSize: 12 }}
+                  onClick={() => declare.mutate({ hash: selectedNode.hash, remove: true })}>
+                  Undeclare load-bearing
+                </button>
+              ) : (
+                <button className="btn btn-sm" style={{ width: "100%",
+                  background: "var(--purple-bg)", color: "var(--purple)",
+                  border: "1px solid var(--purple)", fontSize: 12 }}
+                  onClick={() => declare.mutate({ hash: selectedNode.hash, remove: false })}>
+                  🏛 Declare load-bearing
+                </button>
+              )}
+
               {nodeDetail?.callers?.length > 0 && (
-                <div style={{ marginTop: 10 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text2)", marginBottom: 4 }}>Callers</div>
-                  <div style={{ maxHeight: 120, overflowY: "auto" }}>
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text2)", marginBottom: 4 }}>
+                    Callers
+                  </div>
+                  <div style={{ maxHeight: 110, overflowY: "auto" }}>
                     {nodeDetail.callers.slice(0, 8).map(c => (
-                      <div key={c.hash} style={{ fontSize: 11, padding: "3px 0", borderBottom: "1px solid var(--border)", fontFamily: "monospace", color: "var(--text2)" }}>
+                      <div key={c.hash} style={{ fontSize: 11, padding: "3px 0",
+                        borderBottom: "1px solid var(--border)", fontFamily: "monospace",
+                        color: "var(--text2)" }}>
                         {c.name}
                       </div>
                     ))}
@@ -365,17 +497,21 @@ export default function BuildingPage() {
               )}
             </div>
           ) : (
-            <div className="card" style={{ padding: 20, textAlign: "center", color: "var(--text2)", fontSize: 13 }}>
+            <div className="card" style={{ padding: 20, textAlign: "center",
+              color: "var(--text3)", fontSize: 12 }}>
               Click any node to inspect
             </div>
           )}
 
+          {/* ── Layer Guide ── */}
           <div className="card" style={{ padding: 14 }}>
             <div style={{ fontWeight: 600, marginBottom: 10, fontSize: 13 }}>Layer Guide</div>
             {LAYER_COLORS.map((c, i) => (
-              <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, fontSize: 12 }}>
-                <div style={{ width: 12, height: 12, borderRadius: 2, background: c.bg, border: `1px solid ${c.border}`, flexShrink: 0 }} />
-                <div style={{ color: c.text, fontWeight: 600, width: 80 }}>{c.label}</div>
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 8,
+                marginBottom: 6, fontSize: 12 }}>
+                <div style={{ width: 12, height: 12, borderRadius: 2,
+                  background: c.bg, border: `1px solid ${c.border}`, flexShrink: 0 }} />
+                <div style={{ color: c.text, fontWeight: 600, width: 76 }}>{c.label}</div>
                 <div style={{ color: "var(--text3)", fontSize: 11 }}>
                   {["Most depended-upon", "Shared platform", "Domain services", "Feature code", "Leaf / entry"][i]}
                 </div>
@@ -385,11 +521,122 @@ export default function BuildingPage() {
 
           <div className="card" style={{ padding: 14, fontSize: 12, color: "var(--text2)", lineHeight: 1.7 }}>
             <div style={{ fontWeight: 600, color: "var(--text)", marginBottom: 6 }}>Reading this view</div>
-            <div><span style={{ color: "var(--purple)" }}>Columns</span> = load-bearing nodes — wide cap rests on the floor above it.</div>
+            <div><span style={{ color: "var(--purple)" }}>Columns</span> = load-bearing — cap rests on the floor above.</div>
             <div style={{ marginTop: 4 }}><span style={{ color: "var(--red)" }}>Red blocks</span> = unexpected coupling.</div>
-            <div style={{ marginTop: 4 }}>Bar at bottom of each block = relative caller count.</div>
+            <div style={{ marginTop: 4 }}>Bottom bar on blocks = relative caller count.</div>
           </div>
         </div>
+      </div>
+
+      {/* ── Load-bearing lists ─────────────────────────────────────────────── */}
+      <div style={{ marginTop: 32 }}>
+
+        {/* Concept row */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 24 }}>
+          <div style={{ background: "var(--purple-bg)", border: "1px solid var(--purple)44",
+            borderRadius: 8, padding: "14px 16px" }}>
+            <div style={{ fontWeight: 600, color: "var(--purple)", marginBottom: 6 }}>
+              🏛 Load-Bearing (Expected)
+            </div>
+            <div style={{ fontSize: 13, lineHeight: 1.6 }}>
+              Infrastructure intentionally shared across the codebase — gateways, DB clients, core utils.
+              High centrality here is <em>by design</em>.
+            </div>
+          </div>
+          <div style={{ background: "var(--red-bg)", border: "1px solid var(--red)44",
+            borderRadius: 8, padding: "14px 16px" }}>
+            <div style={{ fontWeight: 600, color: "var(--red)", marginBottom: 6 }}>
+              ⚠ Unexpected Coupling
+            </div>
+            <div style={{ fontSize: 13, lineHeight: 1.6 }}>
+              Business logic or feature code quietly becoming a dependency of everything else.
+              Wasn't designed to bear weight — will resist refactoring.
+            </div>
+          </div>
+        </div>
+
+        {/* Controls row */}
+        <div style={{ display: "flex", gap: 16, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <span style={{ fontSize: 12, color: "var(--text2)" }}>Min modules calling:</span>
+            <select value={lbThreshold} onChange={e => setLbThreshold(+e.target.value)}
+              style={{ width: 60, fontSize: 12 }}>
+              {[2, 3, 4, 5, 8].map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flex: 1, maxWidth: 440 }}>
+            <input
+              style={{ flex: 1, fontFamily: "monospace", fontSize: 12 }}
+              placeholder="Declare entire module, e.g. src.core"
+              value={moduleInput}
+              onChange={e => setModuleInput(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && declareModule()}
+            />
+            <button className="btn btn-sm"
+              style={{ background: "var(--purple-bg)", color: "var(--purple)",
+                border: "1px solid var(--purple)", fontSize: 11, flexShrink: 0 }}
+              onClick={declareModule}>
+              🏛 Declare module
+            </button>
+          </div>
+          {declaredModules.length > 0 && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {declaredModules.map(m => (
+                <span key={m} style={{ display: "flex", alignItems: "center", gap: 4,
+                  background: "var(--purple-bg)", border: "1px solid var(--purple)44",
+                  borderRadius: 12, padding: "2px 10px", fontSize: 11 }}>
+                  <span style={{ fontFamily: "monospace", color: "var(--purple)" }}>{m}</span>
+                  <button style={{ background: "none", border: "none", color: "var(--red)",
+                    cursor: "pointer", padding: "0 2px", fontSize: 14, lineHeight: 1 }}
+                    onClick={() => declare.mutate({ module: m, remove: true })}>×</button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Unexpected */}
+        {unexpectedNodes.length > 0 && (
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+              <h2 style={{ fontSize: 15, fontWeight: 600, color: "var(--red)", margin: 0 }}>
+                ⚠ Unexpected Load-Bearing
+              </h2>
+              <span style={{ fontSize: 12, color: "var(--text2)" }}>
+                ({unexpectedNodes.length}) — click 🏛 Declare if intentional
+              </span>
+            </div>
+            <div className="card" style={{ overflow: "hidden" }}>
+              {unexpectedNodes.map(n => (
+                <LBNodeRow key={n.hash} node={n}
+                  onDeclare={hash => declare.mutate({ hash, remove: false })}
+                  onUndeclare={hash => declare.mutate({ hash, remove: true })} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Declared load-bearing */}
+        {declaredNodes.length > 0 && (
+          <div style={{ marginBottom: 24 }}>
+            <h2 style={{ fontSize: 15, fontWeight: 600, color: "var(--purple)", marginBottom: 10 }}>
+              🏛 Load-Bearing Nodes ({declaredNodes.length})
+            </h2>
+            <div className="card" style={{ overflow: "hidden" }}>
+              {declaredNodes.map(n => (
+                <LBNodeRow key={n.hash} node={n}
+                  onDeclare={hash => declare.mutate({ hash, remove: false })}
+                  onUndeclare={hash => declare.mutate({ hash, remove: true })} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {declaredNodes.length === 0 && unexpectedNodes.length === 0 && lbData && (
+          <div className="card" style={{ padding: 28, textAlign: "center", color: "var(--text2)" }}>
+            No nodes found called from {lbThreshold}+ distinct modules. Try lowering the threshold.
+          </div>
+        )}
       </div>
     </div>
   );
