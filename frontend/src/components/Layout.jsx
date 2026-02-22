@@ -14,6 +14,7 @@ const NAV = [
   { to: "/centrality", icon: "⭐", label: "Centrality" },
   { to: "/cycles", icon: "🔄", label: "Cycles" },
   { to: "/diff", icon: "🔀", label: "Graph Diff" },
+  { to: "/building", icon: "🏗️", label: "Building View" },
 ];
 
 export default function Layout() {

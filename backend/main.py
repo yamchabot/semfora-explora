@@ -27,6 +27,22 @@ app.add_middleware(
 )
 
 DATA_DIR = Path(__file__).parent.parent / "data"
+CONFIG_DIR = DATA_DIR  # load-bearing configs stored alongside .db files
+
+
+def lb_config_path(repo_id: str) -> Path:
+    return CONFIG_DIR / f"{repo_id}.load-bearing.json"
+
+
+def read_lb_config(repo_id: str) -> dict:
+    p = lb_config_path(repo_id)
+    if p.exists():
+        return json.loads(p.read_text())
+    return {"declared_modules": [], "declared_nodes": []}
+
+
+def write_lb_config(repo_id: str, config: dict):
+    lb_config_path(repo_id).write_text(json.dumps(config, indent=2))
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -484,6 +500,175 @@ def load_bearing_analysis(repo_id: str, threshold: int = Query(5)):
         "declared_load_bearing": declared,
         "unexpected_load_bearing": unexpected,
         "threshold_modules": threshold,
+    }
+
+
+# ── Load-bearing config endpoints ──────────────────────────────────────────
+
+@app.get("/api/repos/{repo_id}/load-bearing/config")
+def get_lb_config(repo_id: str):
+    return read_lb_config(repo_id)
+
+
+class LBDeclareRequest(BaseModel):
+    hash: Optional[str] = None       # declare a specific node
+    module: Optional[str] = None     # declare an entire module
+    remove: bool = False             # if true, undeclare instead
+
+
+@app.post("/api/repos/{repo_id}/load-bearing/declare")
+def declare_lb(repo_id: str, req: LBDeclareRequest):
+    config = read_lb_config(repo_id)
+    if req.hash:
+        if req.remove:
+            config["declared_nodes"] = [h for h in config["declared_nodes"] if h != req.hash]
+        elif req.hash not in config["declared_nodes"]:
+            config["declared_nodes"].append(req.hash)
+    if req.module:
+        if req.remove:
+            config["declared_modules"] = [m for m in config["declared_modules"] if m != req.module]
+        elif req.module not in config["declared_modules"]:
+            config["declared_modules"].append(req.module)
+    write_lb_config(repo_id, config)
+    return {"ok": True, "config": config}
+
+
+@app.get("/api/repos/{repo_id}/load-bearing")
+def load_bearing_analysis(repo_id: str, threshold: int = Query(3, le=50)):
+    """
+    Detect load-bearing nodes using both explicit config + heuristics.
+    Returns declared, unexpected, and candidate nodes.
+    """
+    conn = get_db(repo_id)
+    cur = conn.cursor()
+    config = read_lb_config(repo_id)
+    declared_hashes = set(config.get("declared_nodes", []))
+    declared_modules = set(config.get("declared_modules", []))
+
+    # Heuristic keyword modules (auto-detect)
+    lb_keywords = {"core", "platform", "base", "shared", "common", "infra", "lib", "utils",
+                   "foundation", "primitives", "runtime", "framework", "kernel"}
+
+    # Nodes called from many distinct modules
+    cur.execute("""
+        SELECT
+            n.hash, n.name, n.module, n.file_path, n.caller_count, n.callee_count, n.risk,
+            COUNT(DISTINCT n2.module) as calling_module_count
+        FROM nodes n
+        JOIN edges e ON e.callee_hash = n.hash
+        JOIN nodes n2 ON e.caller_hash = n2.hash
+        WHERE n.hash NOT LIKE 'ext:%'
+          AND n2.module != n.module
+        GROUP BY n.hash
+        HAVING calling_module_count >= ?
+        ORDER BY calling_module_count DESC
+        LIMIT 100
+    """, (threshold,))
+    high_centrality = [row_to_dict(r) for r in cur.fetchall()]
+
+    declared = []
+    unexpected = []
+    for node in high_centrality:
+        h = node["hash"]
+        mod = (node.get("module") or "").lower()
+        mod_parts = set(mod.replace(".", "/").replace("-", "/").split("/"))
+        explicitly_declared = h in declared_hashes or any(
+            m in mod for m in declared_modules
+        )
+        auto_lb = bool(mod_parts & lb_keywords)
+
+        if explicitly_declared or auto_lb:
+            node["declaration"] = "explicit" if explicitly_declared else "auto"
+            declared.append(node)
+        else:
+            unexpected.append(node)
+
+    conn.close()
+    return {
+        "declared_load_bearing": declared,
+        "unexpected_load_bearing": unexpected,
+        "threshold_modules": threshold,
+        "config": config,
+    }
+
+
+@app.get("/api/repos/{repo_id}/building")
+def building_view(repo_id: str, max_nodes: int = Query(120, le=300)):
+    """
+    Compute a structural 'building' layout for visualization.
+    - Layers are determined by topological depth (0 = foundation, N = leaf)
+    - Returns nodes with layer assignments + load-bearing status
+    """
+    conn = get_db(repo_id)
+    cur = conn.cursor()
+    config = read_lb_config(repo_id)
+    declared_hashes = set(config.get("declared_nodes", []))
+    declared_modules = set(config.get("declared_modules", []))
+    lb_keywords = {"core", "platform", "base", "shared", "common", "infra", "lib", "utils",
+                   "foundation", "primitives", "runtime", "framework", "kernel"}
+
+    # Get top nodes by caller_count (most impactful subset)
+    cur.execute("""
+        SELECT hash, name, module, file_path, caller_count, callee_count, complexity, risk
+        FROM nodes
+        WHERE hash NOT LIKE 'ext:%'
+        ORDER BY caller_count DESC
+        LIMIT ?
+    """, (max_nodes,))
+    nodes = {r["hash"]: row_to_dict(r) for r in cur.fetchall()}
+
+    # Get edges within this node set
+    if nodes:
+        ph = ",".join("?" * len(nodes))
+        cur.execute(
+            f"SELECT caller_hash, callee_hash FROM edges WHERE caller_hash IN ({ph}) AND callee_hash IN ({ph}) AND callee_hash NOT LIKE 'ext:%'",
+            list(nodes.keys()) * 2
+        )
+        edges = cur.fetchall()
+    else:
+        edges = []
+
+    # Compute in-degree for layer assignment
+    in_degree = defaultdict(int)
+    out_neighbors = defaultdict(list)
+    in_neighbors = defaultdict(list)
+    for e in edges:
+        caller, callee = e["caller_hash"], e["callee_hash"]
+        out_neighbors[caller].append(callee)
+        in_neighbors[callee].append(caller)
+        in_degree[callee] += 1
+
+    # BFS topological layering: nodes with no callers = top layer (features)
+    # Nodes with most callers = bottom layer (foundation)
+    # We reverse: layer 0 = highest caller_count (foundation)
+    max_callers = max((n["caller_count"] for n in nodes.values()), default=1)
+
+    for h, node in nodes.items():
+        mod = (node.get("module") or "").lower()
+        mod_parts = set(mod.replace(".", "/").replace("-", "/").split("/"))
+        explicitly_declared = h in declared_hashes or any(m in mod for m in declared_modules)
+        auto_lb = bool(mod_parts & lb_keywords)
+        node["is_load_bearing"] = explicitly_declared or auto_lb
+        node["declaration"] = "explicit" if explicitly_declared else ("auto" if auto_lb else "none")
+
+        # Layer: 0-4 based on caller_count percentile
+        pct = node["caller_count"] / max_callers if max_callers > 0 else 0
+        if pct > 0.6:
+            node["layer"] = 0  # foundation
+        elif pct > 0.3:
+            node["layer"] = 1  # platform
+        elif pct > 0.1:
+            node["layer"] = 2  # services
+        elif pct > 0.02:
+            node["layer"] = 3  # features
+        else:
+            node["layer"] = 4  # leaves
+
+    conn.close()
+    return {
+        "nodes": list(nodes.values()),
+        "edges": [{"from": e["caller_hash"], "to": e["callee_hash"]} for e in edges],
+        "layer_labels": ["Foundation", "Platform", "Services", "Features", "Leaves"],
     }
 
 

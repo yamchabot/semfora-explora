@@ -34,5 +34,9 @@ export const api = {
   search: (id, q) => get(`/repos/${id}/search?q=${encodeURIComponent(q)}`),
   loadBearing: (id, threshold = 3) =>
     get(`/repos/${id}/load-bearing?threshold=${threshold}`),
+  lbConfig: (id) => get(`/repos/${id}/load-bearing/config`),
+  lbDeclare: (id, hash, module, remove = false) =>
+    post(`/repos/${id}/load-bearing/declare`, { hash, module, remove }),
+  building: (id) => get(`/repos/${id}/building`),
   diff: (repoA, repoB) => post("/diff", { repo_a: repoA, repo_b: repoB }),
 };

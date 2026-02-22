@@ -10,6 +10,7 @@ import DeadCode from "./pages/DeadCode";
 import LoadBearing from "./pages/LoadBearing";
 import Centrality from "./pages/Centrality";
 import Diff from "./pages/Diff";
+import Building from "./pages/Building";
 import Cycles from "./pages/Cycles";
 
 const queryClient = new QueryClient({
@@ -39,6 +40,7 @@ export default function App() {
               <Route path="centrality" element={<Centrality />} />
               <Route path="cycles" element={<Cycles />} />
               <Route path="diff" element={<Diff />} />
+              <Route path="building" element={<Building />} />
             </Route>
           </Routes>
         </BrowserRouter>
