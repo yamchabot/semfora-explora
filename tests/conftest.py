@@ -121,6 +121,8 @@ def query_module_coupling(conn: sqlite3.Connection) -> dict:
         SELECT caller_module, callee_module, SUM(edge_count) as cnt
         FROM module_edges
         WHERE caller_module != callee_module
+          AND caller_module != '__external__'
+          AND callee_module != '__external__'
         GROUP BY caller_module, callee_module
     """).fetchall()
 
