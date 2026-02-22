@@ -1,0 +1,10 @@
+node_modules/
+frontend/dist/
+frontend/.vite/
+venv/
+__pycache__/
+*.pyc
+data/*.db
+*.db-shm
+*.db-wal
+.env

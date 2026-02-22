@@ -4,24 +4,90 @@ A web UI for exploring and analyzing codebases using the [Semfora](https://githu
 
 Semfora indexes a codebase into a call graph — nodes are symbols (functions, methods, classes), edges are call relationships derived from the AST. Semfora Explorer makes that graph useful for staff engineers, code reviewers, and anyone maintaining a large or legacy codebase.
 
-## What This Is
+## Quick Start
 
-A set of analysis tools built on top of Semfora's call graph:
+### 1. Index a repo with Semfora
 
-| Tool | What it does |
+```bash
+cd /your/project
+semfora-engine query callgraph --export /path/to/semfora-explorer/data/my-project.db --limit 999999
+```
+
+### 2. Start the backend
+
+```bash
+cd backend
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
+```
+
+### 3. Start the frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open **http://localhost:5173** — the app auto-discovers all `.db` files in `data/`.
+
+Or run both at once:
+
+```bash
+chmod +x start.sh && ./start.sh
+```
+
+---
+
+## Features
+
+| Tool | Description |
 |---|---|
-| **Call Graph Diff** | Compare structural dependencies between two branches/commits — see what *actually* changed, not just what lines changed |
-| **Blast Radius** | Select any symbol, see the full transitive set of everything that depends on it |
-| **Module Coupling** | Measure afferent/efferent coupling and instability scores per module; detect god objects and shadow modules |
-| **Dead Code Detector** | Find unreachable symbols from all known entrypoints |
-| **Migration Planner** | Plan and track large-scale architectural migrations with real graph data |
+| **Dashboard** | Repo overview — node/edge counts, module breakdown, risk distribution |
+| **Call Graph** | Interactive force-directed graph, filterable by module. Click nodes to inspect. |
+| **Blast Radius** | Search any symbol — see all transitive callers by depth |
+| **Module Coupling** | Ca/Ce/instability scores per module + cross-module dependency heatmap |
+| **Dead Code** | Symbols with zero callers, grouped by file |
+| **Load-Bearing Nodes** | Detects intentional vs unexpected high-centrality nodes |
+| **Centrality** | Ranked list of highest-centrality symbols — your riskiest refactoring targets |
+| **Cycles** | Strongly connected components (circular dependencies) |
+| **Graph Diff** | Compare two indexed repos structurally — added/removed symbols and module edges |
 
-## Status
+---
 
-🚧 Early design phase. This repo contains:
+## Architecture
 
-- `docs/` — Use-case documents and graph algorithm research
-- `mockups/` — Static HTML mockups of each tool (no live data)
+```
+semfora-explorer/
+├── backend/          FastAPI — serves graph analysis from SQLite DBs
+│   ├── main.py       All API endpoints
+│   └── requirements.txt
+├── frontend/         React + Vite
+│   └── src/
+│       ├── pages/    One page per feature
+│       ├── components/Layout.jsx
+│       └── api.js    API client
+├── data/             *.db files (Semfora SQLite exports — gitignored)
+├── docs/             Design documents and use-case specs
+└── mockups/          Static HTML mockups (open directly in browser)
+```
+
+## Data Source
+
+The backend reads Semfora SQLite exports with this schema:
+
+- **nodes**: `hash, name, kind, module, file_path, line_start, line_end, risk, complexity, caller_count, callee_count`
+- **edges**: `caller_hash, callee_hash, call_count, edge_kind`
+- **module_edges**: `caller_module, callee_module, edge_count`
+
+To add a new repo, just export it:
+
+```bash
+cd /your/project
+semfora-engine query callgraph --export /path/to/data/repo-name.db --limit 999999
+```
+
+Restart the backend — the new repo appears in the selector automatically.
 
 ## Design Documents
 
@@ -31,23 +97,9 @@ A set of analysis tools built on top of Semfora's call graph:
 - [Use Case: Module Coupling & Cohesion](docs/use-case-module-coupling.md)
 - [Use Case: Dead Code & Entrypoint Mapping](docs/use-case-dead-code-and-entrypoints.md)
 - [Use Case: Legacy Modernization Planner](docs/use-case-legacy-modernization.md)
-
-## Mockups
-
-Open any of these directly in a browser — no build step:
-
-- [mockups/index.html](mockups/index.html) — Main dashboard
-- [mockups/call-graph-diff.html](mockups/call-graph-diff.html)
-- [mockups/blast-radius.html](mockups/blast-radius.html)
-- [mockups/module-coupling.html](mockups/module-coupling.html)
-- [mockups/dead-code.html](mockups/dead-code.html)
-- [mockups/legacy-planner.html](mockups/legacy-planner.html)
-
-## Why Semfora
-
-Text diffs and linters were the best tools we had for reviewing code changes — especially AI-generated code. They're lossy. A 3-line change in a utility function can rewire how a dozen modules behave; no linter will catch that.
-
-Semfora gives us the actual call graph. That opens up a family of graph algorithms (centrality, reachability, clustering, graph diffing) that are far more precise than anything text-based. This explorer makes those algorithms accessible to engineers who need them most.
+- [Use Case: Feature Risk & Integration Test Traceability](docs/use-case-feature-risk.md)
+- [Use Case: Load-Bearing Nodes & Unexpected Coupling](docs/use-case-load-bearing-nodes.md)
+- [Extended Feature Brainstorm](docs/feature-brainstorm-extended.md)
 
 ## Related
 
