@@ -147,8 +147,17 @@ export default function Diff() {
       {isLoading && <div className="loading">Computing structural diff…</div>}
       {error && <div className="error">{error.message}</div>}
 
-      {data && (
-        <>
+      {data && (() => {
+        // Sort everything once before rendering
+        const added = [...data.added].sort((a, b) =>
+          (a.module || "").localeCompare(b.module || "") || a.name.localeCompare(b.name));
+        const removed = [...data.removed].sort((a, b) =>
+          (a.module || "").localeCompare(b.module || "") || a.name.localeCompare(b.name));
+        const modAdded = [...data.module_edges_added].sort((a, b) =>
+          a.from.localeCompare(b.from) || a.to.localeCompare(b.to));
+        const modRemoved = [...data.module_edges_removed].sort((a, b) =>
+          a.from.localeCompare(b.from) || a.to.localeCompare(b.to));
+        return (<>
           {/* Summary */}
           <div className="stat-grid" style={{ marginBottom: 24 }}>
             <div className="stat-card">
@@ -173,22 +182,22 @@ export default function Diff() {
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
             {/* Added */}
-            {data.added.length > 0 && (
+            {added.length > 0 && (
               <div>
                 <div style={{ fontWeight: 600, color: "var(--green)", marginBottom: 10, fontSize: 14 }}>
                   ✦ Added ({data.nodes_added})
                 </div>
                 <div className="card" style={{ overflow: "hidden", maxHeight: 400, overflowY: "auto" }}>
-                  {data.added.map((n, i) => (
+                  {added.map((n, i) => (
                     <div key={i} style={{ padding: "8px 14px", borderBottom: "1px solid var(--border)", fontSize: 12 }}>
                       <span style={{ fontFamily: "monospace", fontWeight: 600, color: "var(--green)" }}>{n.name}</span>
                       <span style={{ background: "var(--bg3)", color: "var(--text3)", fontSize: 10, padding: "1px 5px", borderRadius: 3, marginLeft: 6 }}>{n.kind}</span>
                       <div style={{ color: "var(--text3)", fontSize: 11, marginTop: 2 }}>{n.module}</div>
                     </div>
                   ))}
-                  {data.nodes_added > data.added.length && (
+                  {data.nodes_added > added.length && (
                     <div style={{ padding: "8px 14px", color: "var(--text2)", fontSize: 12 }}>
-                      + {data.nodes_added - data.added.length} more…
+                      + {data.nodes_added - added.length} more…
                     </div>
                   )}
                 </div>
@@ -196,22 +205,22 @@ export default function Diff() {
             )}
 
             {/* Removed */}
-            {data.removed.length > 0 && (
+            {removed.length > 0 && (
               <div>
                 <div style={{ fontWeight: 600, color: "var(--red)", marginBottom: 10, fontSize: 14 }}>
                   ✕ Removed ({data.nodes_removed})
                 </div>
                 <div className="card" style={{ overflow: "hidden", maxHeight: 400, overflowY: "auto" }}>
-                  {data.removed.map((n, i) => (
+                  {removed.map((n, i) => (
                     <div key={i} style={{ padding: "8px 14px", borderBottom: "1px solid var(--border)", fontSize: 12 }}>
                       <span style={{ fontFamily: "monospace", fontWeight: 600, color: "var(--red)", textDecoration: "line-through" }}>{n.name}</span>
                       <span style={{ background: "var(--bg3)", color: "var(--text3)", fontSize: 10, padding: "1px 5px", borderRadius: 3, marginLeft: 6 }}>{n.kind}</span>
                       <div style={{ color: "var(--text3)", fontSize: 11, marginTop: 2 }}>{n.module}</div>
                     </div>
                   ))}
-                  {data.nodes_removed > data.removed.length && (
+                  {data.nodes_removed > removed.length && (
                     <div style={{ padding: "8px 14px", color: "var(--text2)", fontSize: 12 }}>
-                      + {data.nodes_removed - data.removed.length} more…
+                      + {data.nodes_removed - removed.length} more…
                     </div>
                   )}
                 </div>
@@ -220,15 +229,15 @@ export default function Diff() {
           </div>
 
           {/* Module edge changes */}
-          {(data.module_edges_added.length > 0 || data.module_edges_removed.length > 0) && (
+          {(modAdded.length > 0 || modRemoved.length > 0) && (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginTop: 20 }}>
-              {data.module_edges_added.length > 0 && (
+              {modAdded.length > 0 && (
                 <div>
                   <div style={{ fontWeight: 600, color: "var(--green)", marginBottom: 10, fontSize: 14 }}>
-                    New Module Dependencies ({data.module_edges_added.length})
+                    New Module Dependencies ({modAdded.length})
                   </div>
                   <div className="card" style={{ overflow: "hidden" }}>
-                    {data.module_edges_added.map((e, i) => (
+                    {modAdded.map((e, i) => (
                       <div key={i} style={{ padding: "8px 14px", borderBottom: "1px solid var(--border)", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
                         <span style={{ fontFamily: "monospace", color: "var(--text2)", fontSize: 11 }}>{e.from}</span>
                         <span style={{ color: "var(--green)" }}>→</span>
@@ -239,13 +248,13 @@ export default function Diff() {
                   </div>
                 </div>
               )}
-              {data.module_edges_removed.length > 0 && (
+              {modRemoved.length > 0 && (
                 <div>
                   <div style={{ fontWeight: 600, color: "var(--red)", marginBottom: 10, fontSize: 14 }}>
-                    Removed Module Dependencies ({data.module_edges_removed.length})
+                    Removed Module Dependencies ({modRemoved.length})
                   </div>
                   <div className="card" style={{ overflow: "hidden" }}>
-                    {data.module_edges_removed.map((e, i) => (
+                    {modRemoved.map((e, i) => (
                       <div key={i} style={{ padding: "8px 14px", borderBottom: "1px solid var(--border)", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
                         <span style={{ fontFamily: "monospace", color: "var(--text3)", fontSize: 11, textDecoration: "line-through" }}>{e.from}</span>
                         <span style={{ color: "var(--red)" }}>→</span>
@@ -258,8 +267,8 @@ export default function Diff() {
               )}
             </div>
           )}
-        </>
-      )}
+        </>);
+      })()}
 
       {!submitted && (
         <div className="card" style={{ padding: 40, textAlign: "center", color: "var(--text2)" }}>
