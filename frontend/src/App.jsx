@@ -12,6 +12,8 @@ import Centrality from "./pages/Centrality";
 import Diff from "./pages/Diff";
 import Building from "./pages/Building";
 import Cycles from "./pages/Cycles";
+import ModuleGraph from "./pages/ModuleGraph";
+import Communities from "./pages/Communities";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -41,6 +43,8 @@ export default function App() {
               <Route path="cycles" element={<Cycles />} />
               <Route path="diff" element={<Diff />} />
               <Route path="building" element={<Building />} />
+              <Route path="module-graph" element={<ModuleGraph />} />
+              <Route path="communities" element={<Communities />} />
             </Route>
           </Routes>
         </BrowserRouter>

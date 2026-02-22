@@ -855,6 +855,236 @@ def building_view(repo_id: str, max_nodes: int = Query(120, le=300)):
     }
 
 
+@app.get("/api/repos/{repo_id}/module-graph")
+def module_graph(repo_id: str, depth: int = Query(2, ge=1, le=6)):
+    """
+    Force-graph at the module level.
+    Roll up path-derived module names to `depth` path segments.
+    e.g., depth=2: "backend.sandbox.docker" → "backend.sandbox"
+    """
+    conn = get_db(repo_id)
+    cur = conn.cursor()
+
+    def rollup(module, d):
+        if not module:
+            return "__unknown__"
+        if module.startswith("__"):
+            return module
+        parts = module.replace("/", ".").split(".")
+        return ".".join(parts[:d])
+
+    # Aggregate node stats to rolled-up module names
+    cur.execute("""
+        SELECT module, COUNT(*) AS symbol_count,
+               COALESCE(SUM(complexity), 0) AS total_complexity
+        FROM nodes WHERE hash NOT LIKE 'ext:%' AND module IS NOT NULL
+        GROUP BY module
+    """)
+    rolled_stats: dict = {}
+    for r in cur.fetchall():
+        rolled = rollup(r["module"], depth)
+        if rolled not in rolled_stats:
+            rolled_stats[rolled] = {"symbol_count": 0, "complexity": 0, "submodules": set()}
+        rolled_stats[rolled]["symbol_count"] += r["symbol_count"]
+        rolled_stats[rolled]["complexity"] += r["total_complexity"]
+        if r["module"] != rolled:
+            rolled_stats[rolled]["submodules"].add(r["module"])
+
+    # Roll up module_edges
+    cur.execute("SELECT caller_module, callee_module, edge_count FROM module_edges")
+    edge_map: dict = {}
+    intra: dict = {}
+    for r in cur.fetchall():
+        src = rollup(r["caller_module"], depth)
+        dst = rollup(r["callee_module"], depth)
+        if src == dst:
+            intra[src] = intra.get(src, 0) + r["edge_count"]
+            continue
+        if dst.startswith("__") or src.startswith("__"):
+            continue
+        key = (src, dst)
+        edge_map[key] = edge_map.get(key, 0) + r["edge_count"]
+
+    # Coupling metrics per rolled module
+    afferent: dict = {}
+    efferent: dict = {}
+    for (src, dst), cnt in edge_map.items():
+        efferent[src] = efferent.get(src, 0) + cnt
+        afferent[dst] = afferent.get(dst, 0) + cnt
+
+    valid_ids = {m for m in rolled_stats if not m.startswith("__")}
+    nodes_out = []
+    for mod in valid_ids:
+        stats = rolled_stats[mod]
+        ca = afferent.get(mod, 0)
+        ce = efferent.get(mod, 0)
+        instability = ce / (ca + ce) if (ca + ce) > 0 else 0.5
+        nodes_out.append({
+            "id": mod,
+            "label": mod.split(".")[-1],
+            "full_name": mod,
+            "symbol_count": stats["symbol_count"],
+            "complexity": stats["complexity"],
+            "afferent": ca,
+            "efferent": ce,
+            "instability": round(instability, 3),
+            "intra_calls": intra.get(mod, 0),
+            "submodule_count": len(stats["submodules"]),
+        })
+
+    max_edge = max((v for v in edge_map.values()), default=1)
+    edges_out = [
+        {"from": k[0], "to": k[1], "count": v, "weight": round(v / max_edge, 3)}
+        for k, v in edge_map.items()
+        if k[0] in valid_ids and k[1] in valid_ids
+    ]
+
+    # Determine available depths (how many unique path segments exist)
+    cur.execute("SELECT DISTINCT module FROM nodes WHERE hash NOT LIKE 'ext:%' AND module IS NOT NULL")
+    all_modules = [r["module"] for r in cur.fetchall()]
+    max_meaningful_depth = max(
+        (len(m.replace("/", ".").split(".")) for m in all_modules if not m.startswith("__")),
+        default=1
+    )
+
+    conn.close()
+    return {
+        "nodes": nodes_out,
+        "edges": edges_out,
+        "depth": depth,
+        "max_depth": min(max_meaningful_depth, 6),
+    }
+
+
+@app.get("/api/repos/{repo_id}/communities")
+def detect_communities(repo_id: str, resolution: float = Query(1.0, ge=0.1, le=5.0)):
+    """
+    Louvain community detection on the symbol call graph.
+    Returns inferred clusters, alignment score vs declared modules,
+    inter-community edges, and misaligned symbols.
+    """
+    from networkx.algorithms.community import louvain_communities
+
+    conn = get_db(repo_id)
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT hash, name, module, file_path
+        FROM nodes WHERE hash NOT LIKE 'ext:%'
+    """)
+    nodes_data: dict = {}
+    for r in cur.fetchall():
+        nodes_data[r["hash"]] = {
+            "name": r["name"],
+            "module": r["module"] or "__unknown__",
+            "file_path": r["file_path"] or "",
+        }
+
+    if not nodes_data:
+        conn.close()
+        return {"communities": [], "community_edges": [], "misaligned": [],
+                "alignment_score": 0, "total_nodes": 0, "community_count": 0}
+
+    # Build undirected weighted graph for Louvain
+    G = nx.Graph()
+    for h in nodes_data:
+        G.add_node(h)
+
+    cur.execute("""
+        SELECT caller_hash, callee_hash, COUNT(*) AS w
+        FROM edges WHERE callee_hash NOT LIKE 'ext:%'
+        GROUP BY caller_hash, callee_hash
+    """)
+    for r in cur.fetchall():
+        ch, cah = r["caller_hash"], r["callee_hash"]
+        if ch in nodes_data and cah in nodes_data:
+            if G.has_edge(ch, cah):
+                G[ch][cah]["weight"] += r["w"]
+            else:
+                G.add_edge(ch, cah, weight=r["w"])
+
+    # Run Louvain (seed for reproducibility)
+    community_sets = louvain_communities(G, resolution=resolution, seed=42)
+
+    hash_to_comm: dict = {}
+    for i, comm in enumerate(community_sets):
+        for h in comm:
+            hash_to_comm[h] = i
+
+    # Per-community: module distribution
+    comm_module_counts: dict = {}
+    for h, comm_id in hash_to_comm.items():
+        mod = nodes_data[h]["module"]
+        if comm_id not in comm_module_counts:
+            comm_module_counts[comm_id] = {}
+        comm_module_counts[comm_id][mod] = comm_module_counts[comm_id].get(mod, 0) + 1
+
+    # Inter-community edge counts (for meta-graph)
+    comm_edges: dict = {}
+    for u, v, data in G.edges(data=True):
+        cu, cv = hash_to_comm.get(u, -1), hash_to_comm.get(v, -1)
+        if cu == cv or cu == -1 or cv == -1:
+            continue
+        key = (min(cu, cv), max(cu, cv))
+        comm_edges[key] = comm_edges.get(key, 0) + data.get("weight", 1)
+
+    communities_out = []
+    for comm_id, mod_counts in comm_module_counts.items():
+        total = sum(mod_counts.values())
+        sorted_mods = sorted(mod_counts.items(), key=lambda x: -x[1])
+        top_mod, top_cnt = sorted_mods[0]
+        purity = top_cnt / total
+        communities_out.append({
+            "id": comm_id,
+            "size": total,
+            "dominant_module": top_mod,
+            "purity": round(purity, 3),
+            "top_modules": dict(sorted_mods[:6]),
+        })
+    communities_out.sort(key=lambda x: -x["size"])
+
+    max_comm_edge = max(comm_edges.values(), default=1)
+    community_edges_out = [
+        {"from": k[0], "to": k[1], "count": v, "weight": round(v / max_comm_edge, 3)}
+        for k, v in comm_edges.items()
+    ]
+
+    # Misaligned: declared module ≠ community's dominant module (only high-purity communities)
+    misaligned = []
+    for h, comm_id in hash_to_comm.items():
+        nd = nodes_data[h]
+        comm_mods = comm_module_counts[comm_id]
+        dominant_mod = max(comm_mods, key=comm_mods.get)
+        purity = comm_mods[dominant_mod] / sum(comm_mods.values())
+        if nd["module"] != dominant_mod and purity >= 0.5:
+            misaligned.append({
+                "hash": h,
+                "name": nd["name"],
+                "declared_module": nd["module"],
+                "inferred_module": dominant_mod,
+                "community_id": comm_id,
+                "file_path": nd["file_path"],
+            })
+    misaligned.sort(key=lambda x: (x["declared_module"], x["name"]))
+
+    # Overall alignment score
+    aligned = sum(
+        1 for h, comm_id in hash_to_comm.items()
+        if nodes_data[h]["module"] == max(comm_module_counts[comm_id], key=comm_module_counts[comm_id].get)
+    )
+    alignment_score = aligned / len(hash_to_comm) if hash_to_comm else 0.0
+
+    conn.close()
+    return {
+        "communities": communities_out,
+        "community_edges": community_edges_out,
+        "misaligned": misaligned[:200],
+        "alignment_score": round(alignment_score, 3),
+        "total_nodes": len(hash_to_comm),
+        "community_count": len(communities_out),
+    }
+
+
 @app.post("/api/diff-building")
 def diff_building(req: DiffRequest, max_nodes: int = Query(120, le=300)):
     """
