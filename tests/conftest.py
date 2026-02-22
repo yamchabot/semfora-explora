@@ -169,3 +169,59 @@ def count_modules_calling_node(conn: sqlite3.Connection, node_hash: str) -> int:
         WHERE e.callee_hash = ?
     """, (node_hash,)).fetchone()
     return row["cnt"] if row else 0
+
+
+# --------------------------------------------------------------------------
+# Enrichment fixtures — session-scoped; generate *.enriched.db on demand
+# --------------------------------------------------------------------------
+
+import sys as _sys
+_sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
+
+from enrich import enrich  # noqa: E402
+
+TASKBOARD_SLUGS = [
+    "main",
+    "antipattern-circular-deps",
+    "antipattern-dead-code-graveyard",
+    "antipattern-feature-creep",
+    "antipattern-god-object",
+    "antipattern-tight-coupling",
+    "antipattern-unstable-foundation",
+    "antipattern-util-dumping-ground",
+]
+
+
+@pytest.fixture(scope="session")
+def enriched_taskboard_dbs():
+    """
+    Enrich all 8 taskboard fixture DBs once per test session.
+
+    Returns dict[slug → sqlite3.Connection] pointing at *.enriched.db copies.
+    The original raw DBs are never modified.
+    """
+    conns: dict[str, sqlite3.Connection] = {}
+    for slug in TASKBOARD_SLUGS:
+        raw = DATA_DIR / f"taskboard-{slug}@HEAD.db"
+        if not raw.exists():
+            pytest.skip(f"Fixture DB not found: {raw}. Run generate_dbs.sh first.")
+        enriched = enrich(raw, verbose=False)
+        conn = sqlite3.connect(str(enriched))
+        conn.row_factory = sqlite3.Row
+        conns[slug] = conn
+
+    yield conns
+
+    for conn in conns.values():
+        conn.close()
+
+
+def scalar(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> float | None:
+    """Run a scalar query and return the single value."""
+    row = conn.execute(sql, params).fetchone()
+    return row[0] if row else None
+
+
+def col(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> list:
+    """Run a query and return a flat list of first-column values (nulls excluded)."""
+    return [r[0] for r in conn.execute(sql, params).fetchall() if r[0] is not None]
