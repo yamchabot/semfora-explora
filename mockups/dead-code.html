@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dead Code · Semfora Explorer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #e6edf3; }
+  header { padding: 16px 32px; border-bottom: 1px solid #21262d; display: flex; align-items: center; gap: 16px; }
+  .logo { font-size: 20px; font-weight: 700; color: #58a6ff; text-decoration: none; }
+  .logo span { color: #e6edf3; }
+  .breadcrumb { color: #8b949e; font-size: 14px; }
+  .main { display: grid; grid-template-columns: 240px 1fr; min-height: calc(100vh - 57px); }
+  nav { border-right: 1px solid #21262d; padding: 16px 0; }
+  nav a { display: flex; align-items: center; gap: 10px; padding: 8px 20px; color: #8b949e; text-decoration: none; font-size: 14px; border-left: 2px solid transparent; }
+  nav a:hover { color: #e6edf3; background: #161b22; }
+  nav a.active { color: #58a6ff; border-left-color: #58a6ff; background: #161b22; }
+  nav .section-label { padding: 16px 20px 6px; font-size: 11px; font-weight: 600; color: #484f58; text-transform: uppercase; letter-spacing: 0.08em; }
+  .content { padding: 24px 32px; }
+  h1 { font-size: 22px; font-weight: 600; margin-bottom: 4px; }
+  .subtitle { color: #8b949e; font-size: 13px; margin-bottom: 24px; }
+  
+  .top-row { display: grid; grid-template-columns: 1fr 340px; gap: 24px; margin-bottom: 24px; }
+  
+  .stats-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .stat { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 16px; }
+  .stat-val { font-size: 28px; font-weight: 700; }
+  .stat-lbl { font-size: 12px; color: #8b949e; margin-top: 2px; }
+  
+  .entrypoints { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 16px; }
+  .entrypoints h3 { font-size: 13px; font-weight: 600; margin-bottom: 12px; }
+  .ep-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #21262d; font-size: 12px; }
+  .ep-item:last-child { border-bottom: none; }
+  .ep-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .ep-name { font-family: monospace; color: #e6edf3; flex: 1; }
+  .ep-reach { color: #8b949e; }
+  
+  .controls { display: flex; gap: 10px; margin-bottom: 16px; align-items: center; flex-wrap: wrap; }
+  select { background: #21262d; color: #e6edf3; border: 1px solid #30363d; padding: 6px 10px; border-radius: 6px; font-size: 13px; }
+  .search { background: #161b22; border: 1px solid #30363d; color: #e6edf3; padding: 6px 12px; border-radius: 6px; font-size: 13px; width: 220px; }
+  button { background: #1f6feb; color: white; border: none; padding: 7px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; font-weight: 500; }
+  .btn-secondary { background: transparent; border: 1px solid #30363d; color: #e6edf3; }
+  
+  .file-group { background: #161b22; border: 1px solid #21262d; border-radius: 8px; margin-bottom: 12px; overflow: hidden; }
+  .file-header { padding: 12px 16px; display: flex; align-items: center; gap: 10px; cursor: pointer; background: #1c2128; border-bottom: 1px solid #21262d; }
+  .file-header:hover { background: #21262d; }
+  .file-path { font-family: monospace; font-size: 13px; color: #58a6ff; flex: 1; }
+  .file-count { font-size: 12px; color: #f85149; background: #3d1f1f; padding: 2px 8px; border-radius: 12px; }
+  .file-loc { font-size: 12px; color: #8b949e; }
+  
+  .dead-item { padding: 10px 16px; display: flex; align-items: flex-start; gap: 10px; border-bottom: 1px solid #21262d; font-size: 12px; }
+  .dead-item:last-child { border-bottom: none; }
+  .dead-item input { margin-top: 2px; flex-shrink: 0; }
+  .dead-sym { font-family: monospace; color: #e6edf3; }
+  .dead-type { font-size: 10px; padding: 1px 6px; border-radius: 4px; background: #21262d; color: #8b949e; margin-left: 4px; }
+  .dead-line { color: #484f58; margin-left: auto; }
+  .confidence { font-size: 10px; padding: 1px 6px; border-radius: 4px; }
+  .conf-high { background: #1a3628; color: #3fb950; }
+  .conf-med { background: #3d2c1e; color: #e3b341; }
+  
+  .action-bar { background: #1f3a5f; border: 1px solid #388bfd; border-radius: 8px; padding: 12px 16px; display: flex; align-items: center; gap: 12px; font-size: 13px; margin-bottom: 16px; }
+  .action-bar strong { color: #58a6ff; }
+</style>
+</head>
+<body>
+
+<header>
+  <a class="logo" href="index.html">semfora<span>explorer</span></a>
+  <div class="breadcrumb">/ Dead Code</div>
+</header>
+
+<div class="main">
+  <nav>
+    <div class="section-label">Overview</div>
+    <a href="index.html">📊 Dashboard</a>
+    <div class="section-label">Analysis Tools</div>
+    <a href="call-graph-diff.html">🔀 Call Graph Diff</a>
+    <a href="blast-radius.html">💥 Blast Radius</a>
+    <a href="module-coupling.html">🧩 Module Coupling</a>
+    <a href="dead-code.html" class="active">🪦 Dead Code</a>
+    <a href="legacy-planner.html">🏗️ Migration Planner</a>
+  </nav>
+  
+  <div class="content">
+    <h1>🪦 Dead Code Detector</h1>
+    <p class="subtitle">Symbols unreachable from any known entrypoint. The safest refactor is deleting code nothing calls.</p>
+    
+    <div class="top-row">
+      <div class="stats-col">
+        <div class="stat">
+          <div class="stat-val" style="color:#f85149">387</div>
+          <div class="stat-lbl">Dead symbols found</div>
+        </div>
+        <div class="stat">
+          <div class="stat-val" style="color:#e3b341">2,841</div>
+          <div class="stat-lbl">Dead lines of code</div>
+        </div>
+        <div class="stat">
+          <div class="stat-val" style="color:#58a6ff">12</div>
+          <div class="stat-lbl">Affected files</div>
+        </div>
+        <div class="stat">
+          <div class="stat-val" style="color:#3fb950">8</div>
+          <div class="stat-lbl">Fully dead files</div>
+        </div>
+      </div>
+      
+      <div class="entrypoints">
+        <h3>Known Entrypoints</h3>
+        <div class="ep-item">
+          <div class="ep-dot" style="background:#3fb950;"></div>
+          <div class="ep-name">src/main.ts</div>
+          <div class="ep-reach">reaches 3,102 symbols</div>
+        </div>
+        <div class="ep-item">
+          <div class="ep-dot" style="background:#3fb950;"></div>
+          <div class="ep-name">src/api/router.ts (exports)</div>
+          <div class="ep-reach">reaches 1,847 symbols</div>
+        </div>
+        <div class="ep-item">
+          <div class="ep-dot" style="background:#3fb950;"></div>
+          <div class="ep-name">src/**/*.test.ts</div>
+          <div class="ep-reach">reaches 2,201 symbols</div>
+        </div>
+        <div class="ep-item">
+          <div class="ep-dot" style="background:#e3b341;"></div>
+          <div class="ep-name">src/scripts/*.ts</div>
+          <div class="ep-reach">reaches 284 symbols</div>
+        </div>
+        <div class="ep-item" style="border-bottom:none;padding-bottom:0;">
+          <button style="background:transparent;border:1px dashed #30363d;color:#8b949e;font-size:12px;padding:4px 10px;border-radius:6px;cursor:pointer;width:100%;margin-top:4px;">+ Add entrypoint</button>
+        </div>
+      </div>
+    </div>
+    
+    <div class="controls">
+      <input class="search" placeholder="Search dead symbols...">
+      <select><option>All types</option><option>Functions</option><option>Classes</option><option>Variables</option></select>
+      <select><option>All modules</option><option>utils/</option><option>auth/</option><option>legacy/</option></select>
+      <select><option>High confidence only</option><option>All confidence</option></select>
+      <div style="margin-left:auto; display:flex; gap:8px;">
+        <button class="btn-secondary">Export CSV</button>
+        <button>Generate cleanup PR</button>
+      </div>
+    </div>
+    
+    <div class="action-bar">
+      <input type="checkbox"> <strong>24 symbols selected</strong> · 186 lines · <button style="background:#1f6feb;color:white;border:none;padding:5px 12px;border-radius:5px;font-size:12px;cursor:pointer;">Delete selected</button>
+    </div>
+    
+    <!-- File group 1 -->
+    <div class="file-group">
+      <div class="file-header">
+        <span>▾</span>
+        <span class="file-path">src/utils/legacy-helpers.ts</span>
+        <span class="file-count">47 dead symbols</span>
+        <span class="file-loc">~640 lines</span>
+        <span style="font-size:11px;background:#3d1f1f;color:#f85149;padding:2px 8px;border-radius:12px;margin-left:8px;">Fully dead file</span>
+      </div>
+      <div class="dead-item">
+        <input type="checkbox" checked>
+        <div style="flex:1;">
+          <div><span class="dead-sym">formatDateLegacy</span><span class="dead-type">function</span></div>
+          <div style="color:#484f58;font-size:11px;margin-top:2px;">Superseded by date-fns. Last caller removed in commit a3f2d1.</div>
+        </div>
+        <span class="confidence conf-high">high confidence</span>
+        <span class="dead-line">L:14</span>
+      </div>
+      <div class="dead-item">
+        <input type="checkbox" checked>
+        <div style="flex:1;">
+          <div><span class="dead-sym">parseCSVManual</span><span class="dead-type">function</span></div>
+          <div style="color:#484f58;font-size:11px;margin-top:2px;">Never imported outside this file.</div>
+        </div>
+        <span class="confidence conf-high">high confidence</span>
+        <span class="dead-line">L:52</span>
+      </div>
+      <div class="dead-item">
+        <input type="checkbox" checked>
+        <div style="flex:1;">
+          <div><span class="dead-sym">LegacyUserAdapter</span><span class="dead-type">class</span></div>
+          <div style="color:#484f58;font-size:11px;margin-top:2px;">Was used by v1 API, removed in refactor.</div>
+        </div>
+        <span class="confidence conf-high">high confidence</span>
+        <span class="dead-line">L:88</span>
+      </div>
+      <div class="dead-item" style="background:#1c2128;color:#8b949e;font-size:12px;">
+        <div style="padding-left:24px;">+ 44 more symbols in this file</div>
+      </div>
+    </div>
+    
+    <!-- File group 2 -->
+    <div class="file-group">
+      <div class="file-header">
+        <span>▾</span>
+        <span class="file-path">src/auth/oauth-v1.ts</span>
+        <span class="file-count">12 dead symbols</span>
+        <span class="file-loc">~210 lines</span>
+        <span style="font-size:11px;background:#3d1f1f;color:#f85149;padding:2px 8px;border-radius:12px;margin-left:8px;">Fully dead file</span>
+      </div>
+      <div class="dead-item">
+        <input type="checkbox">
+        <div style="flex:1;">
+          <div><span class="dead-sym">OAuthV1Client</span><span class="dead-type">class</span></div>
+          <div style="color:#484f58;font-size:11px;margin-top:2px;">Superseded by oauth-v2.ts. All callers migrated.</div>
+        </div>
+        <span class="confidence conf-high">high confidence</span>
+        <span class="dead-line">L:1</span>
+      </div>
+    </div>
+    
+    <!-- File group 3 -->
+    <div class="file-group">
+      <div class="file-header">
+        <span>▸</span>
+        <span class="file-path">src/payments/refunds.ts</span>
+        <span class="file-count">5 dead symbols</span>
+        <span class="file-loc">partial</span>
+      </div>
+    </div>
+    
+    <div style="text-align:center;padding:16px;color:#484f58;font-size:13px;">
+      Showing 3 of 12 affected files · <a href="#" style="color:#58a6ff;text-decoration:none;">Show all</a>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

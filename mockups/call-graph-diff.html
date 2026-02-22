@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Call Graph Diff · Semfora Explorer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #e6edf3; }
+  header { padding: 16px 32px; border-bottom: 1px solid #21262d; display: flex; align-items: center; gap: 16px; }
+  .logo { font-size: 20px; font-weight: 700; color: #58a6ff; text-decoration: none; }
+  .logo span { color: #e6edf3; }
+  .breadcrumb { color: #8b949e; font-size: 14px; }
+  .main { display: grid; grid-template-columns: 240px 1fr; min-height: calc(100vh - 57px); }
+  nav { border-right: 1px solid #21262d; padding: 16px 0; }
+  nav a { display: flex; align-items: center; gap: 10px; padding: 8px 20px; color: #8b949e; text-decoration: none; font-size: 14px; border-left: 2px solid transparent; }
+  nav a:hover { color: #e6edf3; background: #161b22; }
+  nav a.active { color: #58a6ff; border-left-color: #58a6ff; background: #161b22; }
+  nav .section-label { padding: 16px 20px 6px; font-size: 11px; font-weight: 600; color: #484f58; text-transform: uppercase; letter-spacing: 0.08em; }
+  .content { padding: 24px 32px; }
+  h1 { font-size: 22px; font-weight: 600; margin-bottom: 4px; }
+  .subtitle { color: #8b949e; font-size: 13px; margin-bottom: 24px; }
+  
+  .controls { display: flex; gap: 12px; align-items: center; margin-bottom: 24px; background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 16px; flex-wrap: wrap; }
+  .ref-box { display: flex; align-items: center; gap: 8px; }
+  .ref-label { font-size: 12px; font-weight: 600; color: #8b949e; text-transform: uppercase; }
+  select, input { background: #0d1117; color: #e6edf3; border: 1px solid #30363d; padding: 6px 10px; border-radius: 6px; font-size: 13px; }
+  .arrow { color: #8b949e; font-size: 18px; }
+  button { background: #1f6feb; color: white; border: none; padding: 7px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; font-weight: 500; }
+  button:hover { background: #388bfd; }
+  
+  .diff-summary { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 24px; }
+  .summary-pill { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 14px 16px; text-align: center; }
+  .pill-count { font-size: 26px; font-weight: 700; }
+  .pill-label { font-size: 12px; color: #8b949e; margin-top: 2px; }
+  
+  .layout { display: grid; grid-template-columns: 1fr 320px; gap: 16px; }
+  
+  .graph-area { background: #161b22; border: 1px solid #21262d; border-radius: 8px; min-height: 480px; position: relative; overflow: hidden; }
+  .graph-placeholder { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; color: #484f58; }
+  .graph-placeholder svg { opacity: 0.4; }
+  
+  .mock-graph { width: 100%; height: 480px; position: relative; }
+  .node { position: absolute; border-radius: 8px; padding: 8px 12px; font-size: 12px; font-weight: 500; border: 2px solid; white-space: nowrap; cursor: pointer; }
+  .node-unchanged { background: #1c2128; border-color: #30363d; color: #8b949e; }
+  .node-added { background: #1a3628; border-color: #3fb950; color: #3fb950; }
+  .node-removed { background: #3d1f1f; border-color: #f85149; color: #f85149; text-decoration: line-through; }
+  .node-modified { background: #3d2c1e; border-color: #e3b341; color: #e3b341; }
+  
+  .sidebar { display: flex; flex-direction: column; gap: 12px; }
+  .sidebar-card { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 16px; }
+  .sidebar-card h3 { font-size: 13px; font-weight: 600; margin-bottom: 12px; color: #e6edf3; }
+  .change-item { padding: 8px 0; border-bottom: 1px solid #21262d; font-size: 12px; display: flex; align-items: flex-start; gap: 8px; }
+  .change-item:last-child { border-bottom: none; padding-bottom: 0; }
+  .change-tag { font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px; white-space: nowrap; flex-shrink: 0; margin-top: 1px; }
+  .tag-added { background: #1a3628; color: #3fb950; }
+  .tag-removed { background: #3d1f1f; color: #f85149; }
+  .tag-modified { background: #3d2c1e; color: #e3b341; }
+  .change-name { color: #e6edf3; font-family: monospace; }
+  .change-sub { color: #484f58; font-size: 11px; }
+  
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .filter-btn { background: #21262d; border: 1px solid #30363d; color: #8b949e; padding: 4px 10px; border-radius: 12px; font-size: 12px; cursor: pointer; }
+  .filter-btn.on { border-color: #58a6ff; color: #58a6ff; background: #1f3a5f; }
+  
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: #8b949e; margin-bottom: 16px; }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<header>
+  <a class="logo" href="index.html">semfora<span>explorer</span></a>
+  <div class="breadcrumb">/ Call Graph Diff</div>
+</header>
+
+<div class="main">
+  <nav>
+    <div class="section-label">Overview</div>
+    <a href="index.html">📊 Dashboard</a>
+    <div class="section-label">Analysis Tools</div>
+    <a href="call-graph-diff.html" class="active">🔀 Call Graph Diff</a>
+    <a href="blast-radius.html">💥 Blast Radius</a>
+    <a href="module-coupling.html">🧩 Module Coupling</a>
+    <a href="dead-code.html">🪦 Dead Code</a>
+    <a href="legacy-planner.html">🏗️ Migration Planner</a>
+  </nav>
+  
+  <div class="content">
+    <h1>🔀 Call Graph Diff</h1>
+    <p class="subtitle">Compare dependency structure between two refs — see what actually changed, not just what lines changed.</p>
+    
+    <div class="controls">
+      <div class="ref-box">
+        <span class="ref-label">Base</span>
+        <select><option>main</option><option>v2.1.0</option></select>
+      </div>
+      <div class="arrow">→</div>
+      <div class="ref-box">
+        <span class="ref-label">Compare</span>
+        <select><option>feature/new-auth</option><option>main</option></select>
+      </div>
+      <div style="margin-left:auto; display:flex; gap:8px; align-items:center;">
+        <span style="font-size:12px;color:#8b949e;">Filter by module:</span>
+        <select><option>All modules</option><option>auth/</option><option>users/</option><option>payments/</option></select>
+        <button>Compare</button>
+      </div>
+    </div>
+    
+    <div class="diff-summary">
+      <div class="summary-pill">
+        <div class="pill-count" style="color:#3fb950">+14</div>
+        <div class="pill-label">New edges</div>
+      </div>
+      <div class="summary-pill">
+        <div class="pill-count" style="color:#f85149">-3</div>
+        <div class="pill-label">Removed edges</div>
+      </div>
+      <div class="summary-pill">
+        <div class="pill-count" style="color:#e3b341">7</div>
+        <div class="pill-label">Modified nodes</div>
+      </div>
+      <div class="summary-pill">
+        <div class="pill-count" style="color:#3fb950">+5</div>
+        <div class="pill-label">New nodes</div>
+      </div>
+      <div class="summary-pill">
+        <div class="pill-count" style="color:#58a6ff">0.91</div>
+        <div class="pill-label">Similarity score</div>
+      </div>
+    </div>
+    
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#3fb950"></div> Added</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#f85149"></div> Removed</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#e3b341"></div> Modified</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#30363d"></div> Unchanged</div>
+    </div>
+    
+    <div class="filters">
+      <div class="filter-btn on">All changes</div>
+      <div class="filter-btn">New only</div>
+      <div class="filter-btn">Removed only</div>
+      <div class="filter-btn">High impact</div>
+    </div>
+    
+    <div class="layout">
+      <div class="graph-area">
+        <!-- Mock graph using positioned nodes -->
+        <div class="mock-graph">
+          <div class="node node-unchanged" style="left:40px;top:40px;">AuthController</div>
+          <div class="node node-modified" style="left:220px;top:40px;">UserService ⚠</div>
+          <div class="node node-added" style="left:420px;top:40px;">TokenService ✦</div>
+          <div class="node node-unchanged" style="left:40px;top:140px;">LoginHandler</div>
+          <div class="node node-added" style="left:220px;top:140px;">OAuthProvider ✦</div>
+          <div class="node node-unchanged" style="left:420px;top:140px;">SessionStore</div>
+          <div class="node node-removed" style="left:40px;top:240px;">LegacyAuth ✕</div>
+          <div class="node node-unchanged" style="left:220px;top:240px;">Database</div>
+          <div class="node node-modified" style="left:420px;top:240px;">CacheLayer ⚠</div>
+          <div class="node node-unchanged" style="left:120px;top:340px;">EmailService</div>
+          <div class="node node-added" style="left:320px;top:340px;">AuditLogger ✦</div>
+          
+          <!-- SVG for edges -->
+          <svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;">
+            <defs>
+              <marker id="arrow" markerWidth="6" markerHeight="6" refX="6" refY="3" orient="auto">
+                <path d="M0,0 L6,3 L0,6 Z" fill="#484f58"/>
+              </marker>
+              <marker id="arrow-green" markerWidth="6" markerHeight="6" refX="6" refY="3" orient="auto">
+                <path d="M0,0 L6,3 L0,6 Z" fill="#3fb950"/>
+              </marker>
+              <marker id="arrow-red" markerWidth="6" markerHeight="6" refX="6" refY="3" orient="auto">
+                <path d="M0,0 L6,3 L0,6 Z" fill="#f85149"/>
+              </marker>
+            </defs>
+            <!-- unchanged edges -->
+            <line x1="145" y1="58" x2="218" y2="58" stroke="#30363d" stroke-width="1.5" marker-end="url(#arrow)"/>
+            <line x1="120" y1="75" x2="120" y2="138" stroke="#30363d" stroke-width="1.5" marker-end="url(#arrow)"/>
+            <line x1="280" y1="75" x2="280" y2="138" stroke="#484f58" stroke-width="1.5" marker-end="url(#arrow)"/>
+            <line x1="280" y1="165" x2="280" y2="238" stroke="#30363d" stroke-width="1.5" marker-end="url(#arrow)"/>
+            <line x1="185" y1="255" x2="155" y2="340" stroke="#30363d" stroke-width="1.5" marker-end="url(#arrow)"/>
+            <!-- new edges (green) -->
+            <line x1="330" y1="58" x2="420" y2="58" stroke="#3fb950" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#arrow-green)"/>
+            <line x1="335" y1="75" x2="280" y2="138" stroke="#3fb950" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#arrow-green)"/>
+            <line x1="450" y1="165" x2="390" y2="238" stroke="#3fb950" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#arrow-green)"/>
+            <line x1="380" y1="270" x2="370" y2="338" stroke="#3fb950" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#arrow-green)"/>
+            <!-- removed edge (red) -->
+            <line x1="120" y1="165" x2="100" y2="238" stroke="#f85149" stroke-width="2" stroke-dasharray="4,4" marker-end="url(#arrow-red)" opacity="0.6"/>
+          </svg>
+        </div>
+      </div>
+      
+      <div class="sidebar">
+        <div class="sidebar-card">
+          <h3>Changed Symbols</h3>
+          <div class="change-item">
+            <span class="change-tag tag-added">NEW</span>
+            <div>
+              <div class="change-name">TokenService</div>
+              <div class="change-sub">auth/token.service.ts · 4 new callers</div>
+            </div>
+          </div>
+          <div class="change-item">
+            <span class="change-tag tag-added">NEW</span>
+            <div>
+              <div class="change-name">OAuthProvider</div>
+              <div class="change-sub">auth/oauth.ts · 2 new callers</div>
+            </div>
+          </div>
+          <div class="change-item">
+            <span class="change-tag tag-added">NEW</span>
+            <div>
+              <div class="change-name">AuditLogger</div>
+              <div class="change-sub">core/audit.ts · 6 new callers ⚠️ high centrality</div>
+            </div>
+          </div>
+          <div class="change-item">
+            <span class="change-tag tag-modified">MOD</span>
+            <div>
+              <div class="change-name">UserService</div>
+              <div class="change-sub">users/service.ts · signature changed</div>
+            </div>
+          </div>
+          <div class="change-item">
+            <span class="change-tag tag-modified">MOD</span>
+            <div>
+              <div class="change-name">CacheLayer</div>
+              <div class="change-sub">core/cache.ts · 2 new deps added</div>
+            </div>
+          </div>
+          <div class="change-item">
+            <span class="change-tag tag-removed">DEL</span>
+            <div>
+              <div class="change-name">LegacyAuth</div>
+              <div class="change-sub">auth/legacy.ts · 1 dependent updated</div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="sidebar-card">
+          <h3>⚠️ Review Flags</h3>
+          <div style="font-size:12px;color:#e3b341;background:#3d2c1e;border-radius:6px;padding:10px;margin-bottom:8px;line-height:1.5;">
+            <strong>AuditLogger</strong> has betweenness centrality 0.74. High-risk new dependency — 6 modules now route through it.
+          </div>
+          <div style="font-size:12px;color:#58a6ff;background:#1f3a5f;border-radius:6px;padding:10px;line-height:1.5;">
+            <strong>UserService</strong> signature change affects 23 callers — confirm all call sites were updated.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

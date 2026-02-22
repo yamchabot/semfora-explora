@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Module Coupling · Semfora Explorer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #e6edf3; }
+  header { padding: 16px 32px; border-bottom: 1px solid #21262d; display: flex; align-items: center; gap: 16px; }
+  .logo { font-size: 20px; font-weight: 700; color: #58a6ff; text-decoration: none; }
+  .logo span { color: #e6edf3; }
+  .breadcrumb { color: #8b949e; font-size: 14px; }
+  .main { display: grid; grid-template-columns: 240px 1fr; min-height: calc(100vh - 57px); }
+  nav { border-right: 1px solid #21262d; padding: 16px 0; }
+  nav a { display: flex; align-items: center; gap: 10px; padding: 8px 20px; color: #8b949e; text-decoration: none; font-size: 14px; border-left: 2px solid transparent; }
+  nav a:hover { color: #e6edf3; background: #161b22; }
+  nav a.active { color: #58a6ff; border-left-color: #58a6ff; background: #161b22; }
+  nav .section-label { padding: 16px 20px 6px; font-size: 11px; font-weight: 600; color: #484f58; text-transform: uppercase; letter-spacing: 0.08em; }
+  .content { padding: 24px 32px; }
+  h1 { font-size: 22px; font-weight: 600; margin-bottom: 4px; }
+  .subtitle { color: #8b949e; font-size: 13px; margin-bottom: 24px; }
+  
+  .tabs { display: flex; gap: 0; border-bottom: 1px solid #21262d; margin-bottom: 24px; }
+  .tab { padding: 10px 20px; font-size: 13px; color: #8b949e; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tab.active { color: #58a6ff; border-bottom-color: #58a6ff; }
+  
+  table { width: 100%; border-collapse: collapse; font-size: 13px; background: #161b22; border: 1px solid #21262d; border-radius: 8px; overflow: hidden; }
+  th { padding: 10px 16px; text-align: left; background: #1c2128; color: #8b949e; font-weight: 500; font-size: 12px; border-bottom: 1px solid #21262d; }
+  th.sortable { cursor: pointer; }
+  th.sortable:hover { color: #e6edf3; }
+  td { padding: 10px 16px; border-bottom: 1px solid #21262d; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #1c2128; }
+  
+  .score-bar { display: flex; align-items: center; gap: 8px; }
+  .bar-bg { flex: 1; background: #21262d; border-radius: 4px; height: 6px; max-width: 80px; }
+  .bar-fill { height: 100%; border-radius: 4px; }
+  
+  .score-pill { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 4px; }
+  .pill-red { background: #3d1f1f; color: #f85149; }
+  .pill-orange { background: #3d2c1e; color: #e3b341; }
+  .pill-green { background: #1a3628; color: #3fb950; }
+  .pill-gray { background: #21262d; color: #8b949e; }
+  
+  .matrix-wrap { overflow: auto; background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 16px; margin-bottom: 24px; }
+  .matrix-title { font-size: 14px; font-weight: 600; margin-bottom: 16px; }
+  .matrix { border-collapse: collapse; }
+  .matrix th, .matrix td { width: 54px; height: 54px; text-align: center; font-size: 11px; }
+  .matrix th { color: #8b949e; font-weight: 500; border: 1px solid #21262d; background: #1c2128; }
+  .matrix td { border: 1px solid #21262d; position: relative; cursor: pointer; }
+  .matrix td:hover { outline: 2px solid #58a6ff; }
+  .matrix .diagonal { background: #1c2128; color: #484f58; }
+  .heat0 { background: #0d1117; }
+  .heat1 { background: #1a2d1a; color: #3fb950; }
+  .heat2 { background: #2d2a14; color: #e3b341; }
+  .heat3 { background: #3d2310; color: #e3b341; }
+  .heat4 { background: #4d1a14; color: #f85149; }
+  .matrix-label { font-size: 10px; font-weight: 600; color: #e6edf3; }
+  
+  .insight { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 16px; margin-bottom: 16px; display: flex; gap: 12px; }
+  .insight-icon { font-size: 20px; flex-shrink: 0; }
+  .insight-body { font-size: 13px; line-height: 1.5; }
+  .insight-body strong { color: #e6edf3; }
+</style>
+</head>
+<body>
+
+<header>
+  <a class="logo" href="index.html">semfora<span>explorer</span></a>
+  <div class="breadcrumb">/ Module Coupling</div>
+</header>
+
+<div class="main">
+  <nav>
+    <div class="section-label">Overview</div>
+    <a href="index.html">📊 Dashboard</a>
+    <div class="section-label">Analysis Tools</div>
+    <a href="call-graph-diff.html">🔀 Call Graph Diff</a>
+    <a href="blast-radius.html">💥 Blast Radius</a>
+    <a href="module-coupling.html" class="active">🧩 Module Coupling</a>
+    <a href="dead-code.html">🪦 Dead Code</a>
+    <a href="legacy-planner.html">🏗️ Migration Planner</a>
+  </nav>
+  
+  <div class="content">
+    <h1>🧩 Module Coupling & Cohesion</h1>
+    <p class="subtitle">Structural metrics for every module — instability, coupling ratios, and auto-detected shadow module boundaries.</p>
+    
+    <div class="tabs">
+      <div class="tab active">Metrics Table</div>
+      <div class="tab">Dependency Matrix</div>
+      <div class="tab">Auto-Detected Clusters</div>
+    </div>
+    
+    <!-- Insight cards -->
+    <div class="insight">
+      <div class="insight-icon">🚨</div>
+      <div class="insight-body"><strong>utils/</strong> has afferent coupling of 47 — nearly everything depends on it. But its efferent coupling is also 12, making it unstable (I=0.20). This is a god module. Consider splitting by domain.</div>
+    </div>
+    <div class="insight">
+      <div class="insight-icon">⚠️</div>
+      <div class="insight-body"><strong>payments/</strong> and <strong>orders/</strong> have 38 cross-boundary edges despite being nominally separate modules. Community detection suggests they should be one cluster.</div>
+    </div>
+    
+    <table>
+      <thead>
+        <tr>
+          <th>Module</th>
+          <th class="sortable">Ca (afferent) ↕</th>
+          <th class="sortable">Ce (efferent) ↕</th>
+          <th class="sortable">Instability (I) ↓</th>
+          <th>Internal cohesion</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>utils/</code></td>
+          <td>47</td>
+          <td>12</td>
+          <td>
+            <div class="score-bar">
+              <div class="bar-bg"><div class="bar-fill" style="width:20%;background:#3fb950;"></div></div>
+              0.20
+            </div>
+          </td>
+          <td>
+            <div class="score-bar">
+              <div class="bar-bg"><div class="bar-fill" style="width:30%;background:#f85149;"></div></div>
+              low
+            </div>
+          </td>
+          <td><span class="score-pill pill-red">God module</span></td>
+        </tr>
+        <tr>
+          <td><code>auth/</code></td>
+          <td>18</td>
+          <td>8</td>
+          <td>
+            <div class="score-bar">
+              <div class="bar-bg"><div class="bar-fill" style="width:31%;background:#e3b341;"></div></div>
+              0.31
+            </div>
+          </td>
+          <td>
+            <div class="score-bar">
+              <div class="bar-bg"><div class="bar-fill" style="width:72%;background:#3fb950;"></div></div>
+              high
+            </div>
+          </td>
+          <td><span class="score-pill pill-orange">Stable</span></td>
+        </tr>
+        <tr>
+          <td><code>payments/</code></td>
+          <td>9</td>
+          <td>14</td>
+          <td>
+            <div class="score-bar">
+              <div class="bar-bg"><div class="bar-fill" style="width:61%;background:#e3b341;"></div></div>
+              0.61
+            </div>
+          </td>
+          <td>
+            <div class="score-bar">
+              <div class="bar-bg"><div class="bar-fill" style="width:55%;background:#e3b341;"></div></div>
+              medium
+            </div>
+          </td>
+          <td><span class="score-pill pill-orange">Coupled to orders/</span></td>
+        </tr>
+        <tr>
+          <td><code>orders/</code></td>
+          <td>7</td>
+          <td>16</td>
+          <td>
+            <div class="score-bar">
+              <div class="bar-bg"><div class="bar-fill" style="width:70%;background:#f85149;"></div></div>
+              0.70
+            </div>
+          </td>
+          <td>
+            <div class="score-bar">
+              <div class="bar-bg"><div class="bar-fill" style="width:45%;background:#e3b341;"></div></div>
+              medium
+            </div>
+          </td>
+          <td><span class="score-pill pill-red">Unstable</span></td>
+        </tr>
+        <tr>
+          <td><code>core/</code></td>
+          <td>32</td>
+          <td>3</td>
+          <td>
+            <div class="score-bar">
+              <div class="bar-bg"><div class="bar-fill" style="width:9%;background:#3fb950;"></div></div>
+              0.09
+            </div>
+          </td>
+          <td>
+            <div class="score-bar">
+              <div class="bar-bg"><div class="bar-fill" style="width:88%;background:#3fb950;"></div></div>
+              high
+            </div>
+          </td>
+          <td><span class="score-pill pill-green">Healthy</span></td>
+        </tr>
+        <tr>
+          <td><code>api/</code></td>
+          <td>2</td>
+          <td>24</td>
+          <td>
+            <div class="score-bar">
+              <div class="bar-bg"><div class="bar-fill" style="width:92%;background:#f85149;"></div></div>
+              0.92
+            </div>
+          </td>
+          <td>
+            <div class="score-bar">
+              <div class="bar-bg"><div class="bar-fill" style="width:68%;background:#3fb950;"></div></div>
+              high
+            </div>
+          </td>
+          <td><span class="score-pill pill-gray">Entrypoint (expected)</span></td>
+        </tr>
+        <tr>
+          <td><code>notifications/</code></td>
+          <td>11</td>
+          <td>5</td>
+          <td>
+            <div class="score-bar">
+              <div class="bar-bg"><div class="bar-fill" style="width:31%;background:#3fb950;"></div></div>
+              0.31
+            </div>
+          </td>
+          <td>
+            <div class="score-bar">
+              <div class="bar-bg"><div class="bar-fill" style="width:78%;background:#3fb950;"></div></div>
+              high
+            </div>
+          </td>
+          <td><span class="score-pill pill-green">Healthy</span></td>
+        </tr>
+      </tbody>
+    </table>
+    
+    <div style="margin-top:24px;" class="matrix-wrap">
+      <div class="matrix-title">Cross-Module Dependency Matrix <span style="font-size:12px;color:#8b949e;font-weight:400">— cell value = # of call edges. Red = high coupling.</span></div>
+      <table class="matrix">
+        <tr>
+          <th></th>
+          <th>core/</th>
+          <th>auth/</th>
+          <th>utils/</th>
+          <th>payments/</th>
+          <th>orders/</th>
+          <th>api/</th>
+          <th>notif/</th>
+        </tr>
+        <tr>
+          <th>core/</th>
+          <td class="diagonal">—</td>
+          <td class="heat0"></td>
+          <td class="heat1 matrix-label">3</td>
+          <td class="heat0"></td>
+          <td class="heat0"></td>
+          <td class="heat0"></td>
+          <td class="heat0"></td>
+        </tr>
+        <tr>
+          <th>auth/</th>
+          <td class="heat2 matrix-label">7</td>
+          <td class="diagonal">—</td>
+          <td class="heat2 matrix-label">5</td>
+          <td class="heat0"></td>
+          <td class="heat0"></td>
+          <td class="heat0"></td>
+          <td class="heat1 matrix-label">2</td>
+        </tr>
+        <tr>
+          <th>utils/</th>
+          <td class="heat1 matrix-label">4</td>
+          <td class="heat1 matrix-label">3</td>
+          <td class="diagonal">—</td>
+          <td class="heat1 matrix-label">2</td>
+          <td class="heat1 matrix-label">1</td>
+          <td class="heat1 matrix-label">1</td>
+          <td class="heat1 matrix-label">1</td>
+        </tr>
+        <tr>
+          <th>payments/</th>
+          <td class="heat2 matrix-label">6</td>
+          <td class="heat2 matrix-label">5</td>
+          <td class="heat3 matrix-label">11</td>
+          <td class="diagonal">—</td>
+          <td class="heat4 matrix-label">38</td>
+          <td class="heat0"></td>
+          <td class="heat1 matrix-label">2</td>
+        </tr>
+        <tr>
+          <th>orders/</th>
+          <td class="heat2 matrix-label">8</td>
+          <td class="heat1 matrix-label">3</td>
+          <td class="heat3 matrix-label">14</td>
+          <td class="heat4 matrix-label">38</td>
+          <td class="diagonal">—</td>
+          <td class="heat0"></td>
+          <td class="heat0"></td>
+        </tr>
+        <tr>
+          <th>api/</th>
+          <td class="heat1 matrix-label">4</td>
+          <td class="heat2 matrix-label">9</td>
+          <td class="heat3 matrix-label">12</td>
+          <td class="heat2 matrix-label">7</td>
+          <td class="heat2 matrix-label">6</td>
+          <td class="diagonal">—</td>
+          <td class="heat1 matrix-label">3</td>
+        </tr>
+        <tr>
+          <th>notif/</th>
+          <td class="heat1 matrix-label">2</td>
+          <td class="heat0"></td>
+          <td class="heat2 matrix-label">5</td>
+          <td class="heat1 matrix-label">1</td>
+          <td class="heat0"></td>
+          <td class="heat0"></td>
+          <td class="diagonal">—</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

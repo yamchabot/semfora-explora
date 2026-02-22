@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Semfora Explorer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #e6edf3; }
+  
+  header { padding: 16px 32px; border-bottom: 1px solid #21262d; display: flex; align-items: center; gap: 16px; }
+  .logo { font-size: 20px; font-weight: 700; color: #58a6ff; }
+  .logo span { color: #e6edf3; }
+  .repo-selector { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  select { background: #21262d; color: #e6edf3; border: 1px solid #30363d; padding: 6px 10px; border-radius: 6px; font-size: 14px; }
+  
+  .main { display: grid; grid-template-columns: 240px 1fr; min-height: calc(100vh - 57px); }
+  
+  nav { border-right: 1px solid #21262d; padding: 16px 0; }
+  nav a { display: flex; align-items: center; gap: 10px; padding: 8px 20px; color: #8b949e; text-decoration: none; font-size: 14px; border-left: 2px solid transparent; transition: all 0.1s; }
+  nav a:hover { color: #e6edf3; background: #161b22; }
+  nav a.active { color: #58a6ff; border-left-color: #58a6ff; background: #161b22; }
+  nav .section-label { padding: 16px 20px 6px; font-size: 11px; font-weight: 600; color: #484f58; text-transform: uppercase; letter-spacing: 0.08em; }
+  
+  .content { padding: 32px; overflow: auto; }
+  
+  h1 { font-size: 24px; font-weight: 600; margin-bottom: 8px; }
+  .subtitle { color: #8b949e; font-size: 14px; margin-bottom: 32px; }
+  
+  .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 32px; }
+  .stat-card { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 20px; }
+  .stat-value { font-size: 32px; font-weight: 700; line-height: 1; margin-bottom: 4px; }
+  .stat-label { font-size: 13px; color: #8b949e; }
+  .stat-delta { font-size: 12px; margin-top: 8px; }
+  .delta-up { color: #f85149; }
+  .delta-down { color: #3fb950; }
+  
+  .tools-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .tool-card { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 24px; text-decoration: none; color: inherit; transition: border-color 0.15s; display: block; }
+  .tool-card:hover { border-color: #58a6ff; }
+  .tool-icon { font-size: 28px; margin-bottom: 12px; }
+  .tool-name { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+  .tool-desc { font-size: 13px; color: #8b949e; line-height: 1.5; }
+  .tool-badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 12px; margin-top: 12px; font-weight: 500; }
+  .badge-blue { background: #1f3a5f; color: #58a6ff; }
+  .badge-green { background: #1a3628; color: #3fb950; }
+  .badge-orange { background: #3d2c1e; color: #e3b341; }
+  .badge-red { background: #3d1f1f; color: #f85149; }
+  
+  .recent { margin-top: 32px; }
+  .recent h2 { font-size: 16px; font-weight: 600; margin-bottom: 16px; }
+  .activity-list { background: #161b22; border: 1px solid #21262d; border-radius: 8px; overflow: hidden; }
+  .activity-item { padding: 12px 16px; border-bottom: 1px solid #21262d; display: flex; align-items: center; gap: 12px; font-size: 13px; }
+  .activity-item:last-child { border-bottom: none; }
+  .activity-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .dot-blue { background: #58a6ff; }
+  .dot-green { background: #3fb950; }
+  .dot-orange { background: #e3b341; }
+  .activity-time { color: #484f58; margin-left: auto; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">semfora<span>explorer</span></div>
+  <div class="repo-selector">
+    <span style="color:#8b949e;font-size:13px;">Repository:</span>
+    <select>
+      <option>my-org / backend-api</option>
+      <option>my-org / frontend-app</option>
+      <option>my-org / data-pipeline</option>
+    </select>
+    <select>
+      <option>main</option>
+      <option>feature/new-auth</option>
+      <option>refactor/extract-payments</option>
+    </select>
+  </div>
+</header>
+
+<div class="main">
+  <nav>
+    <div class="section-label">Overview</div>
+    <a href="index.html" class="active">📊 Dashboard</a>
+    
+    <div class="section-label">Analysis Tools</div>
+    <a href="call-graph-diff.html">🔀 Call Graph Diff</a>
+    <a href="blast-radius.html">💥 Blast Radius</a>
+    <a href="module-coupling.html">🧩 Module Coupling</a>
+    <a href="dead-code.html">🪦 Dead Code</a>
+    <a href="legacy-planner.html">🏗️ Migration Planner</a>
+  </nav>
+  
+  <div class="content">
+    <h1>Codebase Overview</h1>
+    <p class="subtitle">backend-api · main · last indexed 4 minutes ago</p>
+    
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-value" style="color:#58a6ff">4,821</div>
+        <div class="stat-label">Symbols indexed</div>
+        <div class="stat-delta delta-up">↑ 47 since last week</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" style="color:#3fb950">12,304</div>
+        <div class="stat-label">Call edges</div>
+        <div class="stat-delta delta-up">↑ 231 since last week</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" style="color:#e3b341">387</div>
+        <div class="stat-label">Dead symbols</div>
+        <div class="stat-delta delta-down">↓ 12 since last week</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" style="color:#f85149">8</div>
+        <div class="stat-label">Dependency cycles</div>
+        <div class="stat-delta" style="color:#8b949e">unchanged</div>
+      </div>
+    </div>
+    
+    <div class="tools-grid">
+      <a class="tool-card" href="call-graph-diff.html">
+        <div class="tool-icon">🔀</div>
+        <div class="tool-name">Call Graph Diff</div>
+        <div class="tool-desc">Compare structural dependencies between two branches or commits. See what actually changed, not just what lines changed.</div>
+        <span class="tool-badge badge-blue">PR Review</span>
+      </a>
+      <a class="tool-card" href="blast-radius.html">
+        <div class="tool-icon">💥</div>
+        <div class="tool-name">Blast Radius</div>
+        <div class="tool-desc">Select any function and see the full transitive set of symbols that depend on it. Know your risk before you refactor.</div>
+        <span class="tool-badge badge-orange">Risk Analysis</span>
+      </a>
+      <a class="tool-card" href="module-coupling.html">
+        <div class="tool-icon">🧩</div>
+        <div class="tool-name">Module Coupling</div>
+        <div class="tool-desc">Measure afferent/efferent coupling and instability scores per module. Detect hidden god objects and shadow modules.</div>
+        <span class="tool-badge badge-green">Architecture</span>
+      </a>
+      <a class="tool-card" href="dead-code.html">
+        <div class="tool-icon">🪦</div>
+        <div class="tool-name">Dead Code Detector</div>
+        <div class="tool-desc">Find unreachable symbols from all known entrypoints. The safest possible refactor is deleting code nothing calls.</div>
+        <span class="tool-badge badge-red">Cleanup</span>
+      </a>
+      <a class="tool-card" href="legacy-planner.html">
+        <div class="tool-icon">🏗️</div>
+        <div class="tool-name">Migration Planner</div>
+        <div class="tool-desc">Plan and track large-scale architectural migrations. Auto-detect real module clusters. Measure migration progress over time.</div>
+        <span class="tool-badge badge-orange">Refactoring</span>
+      </a>
+      <div class="tool-card" style="opacity:0.4; cursor:default; pointer-events:none;">
+        <div class="tool-icon">🔬</div>
+        <div class="tool-name">Complexity Hotspots</div>
+        <div class="tool-desc">Surface the highest-centrality nodes in the call graph — the functions most likely to cause cascading failures.</div>
+        <span class="tool-badge badge-blue">Coming soon</span>
+      </div>
+    </div>
+    
+    <div class="recent">
+      <h2>Recent Activity</h2>
+      <div class="activity-list">
+        <div class="activity-item">
+          <div class="activity-dot dot-blue"></div>
+          <div>Call graph diff ran for <strong>feature/new-auth</strong> vs <strong>main</strong> — 14 new edges, 3 removed</div>
+          <div class="activity-time">2m ago</div>
+        </div>
+        <div class="activity-item">
+          <div class="activity-dot dot-orange"></div>
+          <div>Blast radius check: <strong>UserService.authenticate()</strong> — 83 affected symbols</div>
+          <div class="activity-time">18m ago</div>
+        </div>
+        <div class="activity-item">
+          <div class="activity-dot dot-green"></div>
+          <div>Index updated — <strong>main</strong> at commit <code style="background:#21262d;padding:1px 5px;border-radius:3px;">a3f7d91</code></div>
+          <div class="activity-time">4m ago</div>
+        </div>
+        <div class="activity-item">
+          <div class="activity-dot dot-blue"></div>
+          <div>Dead code scan complete — <strong>387 unreachable symbols</strong> found across 12 files</div>
+          <div class="activity-time">1h ago</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

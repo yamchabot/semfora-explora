@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Migration Planner · Semfora Explorer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #e6edf3; }
+  header { padding: 16px 32px; border-bottom: 1px solid #21262d; display: flex; align-items: center; gap: 16px; }
+  .logo { font-size: 20px; font-weight: 700; color: #58a6ff; text-decoration: none; }
+  .logo span { color: #e6edf3; }
+  .breadcrumb { color: #8b949e; font-size: 14px; }
+  .main { display: grid; grid-template-columns: 240px 1fr; min-height: calc(100vh - 57px); }
+  nav { border-right: 1px solid #21262d; padding: 16px 0; }
+  nav a { display: flex; align-items: center; gap: 10px; padding: 8px 20px; color: #8b949e; text-decoration: none; font-size: 14px; border-left: 2px solid transparent; }
+  nav a:hover { color: #e6edf3; background: #161b22; }
+  nav a.active { color: #58a6ff; border-left-color: #58a6ff; background: #161b22; }
+  nav .section-label { padding: 16px 20px 6px; font-size: 11px; font-weight: 600; color: #484f58; text-transform: uppercase; letter-spacing: 0.08em; }
+  .content { padding: 24px 32px; }
+  h1 { font-size: 22px; font-weight: 600; margin-bottom: 4px; }
+  .subtitle { color: #8b949e; font-size: 13px; margin-bottom: 24px; }
+  
+  .steps { display: flex; gap: 0; margin-bottom: 28px; }
+  .step { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 0 20px 0 0; }
+  .step:first-child { padding-left: 0; }
+  .step-num { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; }
+  .step.done .step-num { background: #3fb950; color: #0d1117; }
+  .step.active .step-num { background: #58a6ff; color: #0d1117; }
+  .step.pending .step-num { background: #21262d; color: #484f58; }
+  .step.done .step-label { color: #8b949e; }
+  .step.active .step-label { color: #e6edf3; font-weight: 600; }
+  .step.pending .step-label { color: #484f58; }
+  .step-arrow { color: #484f58; margin-left: 8px; }
+  
+  .layout { display: grid; grid-template-columns: 1fr 320px; gap: 24px; }
+  
+  /* Architecture comparison */
+  .arch-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+  .arch-box { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 16px; }
+  .arch-box h3 { font-size: 13px; font-weight: 600; margin-bottom: 12px; color: #8b949e; }
+  
+  .cluster { border-radius: 8px; padding: 12px; margin-bottom: 8px; border: 1px solid; }
+  .cl-gray { background: #1c2128; border-color: #30363d; }
+  .cl-blue { background: #1f3a5f; border-color: #388bfd44; }
+  .cl-green { background: #1a3628; border-color: #3fb95044; }
+  .cl-orange { background: #3d2c1e; border-color: #e3b34144; }
+  .cl-red { background: #3d1f1f; border-color: #f8514944; }
+  .cl-name { font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+  .cl-chips { display: flex; gap: 4px; flex-wrap: wrap; }
+  .chip { font-size: 10px; background: #0d111766; padding: 2px 6px; border-radius: 4px; color: #8b949e; }
+  .chip-highlight { color: #f85149; background: #3d1f1f66; }
+  
+  .progress-card { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  .progress-card h3 { font-size: 13px; font-weight: 600; margin-bottom: 16px; }
+  
+  .progress-metric { margin-bottom: 16px; }
+  .progress-header { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 6px; }
+  .progress-bar-bg { background: #21262d; border-radius: 6px; height: 10px; overflow: hidden; }
+  .progress-bar-fill { height: 100%; border-radius: 6px; }
+  
+  .migration-order { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  .migration-order h3 { font-size: 13px; font-weight: 600; margin-bottom: 12px; }
+  .order-item { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #21262d; font-size: 12px; }
+  .order-item:last-child { border-bottom: none; }
+  .order-num { width: 22px; height: 22px; border-radius: 50%; background: #1f3a5f; color: #58a6ff; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; }
+  .order-module { font-family: monospace; color: #e6edf3; flex: 1; }
+  .order-reason { color: #484f58; font-size: 11px; }
+  .order-status { font-size: 10px; padding: 2px 6px; border-radius: 4px; }
+  .s-done { background: #1a3628; color: #3fb950; }
+  .s-progress { background: #1f3a5f; color: #58a6ff; }
+  .s-todo { background: #21262d; color: #484f58; }
+  
+  .trend { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 16px; }
+  .trend h3 { font-size: 13px; font-weight: 600; margin-bottom: 16px; }
+  
+  /* Sparkline mock */
+  .sparkline { position: relative; height: 80px; }
+  .sparkline svg { width: 100%; height: 100%; }
+  
+  .side-panel { display: flex; flex-direction: column; gap: 16px; }
+  .side-card { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 16px; }
+  .side-card h3 { font-size: 13px; font-weight: 600; margin-bottom: 12px; }
+  .kv { display: flex; justify-content: space-between; font-size: 12px; padding: 5px 0; border-bottom: 1px solid #21262d; }
+  .kv:last-child { border-bottom: none; }
+  .kv-key { color: #8b949e; }
+  .kv-val { font-weight: 600; }
+  
+  .alert { background: #1f3a5f; border: 1px solid #388bfd44; border-radius: 8px; padding: 12px; font-size: 12px; line-height: 1.5; }
+  .alert.warn { background: #3d2c1e; border-color: #e3b34144; }
+</style>
+</head>
+<body>
+
+<header>
+  <a class="logo" href="index.html">semfora<span>explorer</span></a>
+  <div class="breadcrumb">/ Migration Planner</div>
+</header>
+
+<div class="main">
+  <nav>
+    <div class="section-label">Overview</div>
+    <a href="index.html">📊 Dashboard</a>
+    <div class="section-label">Analysis Tools</div>
+    <a href="call-graph-diff.html">🔀 Call Graph Diff</a>
+    <a href="blast-radius.html">💥 Blast Radius</a>
+    <a href="module-coupling.html">🧩 Module Coupling</a>
+    <a href="dead-code.html">🪦 Dead Code</a>
+    <a href="legacy-planner.html" class="active">🏗️ Migration Planner</a>
+  </nav>
+  
+  <div class="content">
+    <h1>🏗️ Legacy Modernization Planner</h1>
+    <p class="subtitle">Track and plan large-scale architectural migrations using real call graph data.</p>
+    
+    <div class="steps">
+      <div class="step done">
+        <div class="step-num">✓</div>
+        <div class="step-label">Understand current</div>
+        <div class="step-arrow">›</div>
+      </div>
+      <div class="step done">
+        <div class="step-num">✓</div>
+        <div class="step-label">Define target</div>
+        <div class="step-arrow">›</div>
+      </div>
+      <div class="step active">
+        <div class="step-num">3</div>
+        <div class="step-label">Plan extraction order</div>
+        <div class="step-arrow">›</div>
+      </div>
+      <div class="step pending">
+        <div class="step-num">4</div>
+        <div class="step-label">Track progress</div>
+        <div class="step-arrow">›</div>
+      </div>
+    </div>
+    
+    <div class="layout">
+      <div>
+        <!-- Architecture comparison -->
+        <div style="font-size:14px;font-weight:600;margin-bottom:12px;">Current vs. Target Architecture</div>
+        <div class="arch-compare">
+          <div class="arch-box">
+            <h3>📍 Current (detected from call graph)</h3>
+            <div class="cluster cl-red">
+              <div class="cl-name" style="color:#f85149">⚠ Monolith cluster (1,847 symbols)</div>
+              <div class="cl-chips">
+                <span class="chip chip-highlight">auth/</span>
+                <span class="chip chip-highlight">users/</span>
+                <span class="chip chip-highlight">payments/</span>
+                <span class="chip chip-highlight">orders/</span>
+                <span class="chip chip-highlight">notifications/</span>
+                <span class="chip">utils/ (shared)</span>
+              </div>
+            </div>
+            <div class="cluster cl-gray">
+              <div class="cl-name" style="color:#8b949e">Loosely separate</div>
+              <div class="cl-chips">
+                <span class="chip">core/</span>
+                <span class="chip">api/</span>
+              </div>
+            </div>
+          </div>
+          
+          <div class="arch-box">
+            <h3>🎯 Target (user-defined)</h3>
+            <div class="cluster cl-blue">
+              <div class="cl-name" style="color:#58a6ff">auth-service</div>
+              <div class="cl-chips"><span class="chip">auth/</span><span class="chip">tokens/</span></div>
+            </div>
+            <div class="cluster cl-green">
+              <div class="cl-name" style="color:#3fb950">user-service</div>
+              <div class="cl-chips"><span class="chip">users/</span><span class="chip">profiles/</span></div>
+            </div>
+            <div class="cluster cl-orange">
+              <div class="cl-name" style="color:#e3b341">commerce-service</div>
+              <div class="cl-chips"><span class="chip">payments/</span><span class="chip">orders/</span></div>
+            </div>
+            <div class="cluster cl-gray">
+              <div class="cl-name" style="color:#8b949e">shared-core</div>
+              <div class="cl-chips"><span class="chip">core/</span><span class="chip">utils/</span></div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Progress -->
+        <div class="progress-card">
+          <h3>Migration Progress</h3>
+          <div class="progress-metric">
+            <div class="progress-header">
+              <span style="color:#8b949e;">Cross-boundary edges remaining</span>
+              <span><strong>247</strong> / 583 <span style="color:#3fb950;font-size:11px;">(58% reduced)</span></span>
+            </div>
+            <div class="progress-bar-bg">
+              <div class="progress-bar-fill" style="width:58%;background:linear-gradient(90deg, #3fb950, #e3b341);"></div>
+            </div>
+          </div>
+          <div class="progress-metric">
+            <div class="progress-header">
+              <span style="color:#8b949e;">auth-service isolation</span>
+              <span><strong>71%</strong></span>
+            </div>
+            <div class="progress-bar-bg">
+              <div class="progress-bar-fill" style="width:71%;background:#3fb950;"></div>
+            </div>
+          </div>
+          <div class="progress-metric">
+            <div class="progress-header">
+              <span style="color:#8b949e;">user-service isolation</span>
+              <span><strong>44%</strong></span>
+            </div>
+            <div class="progress-bar-bg">
+              <div class="progress-bar-fill" style="width:44%;background:#e3b341;"></div>
+            </div>
+          </div>
+          <div class="progress-metric" style="margin-bottom:0;">
+            <div class="progress-header">
+              <span style="color:#8b949e;">commerce-service isolation</span>
+              <span><strong>12%</strong></span>
+            </div>
+            <div class="progress-bar-bg">
+              <div class="progress-bar-fill" style="width:12%;background:#f85149;"></div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Extraction order -->
+        <div class="migration-order">
+          <h3>Recommended Extraction Order <span style="font-size:11px;color:#8b949e;font-weight:400;">(by topological sort + instability)</span></h3>
+          <div class="order-item">
+            <div class="order-num">1</div>
+            <div class="order-module">shared-core</div>
+            <div class="order-reason">fewest dependents, foundation for everything</div>
+            <span class="order-status s-done">Done</span>
+          </div>
+          <div class="order-item">
+            <div class="order-num">2</div>
+            <div class="order-module">auth-service</div>
+            <div class="order-reason">18 dependents, clean interface possible</div>
+            <span class="order-status s-progress">In progress</span>
+          </div>
+          <div class="order-item">
+            <div class="order-num">3</div>
+            <div class="order-module">user-service</div>
+            <div class="order-reason">depends on auth, wait for step 2</div>
+            <span class="order-status s-todo">Queued</span>
+          </div>
+          <div class="order-item">
+            <div class="order-num">4</div>
+            <div class="order-module">commerce-service</div>
+            <div class="order-reason">highest coupling — payments/orders tangle must resolve first</div>
+            <span class="order-status s-todo">Queued</span>
+          </div>
+        </div>
+        
+        <!-- Trend sparkline -->
+        <div class="trend">
+          <h3>Cross-Boundary Edge Count Over Time</h3>
+          <div class="sparkline">
+            <svg viewBox="0 0 400 80" preserveAspectRatio="none">
+              <defs>
+                <linearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#3fb950" stop-opacity="0.3"/>
+                  <stop offset="100%" stop-color="#3fb950" stop-opacity="0"/>
+                </linearGradient>
+              </defs>
+              <path d="M0,10 L40,12 L80,18 L120,25 L160,35 L200,42 L240,50 L280,55 L320,60 L360,62 L400,64" 
+                    fill="none" stroke="#3fb950" stroke-width="2"/>
+              <path d="M0,10 L40,12 L80,18 L120,25 L160,35 L200,42 L240,50 L280,55 L320,60 L360,62 L400,64 L400,80 L0,80Z" 
+                    fill="url(#fade)"/>
+              <!-- Axis labels -->
+              <text x="0" y="77" fill="#484f58" font-size="9">8 weeks ago</text>
+              <text x="370" y="77" fill="#484f58" font-size="9" text-anchor="end">Now</text>
+              <text x="0" y="12" fill="#484f58" font-size="9">583</text>
+              <text x="0" y="67" fill="#484f58" font-size="9">247</text>
+              <line x1="28" y1="0" x2="28" y2="80" stroke="#21262d" stroke-width="1"/>
+            </svg>
+          </div>
+          <div style="font-size:12px;color:#3fb950;margin-top:4px;">↓ 58% reduction in coupling over 8 weeks</div>
+        </div>
+      </div>
+      
+      <div class="side-panel">
+        <div class="side-card">
+          <h3>Migration Summary</h3>
+          <div class="kv"><span class="kv-key">Migration plan</span><span class="kv-val">Monolith → 4 services</span></div>
+          <div class="kv"><span class="kv-key">Started</span><span class="kv-val">6 weeks ago</span></div>
+          <div class="kv"><span class="kv-key">Modules extracted</span><span class="kv-val">1 / 4</span></div>
+          <div class="kv"><span class="kv-key">Edges to resolve</span><span class="kv-val" style="color:#e3b341;">247</span></div>
+          <div class="kv"><span class="kv-key">Estimated completion</span><span class="kv-val">~12 weeks</span></div>
+        </div>
+        
+        <div class="alert warn">
+          ⚠️ <strong>PR #241 detected regression:</strong> Added 12 new cross-boundary edges between <code>payments/</code> and <code>auth/</code>. Flagged for review before merge.
+        </div>
+        
+        <div class="alert">
+          💡 <strong>Strangler fig candidate:</strong> <code>notifications/</code> has only 11 inbound edges and a clean interface. Could be extracted outside the planned order with minimal risk.
+        </div>
+        
+        <div class="side-card">
+          <h3>Cycle Breakers Needed</h3>
+          <p style="font-size:12px;color:#8b949e;margin-bottom:12px;">These cycles must be broken before the affected services can be extracted.</p>
+          <div style="font-size:12px;padding:8px 0;border-bottom:1px solid #21262d;font-family:monospace;color:#f85149;">
+            payments/ ↔ orders/ (38 edges)
+          </div>
+          <div style="font-size:12px;padding:8px 0;font-family:monospace;color:#e3b341;">
+            users/ → auth/ → users/ (3-cycle)
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

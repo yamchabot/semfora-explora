@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Blast Radius · Semfora Explorer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #e6edf3; }
+  header { padding: 16px 32px; border-bottom: 1px solid #21262d; display: flex; align-items: center; gap: 16px; }
+  .logo { font-size: 20px; font-weight: 700; color: #58a6ff; text-decoration: none; }
+  .logo span { color: #e6edf3; }
+  .breadcrumb { color: #8b949e; font-size: 14px; }
+  .main { display: grid; grid-template-columns: 240px 1fr; min-height: calc(100vh - 57px); }
+  nav { border-right: 1px solid #21262d; padding: 16px 0; }
+  nav a { display: flex; align-items: center; gap: 10px; padding: 8px 20px; color: #8b949e; text-decoration: none; font-size: 14px; border-left: 2px solid transparent; }
+  nav a:hover { color: #e6edf3; background: #161b22; }
+  nav a.active { color: #58a6ff; border-left-color: #58a6ff; background: #161b22; }
+  nav .section-label { padding: 16px 20px 6px; font-size: 11px; font-weight: 600; color: #484f58; text-transform: uppercase; letter-spacing: 0.08em; }
+  .content { padding: 24px 32px; }
+  h1 { font-size: 22px; font-weight: 600; margin-bottom: 4px; }
+  .subtitle { color: #8b949e; font-size: 13px; margin-bottom: 24px; }
+  
+  .search-bar { display: flex; gap: 12px; align-items: center; margin-bottom: 24px; }
+  .search-input { flex: 1; background: #161b22; border: 1px solid #30363d; color: #e6edf3; padding: 10px 16px; border-radius: 8px; font-size: 14px; font-family: monospace; }
+  .search-input:focus { outline: none; border-color: #58a6ff; }
+  button { background: #1f6feb; color: white; border: none; padding: 10px 20px; border-radius: 6px; font-size: 13px; cursor: pointer; font-weight: 500; white-space: nowrap; }
+  
+  .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+  .stat { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 16px; }
+  .stat-val { font-size: 28px; font-weight: 700; }
+  .stat-lbl { font-size: 12px; color: #8b949e; margin-top: 2px; }
+  
+  .layout { display: grid; grid-template-columns: 1fr 300px; gap: 16px; }
+  
+  .radial-area { background: #161b22; border: 1px solid #21262d; border-radius: 8px; min-height: 500px; position: relative; display: flex; align-items: center; justify-content: center; }
+  
+  .panel { display: flex; flex-direction: column; gap: 12px; }
+  .panel-card { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 16px; }
+  .panel-card h3 { font-size: 13px; font-weight: 600; margin-bottom: 12px; }
+  
+  .depth-item { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid #21262d; font-size: 12px; }
+  .depth-item:last-child { border-bottom: none; }
+  .depth-badge { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; }
+  .d0 { background: #f85149; color: white; }
+  .d1 { background: #e3b341; color: #0d1117; }
+  .d2 { background: #58a6ff; color: white; }
+  .d3 { background: #388bfd33; color: #58a6ff; border: 1px solid #58a6ff44; }
+  .depth-name { font-family: monospace; color: #e6edf3; }
+  .depth-meta { color: #484f58; font-size: 11px; margin-left: auto; }
+  
+  .bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; }
+  .bar-label { width: 100px; color: #8b949e; text-align: right; }
+  .bar-bg { flex: 1; background: #21262d; border-radius: 4px; height: 8px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 4px; }
+  .bar-count { width: 30px; text-align: right; color: #8b949e; }
+  
+  /* Radial mock SVG */
+  .center-label { font-size: 11px; font-weight: 600; fill: #f85149; }
+</style>
+</head>
+<body>
+
+<header>
+  <a class="logo" href="index.html">semfora<span>explorer</span></a>
+  <div class="breadcrumb">/ Blast Radius</div>
+</header>
+
+<div class="main">
+  <nav>
+    <div class="section-label">Overview</div>
+    <a href="index.html">📊 Dashboard</a>
+    <div class="section-label">Analysis Tools</div>
+    <a href="call-graph-diff.html">🔀 Call Graph Diff</a>
+    <a href="blast-radius.html" class="active">💥 Blast Radius</a>
+    <a href="module-coupling.html">🧩 Module Coupling</a>
+    <a href="dead-code.html">🪦 Dead Code</a>
+    <a href="legacy-planner.html">🏗️ Migration Planner</a>
+  </nav>
+
+  <div class="content">
+    <h1>💥 Blast Radius</h1>
+    <p class="subtitle">Select any symbol to see everything that depends on it — directly and transitively. Know your risk before you change anything.</p>
+    
+    <div class="search-bar">
+      <input class="search-input" type="text" value="UserService.authenticate" placeholder="Search for a function, method, or class...">
+      <button>Analyze</button>
+      <div style="display:flex;gap:8px;font-size:13px;color:#8b949e;align-items:center;">
+        Mode:
+        <label style="cursor:pointer;"><input type="radio" name="mode" checked> Callers (upstream)</label>
+        <label style="cursor:pointer;"><input type="radio" name="mode"> Callees (downstream)</label>
+      </div>
+    </div>
+    
+    <div class="stats-row">
+      <div class="stat">
+        <div class="stat-val" style="color:#f85149">83</div>
+        <div class="stat-lbl">Total affected symbols</div>
+      </div>
+      <div class="stat">
+        <div class="stat-val" style="color:#e3b341">12</div>
+        <div class="stat-lbl">Affected files</div>
+      </div>
+      <div class="stat">
+        <div class="stat-val" style="color:#58a6ff">5</div>
+        <div class="stat-lbl">Affected modules</div>
+      </div>
+      <div class="stat">
+        <div class="stat-val" style="color:#3fb950">0.74</div>
+        <div class="stat-lbl">Centrality score</div>
+      </div>
+    </div>
+    
+    <div class="layout">
+      <div class="radial-area">
+        <svg width="560" height="480" viewBox="0 0 560 480">
+          <!-- Depth rings -->
+          <circle cx="280" cy="240" r="50" fill="none" stroke="#f8514922" stroke-width="1"/>
+          <circle cx="280" cy="240" r="120" fill="none" stroke="#e3b34122" stroke-width="1" stroke-dasharray="4,4"/>
+          <circle cx="280" cy="240" r="200" fill="none" stroke="#58a6ff22" stroke-width="1" stroke-dasharray="4,4"/>
+          
+          <!-- depth 1 edges -->
+          <line x1="280" y1="190" x2="280" y2="145" stroke="#e3b341" stroke-width="1.5" opacity="0.6"/>
+          <line x1="280" y1="290" x2="280" y2="335" stroke="#e3b341" stroke-width="1.5" opacity="0.6"/>
+          <line x1="230" y1="240" x2="175" y2="240" stroke="#e3b341" stroke-width="1.5" opacity="0.6"/>
+          <line x1="330" y1="240" x2="385" y2="240" stroke="#e3b341" stroke-width="1.5" opacity="0.6"/>
+          <line x1="245" y1="205" x2="208" y2="170" stroke="#e3b341" stroke-width="1.5" opacity="0.6"/>
+          <line x1="315" y1="205" x2="352" y2="170" stroke="#e3b341" stroke-width="1.5" opacity="0.6"/>
+          
+          <!-- depth 2 edges -->
+          <line x1="280" y1="120" x2="240" y2="82" stroke="#58a6ff" stroke-width="1" opacity="0.4"/>
+          <line x1="280" y1="120" x2="315" y2="80" stroke="#58a6ff" stroke-width="1" opacity="0.4"/>
+          <line x1="155" y1="240" x2="110" y2="210" stroke="#58a6ff" stroke-width="1" opacity="0.4"/>
+          <line x1="155" y1="240" x2="108" y2="265" stroke="#58a6ff" stroke-width="1" opacity="0.4"/>
+          <line x1="400" y1="240" x2="445" y2="215" stroke="#58a6ff" stroke-width="1" opacity="0.4"/>
+          <line x1="400" y1="240" x2="448" y2="262" stroke="#58a6ff" stroke-width="1" opacity="0.4"/>
+          <line x1="280" y1="355" x2="250" y2="395" stroke="#58a6ff" stroke-width="1" opacity="0.4"/>
+          <line x1="280" y1="355" x2="310" y2="395" stroke="#58a6ff" stroke-width="1" opacity="0.4"/>
+          
+          <!-- Center node -->
+          <circle cx="280" cy="240" r="42" fill="#3d1f1f" stroke="#f85149" stroke-width="2"/>
+          <text x="280" y="235" text-anchor="middle" fill="#f85149" font-size="11" font-weight="600" font-family="monospace">UserService</text>
+          <text x="280" y="250" text-anchor="middle" fill="#f85149" font-size="10" font-family="monospace">.authenticate</text>
+          
+          <!-- Depth 1 nodes -->
+          <circle cx="280" cy="120" r="30" fill="#3d2c1e" stroke="#e3b341" stroke-width="1.5"/>
+          <text x="280" y="125" text-anchor="middle" fill="#e3b341" font-size="10" font-family="monospace">LoginHandler</text>
+          
+          <circle cx="280" cy="355" r="30" fill="#3d2c1e" stroke="#e3b341" stroke-width="1.5"/>
+          <text x="280" y="360" text-anchor="middle" fill="#e3b341" font-size="10" font-family="monospace">AuthMiddlware</text>
+          
+          <circle cx="155" cy="240" r="30" fill="#3d2c1e" stroke="#e3b341" stroke-width="1.5"/>
+          <text x="155" y="245" text-anchor="middle" fill="#e3b341" font-size="10" font-family="monospace">SessionCtrl</text>
+          
+          <circle cx="400" cy="240" r="30" fill="#3d2c1e" stroke="#e3b341" stroke-width="1.5"/>
+          <text x="400" y="245" text-anchor="middle" fill="#e3b341" font-size="10" font-family="monospace">OAuthProvider</text>
+          
+          <circle cx="200" cy="165" r="26" fill="#3d2c1e" stroke="#e3b341" stroke-width="1.5"/>
+          <text x="200" y="170" text-anchor="middle" fill="#e3b341" font-size="10" font-family="monospace">MFAService</text>
+          
+          <circle cx="358" cy="162" r="26" fill="#3d2c1e" stroke="#e3b341" stroke-width="1.5"/>
+          <text x="358" y="167" text-anchor="middle" fill="#e3b341" font-size="10" font-family="monospace">TokenService</text>
+          
+          <!-- Depth 2 nodes (smaller) -->
+          <circle cx="232" cy="70" r="20" fill="#1f3a5f" stroke="#58a6ff" stroke-width="1"/>
+          <text x="232" y="74" text-anchor="middle" fill="#58a6ff" font-size="9" font-family="monospace">APIRouter</text>
+          
+          <circle cx="318" cy="68" r="20" fill="#1f3a5f" stroke="#58a6ff" stroke-width="1"/>
+          <text x="318" y="72" text-anchor="middle" fill="#58a6ff" font-size="9" font-family="monospace">WebSocket</text>
+          
+          <circle cx="98" cy="200" r="20" fill="#1f3a5f" stroke="#58a6ff" stroke-width="1"/>
+          <text x="98" y="204" text-anchor="middle" fill="#58a6ff" font-size="9" font-family="monospace">CookieJar</text>
+          
+          <circle cx="96" cy="270" r="20" fill="#1f3a5f" stroke="#58a6ff" stroke-width="1"/>
+          <text x="96" y="274" text-anchor="middle" fill="#58a6ff" font-size="9" font-family="monospace">RedisStore</text>
+          
+          <circle cx="458" cy="208" r="20" fill="#1f3a5f" stroke="#58a6ff" stroke-width="1"/>
+          <text x="458" y="212" text-anchor="middle" fill="#58a6ff" font-size="9" font-family="monospace">GitHub</text>
+          
+          <circle cx="460" cy="270" r="20" fill="#1f3a5f" stroke="#58a6ff" stroke-width="1"/>
+          <text x="460" y="274" text-anchor="middle" fill="#58a6ff" font-size="9" font-family="monospace">Google</text>
+          
+          <circle cx="248" cy="410" r="20" fill="#1f3a5f" stroke="#58a6ff" stroke-width="1"/>
+          <text x="248" y="414" text-anchor="middle" fill="#58a6ff" font-size="9" font-family="monospace">RateLimit</text>
+          
+          <circle cx="314" cy="412" r="20" fill="#1f3a5f" stroke="#58a6ff" stroke-width="1"/>
+          <text x="314" y="416" text-anchor="middle" fill="#58a6ff" font-size="9" font-family="monospace">Logger</text>
+          
+          <!-- Depth legend -->
+          <circle cx="30" cy="30" r="8" fill="#f85149"/>
+          <text x="44" y="34" fill="#8b949e" font-size="11">Target</text>
+          <circle cx="30" cy="54" r="8" fill="#e3b341"/>
+          <text x="44" y="58" fill="#8b949e" font-size="11">Depth 1 (direct callers)</text>
+          <circle cx="30" cy="78" r="8" fill="#58a6ff"/>
+          <text x="44" y="82" fill="#8b949e" font-size="11">Depth 2</text>
+        </svg>
+      </div>
+      
+      <div class="panel">
+        <div class="panel-card">
+          <h3>By Depth</h3>
+          <div class="depth-item">
+            <div class="depth-badge d0">0</div>
+            <div class="depth-name">UserService.authenticate</div>
+            <div class="depth-meta">target</div>
+          </div>
+          <div class="depth-item">
+            <div class="depth-badge d1">1</div>
+            <div><div class="depth-name">LoginHandler</div></div>
+            <div class="depth-meta">direct</div>
+          </div>
+          <div class="depth-item">
+            <div class="depth-badge d1">1</div>
+            <div><div class="depth-name">AuthMiddleware</div></div>
+            <div class="depth-meta">direct</div>
+          </div>
+          <div class="depth-item">
+            <div class="depth-badge d1">1</div>
+            <div><div class="depth-name">SessionController</div></div>
+            <div class="depth-meta">direct</div>
+          </div>
+          <div class="depth-item">
+            <div class="depth-badge d1">1</div>
+            <div><div class="depth-name">OAuthProvider</div></div>
+            <div class="depth-meta">direct</div>
+          </div>
+          <div class="depth-item">
+            <div class="depth-badge d2">2</div>
+            <div><div class="depth-name">APIRouter</div></div>
+            <div class="depth-meta">+2 more</div>
+          </div>
+          <div class="depth-item">
+            <div class="depth-badge d3">3+</div>
+            <div><div class="depth-name">...67 more symbols</div></div>
+            <div class="depth-meta">transitive</div>
+          </div>
+        </div>
+        
+        <div class="panel-card">
+          <h3>Affected by Module</h3>
+          <div class="bar-row">
+            <div class="bar-label">auth/</div>
+            <div class="bar-bg"><div class="bar-fill" style="width:80%;background:#f85149;"></div></div>
+            <div class="bar-count">28</div>
+          </div>
+          <div class="bar-row">
+            <div class="bar-label">api/</div>
+            <div class="bar-bg"><div class="bar-fill" style="width:50%;background:#e3b341;"></div></div>
+            <div class="bar-count">17</div>
+          </div>
+          <div class="bar-row">
+            <div class="bar-label">users/</div>
+            <div class="bar-bg"><div class="bar-fill" style="width:30%;background:#58a6ff;"></div></div>
+            <div class="bar-count">11</div>
+          </div>
+          <div class="bar-row">
+            <div class="bar-label">core/</div>
+            <div class="bar-bg"><div class="bar-fill" style="width:22%;background:#3fb950;"></div></div>
+            <div class="bar-count">8</div>
+          </div>
+          <div class="bar-row">
+            <div class="bar-label">other</div>
+            <div class="bar-bg"><div class="bar-fill" style="width:55%;background:#484f58;"></div></div>
+            <div class="bar-count">19</div>
+          </div>
+        </div>
+        
+        <div class="panel-card" style="background:#3d1f1f;border-color:#f85149;">
+          <h3 style="color:#f85149;">⚠ Risk Assessment</h3>
+          <p style="font-size:12px;line-height:1.6;color:#e6edf3;">This function has <strong>high centrality (0.74)</strong>. Changes here will affect 83 downstream symbols across 5 modules. Ensure full test coverage of callers before modifying.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
