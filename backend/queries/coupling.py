@@ -1,43 +1,18 @@
-"""
-Module coupling queries — DB I/O only.
-"""
+"""Module coupling queries."""
 from __future__ import annotations
-
 import sqlite3
-
 from db import row_to_dict
+from queries.core import fetch_module_edges, fetch_module_symbol_stats  # re-export for callers
 
-_EXT_FILTER = "caller_module != '__external__' AND callee_module != '__external__'"
-
-
-def fetch_module_edges(conn: sqlite3.Connection) -> list[dict]:
-    """All cross-module edges, external excluded."""
-    rows = conn.execute(
-        f"SELECT caller_module, callee_module, edge_count FROM module_edges WHERE {_EXT_FILTER}"
-    ).fetchall()
-    return [row_to_dict(r) for r in rows]
-
-
-def fetch_module_symbol_stats(conn: sqlite3.Connection) -> list[dict]:
-    """Per-module symbol count and complexity aggregates, external excluded."""
-    rows = conn.execute(
-        """
-        SELECT module,
-               COUNT(DISTINCT hash)            AS symbol_count,
-               COALESCE(SUM(complexity), 0)    AS total_complexity,
-               COALESCE(AVG(complexity), 0)    AS avg_complexity
-        FROM nodes
-        WHERE module IS NOT NULL AND hash NOT LIKE 'ext:%'
-        GROUP BY module
-        """
-    ).fetchall()
-    return [row_to_dict(r) for r in rows]
+# Re-export so existing imports of fetch_module_edges from queries.coupling still work.
+__all__ = ["fetch_module_edges", "fetch_module_symbol_stats",
+           "fetch_high_centrality_nodes", "fetch_module_edge_detail"]
 
 
 def fetch_high_centrality_nodes(conn: sqlite3.Connection, threshold: int = 3) -> list[dict]:
     """
-    Nodes called from many distinct external modules — load-bearing candidates.
-    Returns list with calling_module_count attached.
+    Nodes called from at least `threshold` distinct external modules.
+    The JOIN logic here isn't reducible to a generic primitive — keep it specific.
     """
     rows = conn.execute(
         """
@@ -67,7 +42,7 @@ def fetch_module_edge_detail(
     to_module: str,
     limit: int = 50,
 ) -> list[dict]:
-    """Function-level calls that make up the edge between two modules."""
+    """Function-level calls between two specific modules."""
     rows = conn.execute(
         """
         SELECT cn.name  AS caller_name,  cn.hash AS caller_hash,  cn.file_path AS caller_file,

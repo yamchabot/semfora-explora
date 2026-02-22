@@ -1,56 +1,28 @@
 """
-Building view queries — DB I/O only.
+Building view queries.
 
-Sequential query pattern: node hashes from the first query
-drive the edge filter in the second query.
+Sequential pattern: node hashes from step 1 drive the edge filter in step 2.
+Both steps live here because the two-query sequence is an implementation detail
+of this specific data fetch — the analytics layer never sees the connection.
 """
 from __future__ import annotations
-
 import sqlite3
+from queries.core import fetch_nodes, fetch_edges_within
 
-from db import row_to_dict
+_BUILDING_FIELDS = ["hash", "name", "module", "file_path",
+                    "caller_count", "callee_count", "complexity", "risk"]
 
 
 def fetch_building_data(conn: sqlite3.Connection, max_nodes: int = 120) -> dict:
     """
-    Fetch nodes and the edges between them for the building view.
+    Top max_nodes by caller_count, plus the edges between them.
 
-    Two-step sequence:
-      1. Fetch top max_nodes by caller_count
-      2. Fetch edges restricted to those node hashes
-    Returns {"nodes": [...], "edges": [...]}
+    Step 1: nodes ordered by caller_count DESC
+    Step 2: edges restricted to those node hashes (depends on step 1)
     """
-    cur = conn.cursor()
-
-    cur.execute(
-        """
-        SELECT hash, name, module, file_path,
-               caller_count, callee_count, complexity, risk
-        FROM nodes
-        WHERE hash NOT LIKE 'ext:%'
-        ORDER BY caller_count DESC
-        LIMIT ?
-        """,
-        (max_nodes,),
-    )
-    nodes = [row_to_dict(r) for r in cur.fetchall()]
-
-    if not nodes:
-        return {"nodes": [], "edges": []}
-
-    # Step 2 depends on step 1 — node hashes determine which edges to fetch
-    hashes = [n["hash"] for n in nodes]
-    ph = ",".join("?" * len(hashes))
-    cur.execute(
-        f"""
-        SELECT caller_hash, callee_hash FROM edges
-        WHERE caller_hash IN ({ph}) AND callee_hash IN ({ph})
-          AND callee_hash NOT LIKE 'ext:%'
-        """,
-        hashes * 2,
-    )
-    edges = [{"from": r["caller_hash"], "to": r["callee_hash"]} for r in cur.fetchall()]
-
+    nodes = fetch_nodes(conn, fields=_BUILDING_FIELDS,
+                        order_by="caller_count DESC", limit=max_nodes)
+    edges = fetch_edges_within(conn, {n["hash"] for n in nodes})
     return {"nodes": nodes, "edges": edges}
 
 
