@@ -1,9 +1,9 @@
-import { useContext, useState, useRef } from "react";
+import { useContext, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { RepoContext } from "../App";
 import { api } from "../api";
 
-const LAYER_COLORS = [
+export const LAYER_COLORS = [
   { bg: "#2d1f4e", border: "#a371f7", text: "#a371f7", label: "Foundation" },
   { bg: "#1f3a5f", border: "#58a6ff", text: "#58a6ff", label: "Platform" },
   { bg: "#1a3628", border: "#3fb950", text: "#3fb950", label: "Services" },
@@ -12,24 +12,135 @@ const LAYER_COLORS = [
 ];
 
 const CANVAS_W = 900;
-const LAYER_H = 100;
-const PADDING = 60;
-const NODE_MIN_W = 40;
-const NODE_MAX_W = 160;
-const NODE_H = 36;
-const COLUMN_W = 18;  // width of a load-bearing pillar
+const LAYER_H  = 110;   // height of each floor
+const GAP      = 16;    // gap between floors
+const PADDING  = 60;
+const NODE_MIN_W = 36;
+const NODE_MAX_W = 150;
+const NODE_H   = 34;
 
-function Building({ nodes, edges, layerLabels, onNodeClick, selected }) {
+// Column geometry constants
+const SHAFT_W  = 22;
+const CAP_W    = SHAFT_W + 18;  // flange extends 9px each side
+const CAP_H    = 13;
+const BASE_H   = 9;
+const COL_PAD  = 5;             // top/bottom padding inside the layer band
+
+function layerTopY(l) {
+  return PADDING + (4 - l) * (LAYER_H + GAP);
+}
+
+// ── Column (load-bearing node) ───────────────────────────────────────────────
+function Column({ cx, layerY, node, isSelected, onClick, diffStatus }) {
+  const shaftH = LAYER_H - CAP_H - BASE_H - COL_PAD * 2;
+  const capY   = layerY + COL_PAD;
+  const shaftY = capY + CAP_H;
+  const baseY  = shaftY + shaftH;
+  const midY   = shaftY + shaftH / 2;
+
+  const isExplicit = node.declaration === "explicit";
+
+  // Color overrides for diff mode
+  let capColor   = "#a371f7";
+  let shaftFill  = isExplicit ? "#2d1f4e" : "#1c1c2e";
+  let shaftStroke = isSelected ? "#fff" : "#a371f7";
+  let baseColor  = "#a371f7";
+  let opacity    = 1;
+  if (diffStatus === "added")   { capColor = "#3fb950"; shaftFill = "#1a3628"; shaftStroke = "#3fb950"; baseColor = "#3fb950"; }
+  if (diffStatus === "removed") { capColor = "#f85149"; shaftFill = "#3d1f1f"; shaftStroke = "#f85149"; baseColor = "#f85149"; opacity = 0.7; }
+  if (diffStatus === "common")  { opacity = 0.55; }
+
+  const maxChars = Math.floor(shaftH / 7);
+  const label = node.name.length > maxChars ? node.name.slice(0, maxChars - 1) + "…" : node.name;
+
+  return (
+    <g onClick={onClick} style={{ cursor: "pointer" }} opacity={opacity}>
+      {/* Glow for selected */}
+      {isSelected && (
+        <rect x={cx - CAP_W / 2 - 3} y={capY - 2}
+          width={CAP_W + 6} height={LAYER_H - COL_PAD * 2 + 4}
+          fill="none" stroke="white" strokeWidth={1.5} rx={3} strokeDasharray="3 2" />
+      )}
+      {/* Capital (top flange) — the wide part that "supports" the floor above */}
+      <rect x={cx - CAP_W / 2} y={capY}
+        width={CAP_W} height={CAP_H}
+        fill={capColor} fillOpacity={isExplicit ? 0.9 : 0.65} rx={2} />
+      {/* Shaft */}
+      <rect x={cx - SHAFT_W / 2} y={shaftY}
+        width={SHAFT_W} height={shaftH}
+        fill={shaftFill} stroke={shaftStroke} strokeWidth={isSelected ? 2.5 : 1.5} />
+      {/* Base (bottom flange) */}
+      <rect x={cx - CAP_W / 2 + 4} y={baseY}
+        width={CAP_W - 8} height={BASE_H}
+        fill={baseColor} fillOpacity={0.5} rx={1} />
+      {/* Name — rotated inside shaft */}
+      <text x={cx} y={midY}
+        fill={capColor} fillOpacity={Math.min(1, opacity + 0.2)}
+        fontSize={8} fontWeight={600}
+        textAnchor="middle" dominantBaseline="middle"
+        transform={`rotate(-90,${cx},${midY})`}
+        style={{ pointerEvents: "none", userSelect: "none" }}>
+        {label}
+      </text>
+    </g>
+  );
+}
+
+// ── Block (regular node) ─────────────────────────────────────────────────────
+function Block({ pos, node, isSelected, onClick, diffStatus }) {
+  const isUnexpected = !node.is_load_bearing && (node.calling_module_count || 0) >= 3;
+  const l = node.layer ?? 4;
+  const color = LAYER_COLORS[l];
+
+  let bgColor     = isUnexpected ? "#3d1f1f" : color.bg;
+  let strokeColor = isUnexpected ? "#f85149" : (isSelected ? "#fff" : color.border);
+  let textColor   = isUnexpected ? "#f85149" : color.text;
+  let opacity     = 1;
+
+  if (diffStatus === "added")   { bgColor = "#1a3628"; strokeColor = "#3fb950"; textColor = "#3fb950"; }
+  if (diffStatus === "removed") { bgColor = "#3d1f1f"; strokeColor = "#f85149"; textColor = "#f85149"; opacity = 0.65; }
+  if (diffStatus === "common")  { opacity = 0.5; }
+
+  const callerBar = node.caller_count > 0
+    ? Math.min(pos.w - 6, (node.caller_count / 20) * (pos.w - 6))
+    : 0;
+
+  return (
+    <g onClick={onClick} style={{ cursor: "pointer" }} opacity={opacity}>
+      <rect x={pos.x} y={pos.y} width={pos.w} height={pos.h}
+        rx={3} fill={bgColor} fillOpacity={0.92}
+        stroke={strokeColor} strokeWidth={isSelected ? 2 : 1} />
+      {callerBar > 0 && (
+        <rect x={pos.x + 3} y={pos.y + pos.h - 4}
+          width={callerBar} height={3} rx={1}
+          fill={textColor} fillOpacity={0.5} />
+      )}
+      {diffStatus === "removed" && (
+        <line x1={pos.x + 4} y1={pos.y + pos.h / 2}
+          x2={pos.x + pos.w - 4} y2={pos.y + pos.h / 2}
+          stroke={strokeColor} strokeWidth={1.5} strokeOpacity={0.7} />
+      )}
+      <text x={pos.x + pos.w / 2} y={pos.y + pos.h / 2}
+        fill={textColor} fontSize={9} fontWeight={500}
+        textAnchor="middle" dominantBaseline="middle"
+        style={{ pointerEvents: "none", userSelect: "none" }}>
+        {node.name.length > Math.floor(pos.w / 6)
+          ? node.name.slice(0, Math.floor(pos.w / 6)) + "…"
+          : node.name}
+      </text>
+    </g>
+  );
+}
+
+// ── BuildingCanvas — shared by both BuildingPage and DiffBuildingView ────────
+export function BuildingCanvas({ nodes, edges, onNodeClick, selected, getDiffStatus }) {
   const layers = [0, 1, 2, 3, 4];
-  // Group nodes by layer
   const byLayer = {};
   for (const n of nodes) {
     const l = n.layer ?? 4;
     if (!byLayer[l]) byLayer[l] = [];
     byLayer[l].push(n);
   }
-
-  // Sort each layer: load-bearing first, then by caller_count desc
   for (const l of layers) {
     if (byLayer[l]) {
       byLayer[l].sort((a, b) => {
@@ -39,83 +150,68 @@ function Building({ nodes, edges, layerLabels, onNodeClick, selected }) {
     }
   }
 
-  // Assign x positions within each layer
-  const nodePos = {};
+  // Assign x positions
+  const nodePos = {};  // hash -> {x, y, w, h, cx, cy, layerTopY}
   for (const l of layers) {
     const lnodes = byLayer[l] || [];
     const totalW = CANVAS_W - PADDING * 2;
     const spacing = lnodes.length > 0 ? totalW / lnodes.length : totalW;
     const nodeW = Math.min(NODE_MAX_W, Math.max(NODE_MIN_W, spacing - 6));
+    const ltY = layerTopY(l);
     lnodes.forEach((n, i) => {
-      const x = PADDING + i * spacing + spacing / 2 - nodeW / 2;
-      const y = PADDING + (4 - l) * (LAYER_H + 20) + (LAYER_H - NODE_H) / 2;
-      nodePos[n.hash] = { x, y, w: nodeW, h: NODE_H, cx: x + nodeW / 2, cy: y + NODE_H / 2 };
+      const cx = PADDING + i * spacing + spacing / 2;
+      const blockY = ltY + (LAYER_H - NODE_H) / 2;
+      nodePos[n.hash] = {
+        x: cx - nodeW / 2,
+        y: blockY,
+        w: nodeW,
+        h: NODE_H,
+        cx,
+        cy: blockY + NODE_H / 2,
+        ltY,
+      };
     });
   }
 
-  // Build edge index for quick lookup
-  const edgeSet = new Set(edges.map(e => `${e.from}:${e.to}`));
-
-  const totalH = PADDING * 2 + 5 * (LAYER_H + 20);
+  const totalH = PADDING * 2 + 5 * (LAYER_H + GAP);
 
   return (
-    <svg
-      width="100%"
-      viewBox={`0 0 ${CANVAS_W} ${totalH}`}
-      style={{ fontFamily: "-apple-system, sans-serif", display: "block" }}
-    >
-      {/* Background */}
+    <svg width="100%" viewBox={`0 0 ${CANVAS_W} ${totalH}`}
+      style={{ display: "block", fontFamily: "-apple-system, sans-serif" }}>
       <rect width={CANVAS_W} height={totalH} fill="#0d1117" />
 
-      {/* Floor lines */}
+      {/* Floor slabs */}
       {layers.map((l) => {
-        const y = PADDING + (4 - l) * (LAYER_H + 20);
-        const color = LAYER_COLORS[l];
+        const y = layerTopY(l);
+        const c = LAYER_COLORS[l];
         return (
           <g key={l}>
-            {/* Floor slab */}
-            <rect
-              x={PADDING - 10} y={y - 2}
-              width={CANVAS_W - PADDING * 2 + 20} height={LAYER_H + 4}
-              rx={4} fill={color.bg} fillOpacity={0.25}
-              stroke={color.border} strokeWidth={1} strokeOpacity={0.3}
-            />
-            {/* Layer label on left */}
-            <text
-              x={PADDING - 14} y={y + LAYER_H / 2 + 5}
-              fill={color.text} fontSize={11} fontWeight={600}
-              textAnchor="end" opacity={0.8}
-            >
-              {LAYER_COLORS[l].label}
+            <rect x={PADDING - 10} y={y} width={CANVAS_W - PADDING * 2 + 20} height={LAYER_H}
+              rx={4} fill={c.bg} fillOpacity={0.2}
+              stroke={c.border} strokeWidth={1} strokeOpacity={0.25} />
+            <text x={PADDING - 14} y={y + LAYER_H / 2 + 4}
+              fill={c.text} fontSize={11} fontWeight={600} textAnchor="end" opacity={0.75}>
+              {c.label}
             </text>
-            {/* Floor number */}
-            <text
-              x={CANVAS_W - PADDING + 14} y={y + LAYER_H / 2 + 5}
-              fill={color.text} fontSize={11}
-              textAnchor="start" opacity={0.6}
-            >
+            <text x={CANVAS_W - PADDING + 12} y={y + LAYER_H / 2 + 4}
+              fill={c.text} fontSize={10} textAnchor="start" opacity={0.5}>
               L{l}
             </text>
           </g>
         );
       })}
 
-      {/* Edges — drawn under nodes */}
+      {/* Cross-layer edges */}
       {edges.slice(0, 300).map((e, i) => {
         const a = nodePos[e.from];
         const b = nodePos[e.to];
         if (!a || !b) return null;
-        // Only draw cross-layer edges for clarity
-        const aLayer = nodes.find(n => n.hash === e.from)?.layer ?? 0;
-        const bLayer = nodes.find(n => n.hash === e.to)?.layer ?? 0;
-        if (Math.abs(aLayer - bLayer) === 0) return null;
+        const na = nodes.find(n => n.hash === e.from);
+        const nb = nodes.find(n => n.hash === e.to);
+        if ((na?.layer ?? 0) === (nb?.layer ?? 0)) return null;
         return (
-          <line
-            key={i}
-            x1={a.cx} y1={a.y + a.h}
-            x2={b.cx} y2={b.y}
-            stroke="#30363d" strokeWidth={1} opacity={0.4}
-          />
+          <line key={i} x1={a.cx} y1={a.ltY + LAYER_H} x2={b.cx} y2={b.ltY}
+            stroke="#30363d" strokeWidth={1} opacity={0.35} />
         );
       })}
 
@@ -123,106 +219,44 @@ function Building({ nodes, edges, layerLabels, onNodeClick, selected }) {
       {nodes.map((n) => {
         const pos = nodePos[n.hash];
         if (!pos) return null;
-        const isLB = n.is_load_bearing;
-        const isUnexpected = !isLB && n.calling_module_count >= 3;
+        const diffStatus = getDiffStatus ? getDiffStatus(n) : null;
         const isSelected = selected === n.hash;
-        const l = n.layer ?? 4;
-        const color = LAYER_COLORS[l];
 
-        if (isLB) {
-          // Draw as architectural column/pillar
-          const cx = pos.cx;
-          const y = pos.y;
-          const colH = LAYER_H - 4;
+        if (n.is_load_bearing) {
           return (
-            <g key={n.hash} onClick={() => onNodeClick(n)} style={{ cursor: "pointer" }}>
-              {/* Column shaft */}
-              <rect
-                x={cx - COLUMN_W / 2} y={y}
-                width={COLUMN_W} height={colH - 10}
-                fill={n.declaration === "explicit" ? "#2d1f4e" : "#1c1c2e"}
-                stroke={isSelected ? "#fff" : "#a371f7"}
-                strokeWidth={isSelected ? 2.5 : 1.5}
-                rx={2}
-              />
-              {/* Column cap (capital) */}
-              <rect
-                x={cx - COLUMN_W / 2 - 6} y={y - 8}
-                width={COLUMN_W + 12} height={8}
-                fill="#a371f7" fillOpacity={0.8} rx={1}
-              />
-              {/* Column base */}
-              <rect
-                x={cx - COLUMN_W / 2 - 4} y={y + colH - 10}
-                width={COLUMN_W + 8} height={6}
-                fill="#a371f7" fillOpacity={0.5} rx={1}
-              />
-              {/* Name — rotated */}
-              <text
-                x={cx} y={y + (colH - 10) / 2}
-                fill="#a371f7" fontSize={9} fontWeight={600}
-                textAnchor="middle" dominantBaseline="middle"
-                transform={`rotate(-90, ${cx}, ${y + (colH - 10) / 2})`}
-                style={{ pointerEvents: "none" }}
-              >
-                {n.name.length > 18 ? n.name.slice(0, 16) + "…" : n.name}
-              </text>
-            </g>
+            <Column key={n.hash}
+              cx={pos.cx} layerY={pos.ltY}
+              node={n} isSelected={isSelected}
+              onClick={() => onNodeClick(n)}
+              diffStatus={diffStatus} />
           );
         }
-
-        // Regular node — draw as floor block
-        const bgColor = isUnexpected ? "#3d1f1f" : color.bg;
-        const strokeColor = isUnexpected ? "#f85149" : (isSelected ? "#fff" : color.border);
-        const textColor = isUnexpected ? "#f85149" : color.text;
-
         return (
-          <g key={n.hash} onClick={() => onNodeClick(n)} style={{ cursor: "pointer" }}>
-            <rect
-              x={pos.x} y={pos.y}
-              width={pos.w} height={pos.h}
-              rx={4}
-              fill={bgColor} fillOpacity={0.9}
-              stroke={strokeColor}
-              strokeWidth={isSelected ? 2 : 1}
-            />
-            {/* Caller-count indicator bar at bottom of block */}
-            {n.caller_count > 0 && (
-              <rect
-                x={pos.x + 2} y={pos.y + pos.h - 4}
-                width={Math.min(pos.w - 4, (n.caller_count / 20) * (pos.w - 4))}
-                height={3} rx={1}
-                fill={textColor} fillOpacity={0.6}
-              />
-            )}
-            <text
-              x={pos.cx} y={pos.cy}
-              fill={textColor} fontSize={9} fontWeight={500}
-              textAnchor="middle" dominantBaseline="middle"
-              style={{ pointerEvents: "none" }}
-            >
-              {n.name.length > Math.floor(pos.w / 6) ? n.name.slice(0, Math.floor(pos.w / 6)) + "…" : n.name}
-            </text>
-          </g>
+          <Block key={n.hash}
+            pos={pos} node={n} isSelected={isSelected}
+            onClick={() => onNodeClick(n)}
+            diffStatus={diffStatus} />
         );
       })}
 
       {/* Legend */}
-      <g transform={`translate(${PADDING}, ${totalH - 28})`}>
-        <rect x={0} y={0} width={14} height={14} rx={2}
-          fill="#2d1f4e" stroke="#a371f7" strokeWidth={1.5} />
-        <text x={18} y={11} fill="#a371f7" fontSize={10}>Load-bearing (declared)</text>
-        <rect x={140} y={0} width={14} height={14} rx={2}
-          fill="#1c1c2e" stroke="#a371f777" strokeWidth={1.5} />
-        <text x={158} y={11} fill="#8b949e" fontSize={10}>Load-bearing (auto)</text>
-        <rect x={290} y={0} width={14} height={14} rx={2}
-          fill="#3d1f1f" stroke="#f85149" strokeWidth={1} />
-        <text x={308} y={11} fill="#f85149" fontSize={10}>Unexpected coupling</text>
+      <g transform={`translate(${PADDING},${totalH - 26})`}>
+        {[
+          { x: 0,   fill: "#2d1f4e", stroke: "#a371f7", label: "Load-bearing (declared)" },
+          { x: 155, fill: "#1c1c2e", stroke: "#a371f777", label: "Load-bearing (auto)" },
+          { x: 290, fill: "#3d1f1f", stroke: "#f85149", label: "Unexpected coupling" },
+        ].map(({ x, fill, stroke, label }) => (
+          <g key={label} transform={`translate(${x},0)`}>
+            <rect width={13} height={13} rx={2} fill={fill} stroke={stroke} strokeWidth={1.5} />
+            <text x={17} y={10} fill="#8b949e" fontSize={10}>{label}</text>
+          </g>
+        ))}
       </g>
     </svg>
   );
 }
 
+// ── Main BuildingPage ────────────────────────────────────────────────────────
 export default function BuildingPage() {
   const { repoId } = useContext(RepoContext);
   const [selected, setSelected] = useState(null);
@@ -251,9 +285,7 @@ export default function BuildingPage() {
   const edges = data?.edges || [];
   const lbCount = nodes.filter(n => n.is_load_bearing).length;
   const unexpectedCount = nodes.filter(n => !n.is_load_bearing && n.calling_module_count >= 3).length;
-
-  // Layer counts
-  const layerCounts = [0,1,2,3,4].map(l => nodes.filter(n => n.layer === l).length);
+  const layerCounts = [0, 1, 2, 3, 4].map(l => nodes.filter(n => n.layer === l).length);
 
   return (
     <div>
@@ -287,18 +319,14 @@ export default function BuildingPage() {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 260px", gap: 16 }}>
-        {/* Building canvas */}
         <div className="card" style={{ overflow: "hidden", padding: 0 }}>
-          <Building
-            nodes={nodes}
-            edges={edges}
-            layerLabels={data?.layer_labels || []}
+          <BuildingCanvas
+            nodes={nodes} edges={edges}
             onNodeClick={handleNodeClick}
             selected={selected}
           />
         </div>
 
-        {/* Detail panel */}
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {selectedNode ? (
             <div className="card" style={{ padding: 14 }}>
@@ -312,24 +340,24 @@ export default function BuildingPage() {
                 <div><strong>Module:</strong> {selectedNode.module}</div>
                 <div><strong>Layer:</strong> {LAYER_COLORS[selectedNode.layer ?? 4]?.label}</div>
                 <div><strong>Callers:</strong> {selectedNode.caller_count}</div>
-                <div><strong>Called by modules:</strong> <span style={{ color: selectedNode.calling_module_count >= 5 ? "var(--red)" : "var(--text)" }}>{selectedNode.calling_module_count}</span></div>
+                <div><strong>Called by modules:</strong>{" "}
+                  <span style={{ color: selectedNode.calling_module_count >= 5 ? "var(--red)" : "var(--text)" }}>
+                    {selectedNode.calling_module_count}
+                  </span>
+                </div>
                 <div><strong>Declaration:</strong> {selectedNode.declaration}</div>
               </div>
-              {nodeDetail && (
-                <>
-                  {nodeDetail.callers.length > 0 && (
-                    <div style={{ marginTop: 10 }}>
-                      <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text2)", marginBottom: 4 }}>Callers</div>
-                      <div style={{ maxHeight: 120, overflowY: "auto" }}>
-                        {nodeDetail.callers.slice(0, 8).map(c => (
-                          <div key={c.hash} style={{ fontSize: 11, padding: "3px 0", borderBottom: "1px solid var(--border)", fontFamily: "monospace", color: "var(--text2)" }}>
-                            {c.name}
-                          </div>
-                        ))}
+              {nodeDetail?.callers?.length > 0 && (
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text2)", marginBottom: 4 }}>Callers</div>
+                  <div style={{ maxHeight: 120, overflowY: "auto" }}>
+                    {nodeDetail.callers.slice(0, 8).map(c => (
+                      <div key={c.hash} style={{ fontSize: 11, padding: "3px 0", borderBottom: "1px solid var(--border)", fontFamily: "monospace", color: "var(--text2)" }}>
+                        {c.name}
                       </div>
-                    </div>
-                  )}
-                </>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
           ) : (
@@ -338,7 +366,6 @@ export default function BuildingPage() {
             </div>
           )}
 
-          {/* Layer guide */}
           <div className="card" style={{ padding: 14 }}>
             <div style={{ fontWeight: 600, marginBottom: 10, fontSize: 13 }}>Layer Guide</div>
             {LAYER_COLORS.map((c, i) => (
@@ -354,8 +381,8 @@ export default function BuildingPage() {
 
           <div className="card" style={{ padding: 14, fontSize: 12, color: "var(--text2)", lineHeight: 1.7 }}>
             <div style={{ fontWeight: 600, color: "var(--text)", marginBottom: 6 }}>Reading this view</div>
-            <div><span style={{ color: "var(--purple)" }}>Columns</span> = load-bearing nodes. The wider the capital, the more they're called.</div>
-            <div style={{ marginTop: 4 }}><span style={{ color: "var(--red)" }}>Red blocks</span> = unexpected coupling — code that isn't infrastructure but is being treated like it.</div>
+            <div><span style={{ color: "var(--purple)" }}>Columns</span> = load-bearing nodes — wide cap rests on the floor above it.</div>
+            <div style={{ marginTop: 4 }}><span style={{ color: "var(--red)" }}>Red blocks</span> = unexpected coupling.</div>
             <div style={{ marginTop: 4 }}>Bar at bottom of each block = relative caller count.</div>
           </div>
         </div>

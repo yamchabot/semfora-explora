@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import DiffGraph from "../components/DiffGraph";
+import { BuildingCanvas, LAYER_COLORS } from "./Building";
 
 function groupRepos(repos) {
   const groups = {};
@@ -27,6 +28,7 @@ export default function Diff() {
   const [submitted, setSubmitted] = useState(false);
   const [graphMode, setGraphMode] = useState("neighborhood"); // "neighborhood" | "changed-only"
   const [graphContext, setGraphContext] = useState(4);
+  const [vizTab, setVizTab] = useState("graph"); // "graph" | "building"
 
   // Set sensible defaults once repos load
   useMemo(() => {
@@ -54,6 +56,14 @@ export default function Diff() {
     queryFn: () => api.diffGraph(repoA, repoB, graphContext),
     enabled: submitted && !!repoA && !!repoB,
   });
+
+  const { data: buildingData, isLoading: buildingLoading } = useQuery({
+    queryKey: ["diff-building", repoA, repoB],
+    queryFn: () => api.diffBuilding(repoA, repoB),
+    enabled: submitted && !!repoA && !!repoB && vizTab === "building",
+  });
+
+  const [selectedBuildingNode, setSelectedBuildingNode] = useState(null);
 
   function handleCompare() {
     setSubmitted(true);
@@ -196,60 +206,146 @@ export default function Diff() {
             </div>
           </div>
 
-          {/* ── Graph Diff View ─────────────────────────────────────── */}
+          {/* ── Visual Diff Views ───────────────────────────────────── */}
           <div className="card" style={{ padding: 16, marginBottom: 20 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
-              <div style={{ fontWeight: 600, fontSize: 14 }}>📊 Graph View</div>
-              {graphData?.github_compare_url && (
-                <a
-                  href={graphData.github_compare_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ fontSize: 12, color: "var(--blue)", display: "flex", alignItems: "center", gap: 4 }}
-                >
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
-                  </svg>
-                  View on GitHub
-                </a>
+            {/* Tab bar */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+              <button className={`btn btn-sm ${vizTab === "graph" ? "" : "btn-ghost"}`}
+                onClick={() => setVizTab("graph")}>
+                📊 Graph View
+              </button>
+              <button className={`btn btn-sm ${vizTab === "building" ? "" : "btn-ghost"}`}
+                onClick={() => setVizTab("building")}>
+                🏗️ Building View
+              </button>
+
+              {vizTab === "graph" && (
+                <>
+                  {graphData?.github_compare_url && (
+                    <a href={graphData.github_compare_url} target="_blank" rel="noopener noreferrer"
+                      style={{ fontSize: 12, color: "var(--blue)", display: "flex", alignItems: "center", gap: 4, marginLeft: 4 }}>
+                      <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+                      </svg>
+                      View on GitHub
+                    </a>
+                  )}
+                  <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
+                    <span style={{ fontSize: 11, color: "var(--text2)" }}>Context:</span>
+                    {[2, 4, 6].map(n => (
+                      <button key={n} className={`btn btn-sm ${graphContext === n ? "" : "btn-ghost"}`}
+                        style={{ minWidth: 30, fontSize: 11 }}
+                        onClick={() => setGraphContext(n)}>{n}</button>
+                    ))}
+                    <span style={{ width: 1, height: 16, background: "var(--border)", margin: "0 2px" }} />
+                    <button className={`btn btn-sm ${graphMode === "neighborhood" ? "" : "btn-ghost"}`}
+                      style={{ fontSize: 11 }}
+                      onClick={() => setGraphMode("neighborhood")}>Neighborhood</button>
+                    <button className={`btn btn-sm ${graphMode === "changed-only" ? "" : "btn-ghost"}`}
+                      style={{ fontSize: 11 }}
+                      onClick={() => setGraphMode("changed-only")}>Changed only</button>
+                  </div>
+                </>
               )}
-              <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                <span style={{ fontSize: 12, color: "var(--text2)" }}>Context hops:</span>
-                {[2, 4, 6].map(n => (
-                  <button key={n} className={`btn btn-sm ${graphContext === n ? "" : "btn-ghost"}`}
-                    style={{ minWidth: 32, fontSize: 11 }}
-                    onClick={() => setGraphContext(n)}>
-                    {n}
-                  </button>
-                ))}
-                <span style={{ width: 1, height: 18, background: "var(--border)", margin: "0 4px" }} />
-                <button className={`btn btn-sm ${graphMode === "neighborhood" ? "" : "btn-ghost"}`}
-                  style={{ fontSize: 11 }}
-                  onClick={() => setGraphMode("neighborhood")}>
-                  Neighborhood
-                </button>
-                <button className={`btn btn-sm ${graphMode === "changed-only" ? "" : "btn-ghost"}`}
-                  style={{ fontSize: 11 }}
-                  onClick={() => setGraphMode("changed-only")}>
-                  Changed only
-                </button>
-              </div>
+
+              {vizTab === "building" && buildingData && (
+                <div style={{ marginLeft: "auto", display: "flex", gap: 12, fontSize: 12 }}>
+                  {[
+                    { color: "#3fb950", label: `+${buildingData.stats.added} added` },
+                    { color: "#f85149", label: `-${buildingData.stats.removed} removed` },
+                    { color: "#484f58", label: `${buildingData.stats.common} unchanged` },
+                  ].map(({ color, label }) => (
+                    <span key={label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                      <span style={{ width: 10, height: 10, borderRadius: 2, background: color, display: "inline-block" }} />
+                      <span style={{ color }}>{label}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
 
-            {graphLoading && (
-              <div style={{ padding: "30px 0", textAlign: "center", color: "var(--text2)", fontSize: 13 }}>
-                Building graph…
-              </div>
+            {/* Graph tab */}
+            {vizTab === "graph" && (
+              <>
+                {graphLoading && (
+                  <div style={{ padding: "30px 0", textAlign: "center", color: "var(--text2)", fontSize: 13 }}>
+                    Building graph…
+                  </div>
+                )}
+                {graphData && !graphLoading && graphData.nodes.length === 0 && (
+                  <div style={{ padding: "30px 0", textAlign: "center", color: "var(--text2)", fontSize: 13 }}>
+                    No changed nodes with graph connections found.
+                  </div>
+                )}
+                {graphData && !graphLoading && graphData.nodes.length > 0 && (
+                  <DiffGraph nodes={graphData.nodes} edges={graphData.edges} mode={graphMode} />
+                )}
+              </>
             )}
 
-            {graphData && !graphLoading && graphData.nodes.length === 0 && (
-              <div style={{ padding: "30px 0", textAlign: "center", color: "var(--text2)", fontSize: 13 }}>
-                No changed nodes with graph connections found.
-              </div>
-            )}
-
-            {graphData && !graphLoading && graphData.nodes.length > 0 && (
-              <DiffGraph nodes={graphData.nodes} edges={graphData.edges} mode={graphMode} />
+            {/* Building tab */}
+            {vizTab === "building" && (
+              <>
+                {buildingLoading && (
+                  <div style={{ padding: "30px 0", textAlign: "center", color: "var(--text2)", fontSize: 13 }}>
+                    Building layout…
+                  </div>
+                )}
+                {buildingData && !buildingLoading && (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 220px", gap: 12 }}>
+                    <div style={{ overflow: "hidden" }}>
+                      <BuildingCanvas
+                        nodes={buildingData.nodes}
+                        edges={buildingData.edges}
+                        onNodeClick={setSelectedBuildingNode}
+                        selected={selectedBuildingNode?.hash}
+                        getDiffStatus={(n) => n.diff_status}
+                      />
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                      {selectedBuildingNode ? (
+                        <div className="card" style={{ padding: 12 }}>
+                          <div style={{ fontSize: 10, fontWeight: 600, marginBottom: 4,
+                            color: selectedBuildingNode.diff_status === "added" ? "var(--green)"
+                              : selectedBuildingNode.diff_status === "removed" ? "var(--red)"
+                              : "var(--text2)" }}>
+                            {selectedBuildingNode.diff_status?.toUpperCase()}
+                            {selectedBuildingNode.is_load_bearing ? " · LOAD-BEARING" : ""}
+                          </div>
+                          <div style={{ fontFamily: "monospace", fontWeight: 700, fontSize: 12, marginBottom: 6, wordBreak: "break-all" }}>
+                            {selectedBuildingNode.name}
+                          </div>
+                          <div style={{ fontSize: 11, color: "var(--text2)", lineHeight: 1.8 }}>
+                            <div>{selectedBuildingNode.module}</div>
+                            <div>{LAYER_COLORS[selectedBuildingNode.layer ?? 4]?.label} layer</div>
+                            <div>{selectedBuildingNode.caller_count} callers</div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="card" style={{ padding: 16, textAlign: "center", color: "var(--text3)", fontSize: 12 }}>
+                          Click a node to inspect
+                        </div>
+                      )}
+                      <div className="card" style={{ padding: 12 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>How to read</div>
+                        {[
+                          { color: "#3fb950", label: "Green = added in newer snapshot" },
+                          { color: "#f85149", label: "Red/strikethrough = removed" },
+                          { color: "#484f58", label: "Faded = unchanged context" },
+                        ].map(({ color, label }) => (
+                          <div key={label} style={{ display: "flex", gap: 7, alignItems: "flex-start", marginBottom: 6, fontSize: 11 }}>
+                            <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0, marginTop: 2 }} />
+                            <span style={{ color: "var(--text2)" }}>{label}</span>
+                          </div>
+                        ))}
+                        <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 6 }}>
+                          Layer shifts = architectural drift. A node moving from Features→Platform means it's becoming shared infrastructure.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
 

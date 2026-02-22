@@ -41,4 +41,6 @@ export const api = {
   diff: (repoA, repoB) => post("/diff", { repo_a: repoA, repo_b: repoB }),
   diffGraph: (repoA, repoB, maxContext = 4) =>
     post(`/diff-graph?max_context=${maxContext}`, { repo_a: repoA, repo_b: repoB }),
+  diffBuilding: (repoA, repoB) =>
+    post("/diff-building", { repo_a: repoA, repo_b: repoB }),
 };

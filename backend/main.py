@@ -855,6 +855,120 @@ def building_view(repo_id: str, max_nodes: int = Query(120, le=300)):
     }
 
 
+@app.post("/api/diff-building")
+def diff_building(req: DiffRequest, max_nodes: int = Query(120, le=300)):
+    """
+    Building view showing structural diff — added/removed/common nodes with layer assignments.
+    """
+    conn_a = get_db(req.repo_a)
+    conn_b = get_db(req.repo_b)
+    cur_a, cur_b = conn_a.cursor(), conn_b.cursor()
+    config = read_lb_config(req.repo_b.split("@")[0])
+    declared_hashes = set(config.get("declared_nodes", []))
+    declared_modules = set(config.get("declared_modules", []))
+    lb_keywords = {"core", "platform", "base", "shared", "common", "infra", "lib", "utils",
+                   "foundation", "primitives", "runtime", "framework", "kernel"}
+
+    def load_building_nodes(cur, limit):
+        cur.execute("""
+            SELECT hash, name, module, file_path, caller_count, callee_count, complexity, risk
+            FROM nodes WHERE hash NOT LIKE 'ext:%'
+            ORDER BY caller_count DESC LIMIT ?
+        """, (limit,))
+        return {r["hash"]: row_to_dict(r) for r in cur.fetchall()}
+
+    nodes_a = load_building_nodes(cur_a, max_nodes)
+    nodes_b = load_building_nodes(cur_b, max_nodes)
+
+    # Build identity map: (name, module) -> node
+    def keyed(node_map):
+        return {(n["name"], n["module"]): n for n in node_map.values()}
+
+    keyed_a = keyed(nodes_a)
+    keyed_b = keyed(nodes_b)
+    keys_a, keys_b = set(keyed_a), set(keyed_b)
+
+    added_keys   = keys_b - keys_a
+    removed_keys = keys_a - keys_b
+    common_keys  = keys_a & keys_b
+
+    max_callers_b = max((n["caller_count"] for n in nodes_b.values()), default=1)
+    max_callers_a = max((n["caller_count"] for n in nodes_a.values()), default=1)
+
+    def assign_layer(node, max_c):
+        pct = node["caller_count"] / max_c if max_c > 0 else 0
+        if pct > 0.6: return 0
+        if pct > 0.3: return 1
+        if pct > 0.1: return 2
+        if pct > 0.02: return 3
+        return 4
+
+    def classify_lb(node):
+        mod = (node.get("module") or "").lower()
+        mod_parts = set(mod.replace(".", "/").replace("-", "/").split("/"))
+        h = node.get("hash", "")
+        explicitly = h in declared_hashes or any(m in mod for m in declared_modules)
+        auto = bool(mod_parts & lb_keywords)
+        return explicitly or auto, "explicit" if explicitly else ("auto" if auto else "none")
+
+    out_nodes = []
+
+    for key in added_keys:
+        n = dict(keyed_b[key])
+        n["layer"] = assign_layer(n, max_callers_b)
+        n["diff_status"] = "added"
+        is_lb, decl = classify_lb(n)
+        n["is_load_bearing"] = is_lb
+        n["declaration"] = decl
+        n["calling_module_count"] = 0
+        out_nodes.append(n)
+
+    for key in removed_keys:
+        n = dict(keyed_a[key])
+        n["layer"] = assign_layer(n, max_callers_a)
+        n["diff_status"] = "removed"
+        is_lb, decl = classify_lb(n)
+        n["is_load_bearing"] = is_lb
+        n["declaration"] = decl
+        n["calling_module_count"] = 0
+        out_nodes.append(n)
+
+    for key in common_keys:
+        n = dict(keyed_b[key])
+        n["layer"] = assign_layer(n, max_callers_b)
+        n["diff_status"] = "common"
+        is_lb, decl = classify_lb(n)
+        n["is_load_bearing"] = is_lb
+        n["declaration"] = decl
+        n["calling_module_count"] = 0
+        out_nodes.append(n)
+
+    # Edges from repo B for layout hints
+    if nodes_b:
+        ph = ",".join("?" * len(nodes_b))
+        cur_b.execute(
+            f"SELECT caller_hash, callee_hash FROM edges WHERE caller_hash IN ({ph}) AND callee_hash IN ({ph}) AND callee_hash NOT LIKE 'ext:%'",
+            list(nodes_b.keys()) * 2
+        )
+        edges_b = [{"from": e["caller_hash"], "to": e["callee_hash"]} for e in cur_b.fetchall()]
+    else:
+        edges_b = []
+
+    conn_a.close()
+    conn_b.close()
+
+    return {
+        "nodes": out_nodes,
+        "edges": edges_b,
+        "stats": {
+            "added": len(added_keys),
+            "removed": len(removed_keys),
+            "common": len(common_keys),
+        },
+        "layer_labels": ["Foundation", "Platform", "Services", "Features", "Leaves"],
+    }
+
+
 # ── Serve React frontend (must be last) ────────────────────────────────────
 
 FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"
