@@ -39,4 +39,6 @@ export const api = {
     post(`/repos/${id}/load-bearing/declare`, { hash, module, remove }),
   building: (id) => get(`/repos/${id}/building`),
   diff: (repoA, repoB) => post("/diff", { repo_a: repoA, repo_b: repoB }),
+  diffGraph: (repoA, repoB, maxContext = 4) =>
+    post(`/diff-graph?max_context=${maxContext}`, { repo_a: repoA, repo_b: repoB }),
 };

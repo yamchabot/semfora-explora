@@ -444,6 +444,189 @@ def graph_diff(req: DiffRequest):
     }
 
 
+@app.post("/api/diff-graph")
+def diff_graph(req: DiffRequest, max_context: int = Query(4, le=10), max_nodes: int = Query(120, le=300)):
+    """
+    Build a visual diff subgraph.
+    - Added/removed nodes shown with status
+    - Their 1-hop neighbors included as context
+    - All edges between any of these nodes tagged added/removed/unchanged
+    """
+    conn_a = get_db(req.repo_a)
+    conn_b = get_db(req.repo_b)
+    cur_a, cur_b = conn_a.cursor(), conn_b.cursor()
+
+    # --- Node identity by (name, module) ----
+    def load_nodes(cur):
+        cur.execute("SELECT hash, name, module, kind, file_path, caller_count, callee_count FROM nodes WHERE hash NOT LIKE 'ext:%'")
+        rows = cur.fetchall()
+        by_key = {}
+        by_hash = {}
+        for r in rows:
+            key = (r["name"], r["module"])
+            by_key[key] = row_to_dict(r)
+            by_hash[r["hash"]] = row_to_dict(r)
+        return by_key, by_hash
+
+    nodes_a_by_key, nodes_a_by_hash = load_nodes(cur_a)
+    nodes_b_by_key, nodes_b_by_hash = load_nodes(cur_b)
+
+    added_keys = set(nodes_b_by_key) - set(nodes_a_by_key)
+    removed_keys = set(nodes_a_by_key) - set(nodes_b_by_key)
+
+    # Virtual node ID: "name::module"  (stable across repos)
+    def node_vid(name, module): return f"{name}::{module}"
+
+    changed_vids = {node_vid(k[0], k[1]) for k in added_keys | removed_keys}
+
+    # --- Build adjacency for context lookup ----
+    def load_edges(cur):
+        cur.execute("SELECT caller_hash, callee_hash FROM edges WHERE caller_hash NOT LIKE 'ext:%' AND callee_hash NOT LIKE 'ext:%'")
+        return cur.fetchall()
+
+    edges_a_rows = load_edges(cur_a)
+    edges_b_rows = load_edges(cur_b)
+
+    def adjacency(edge_rows, hash_map):
+        callers = defaultdict(set)
+        callees = defaultdict(set)
+        for e in edge_rows:
+            ch, ce = e["caller_hash"], e["callee_hash"]
+            if ch not in hash_map or ce not in hash_map:
+                continue
+            cn = hash_map[ch]
+            en = hash_map[ce]
+            caller_vid = node_vid(cn["name"], cn["module"])
+            callee_vid = node_vid(en["name"], en["module"])
+            callers[callee_vid].add(caller_vid)
+            callees[caller_vid].add(callee_vid)
+        return callers, callees
+
+    callers_a, callees_a = adjacency(edges_a_rows, nodes_a_by_hash)
+    callers_b, callees_b = adjacency(edges_b_rows, nodes_b_by_hash)
+
+    # Build a unified node lookup vid → node info (prefer B for added, A for removed)
+    all_node_info = {}
+    for key, node in nodes_b_by_key.items():
+        all_node_info[node_vid(key[0], key[1])] = node
+    for key, node in nodes_a_by_key.items():
+        vid = node_vid(key[0], key[1])
+        if vid not in all_node_info:
+            all_node_info[vid] = node
+
+    # --- Collect context nodes ----
+    context_vids = set()
+    def top_neighbors(vid_set, adj_map, n):
+        """Get top-n neighbors by caller_count for a set of VIDs."""
+        neighbors = set()
+        for vid in vid_set:
+            nbrs = list(adj_map.get(vid, set()))
+            nbrs_info = [(n2, all_node_info.get(n2, {}).get("caller_count", 0)) for n2 in nbrs]
+            nbrs_info.sort(key=lambda x: -x[1])
+            for n2, _ in nbrs_info[:max_context]:
+                if n2 not in changed_vids:
+                    neighbors.add(n2)
+        return neighbors
+
+    added_vids = {node_vid(k[0], k[1]) for k in added_keys}
+    removed_vids = {node_vid(k[0], k[1]) for k in removed_keys}
+
+    # Context: who calls new code + what new code calls (from B)
+    context_vids |= top_neighbors(added_vids, callers_b, max_context)
+    context_vids |= top_neighbors(added_vids, callees_b, max_context)
+    # Context: who was calling removed code + what removed code called (from A)
+    context_vids |= top_neighbors(removed_vids, callers_a, max_context)
+    context_vids |= top_neighbors(removed_vids, callees_a, max_context)
+
+    all_vids = added_vids | removed_vids | context_vids
+    # Cap total nodes
+    if len(all_vids) > max_nodes:
+        # Keep changed nodes always; trim context
+        ctx_sorted = sorted(context_vids, key=lambda v: -all_node_info.get(v, {}).get("caller_count", 0))
+        context_vids = set(ctx_sorted[:max_nodes - len(changed_vids)])
+        all_vids = added_vids | removed_vids | context_vids
+
+    # --- Build edge set (vid pairs) ----
+    def edge_vids(edge_rows, hash_map):
+        result = set()
+        for e in edge_rows:
+            ch, ce = e["caller_hash"], e["callee_hash"]
+            if ch not in hash_map or ce not in hash_map:
+                continue
+            cn, en = hash_map[ch], hash_map[ce]
+            cv, ev = node_vid(cn["name"], cn["module"]), node_vid(en["name"], en["module"])
+            if cv in all_vids and ev in all_vids:
+                result.add((cv, ev))
+        return result
+
+    ev_a = edge_vids(edges_a_rows, nodes_a_by_hash)
+    ev_b = edge_vids(edges_b_rows, nodes_b_by_hash)
+
+    edge_added   = ev_b - ev_a
+    edge_removed = ev_a - ev_b
+    edge_same    = ev_a & ev_b
+
+    # --- Serialize ----
+    def status(vid):
+        if vid in added_vids:   return "added"
+        if vid in removed_vids: return "removed"
+        return "context"
+
+    nodes_out = []
+    for vid in all_vids:
+        info = all_node_info.get(vid, {})
+        nodes_out.append({
+            "id": vid,
+            "name": info.get("name", vid.split("::")[0]),
+            "module": info.get("module", ""),
+            "kind": info.get("kind", ""),
+            "caller_count": info.get("caller_count", 0),
+            "status": status(vid),
+        })
+
+    edges_out = []
+    for src, tgt in edge_added:
+        edges_out.append({"source": src, "target": tgt, "status": "added"})
+    for src, tgt in edge_removed:
+        edges_out.append({"source": src, "target": tgt, "status": "removed"})
+    for src, tgt in edge_same:
+        edges_out.append({"source": src, "target": tgt, "status": "unchanged"})
+
+    # --- GitHub compare link ----
+    def repo_base(rid): return rid.split("@")[0]
+    def repo_sha(rid):
+        parts = rid.split("@")
+        return parts[1] if len(parts) > 1 else "HEAD"
+
+    github_url = None
+    base_a, base_b = repo_base(req.repo_a), repo_base(req.repo_b)
+    if base_a == base_b:
+        meta_path = DATA_DIR / f"{base_a}.meta.json"
+        if meta_path.exists():
+            meta = json.loads(meta_path.read_text())
+            gh = meta.get("github_url", "").rstrip("/")
+            if gh:
+                sha_a = repo_sha(req.repo_a)
+                sha_b = repo_sha(req.repo_b)
+                github_url = f"{gh}/compare/{sha_a}...{sha_b}"
+
+    conn_a.close()
+    conn_b.close()
+    return {
+        "nodes": nodes_out,
+        "edges": edges_out,
+        "stats": {
+            "added": len(added_vids),
+            "removed": len(removed_vids),
+            "context": len(context_vids),
+            "edge_added": len(edge_added),
+            "edge_removed": len(edge_removed),
+            "edge_unchanged": len(edge_same),
+        },
+        "github_compare_url": github_url,
+    }
+
+
 @app.get("/api/repos/{repo_id}/search")
 def search_nodes(repo_id: str, q: str = Query(..., min_length=1), limit: int = 20):
     conn = get_db(repo_id)
