@@ -120,26 +120,33 @@ export default function Diff() {
         {/* Quick-pick same-project pairs */}
         {projects.length > 0 && (
           <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--border)" }}>
-            <div style={{ fontSize: 11, color: "var(--text2)", marginBottom: 8 }}>Quick compare (adjacent commits):</div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {projects.flatMap((proj) => {
-                const vers = groups[proj];
-                return vers.slice(0, -1).map((v, i) => ({
-                  a: vers[i + 1].id,
-                  b: v.id,
-                  label: `${proj}: ${vers[i + 1].commit.slice(0, 7)} → ${v.commit.slice(0, 7)}`,
-                }));
-              }).slice(0, 12).map(({ a, b, label }) => (
-                <button
-                  key={label}
-                  className="btn btn-ghost btn-sm"
-                  style={{ fontFamily: "monospace", fontSize: 11 }}
-                  onClick={() => { setRepoA(a); setRepoB(b); }}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+            <div style={{ fontSize: 11, color: "var(--text2)", marginBottom: 10 }}>Quick compare (adjacent commits):</div>
+            {projects.map((proj) => {
+              const vers = groups[proj];
+              const pairs = vers.slice(0, -1).map((v, i) => ({
+                a: vers[i + 1].id,
+                b: v.id,
+                label: `${vers[i + 1].commit.slice(0, 7)} → ${v.commit.slice(0, 7)}`,
+              }));
+              if (pairs.length === 0) return null;
+              return (
+                <div key={proj} style={{ marginBottom: 8 }}>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text3)", marginRight: 8, fontFamily: "monospace" }}>{proj}</span>
+                  <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
+                    {pairs.map(({ a, b, label }) => (
+                      <button
+                        key={label}
+                        className="btn btn-ghost btn-sm"
+                        style={{ fontFamily: "monospace", fontSize: 11 }}
+                        onClick={() => { setRepoA(a); setRepoB(b); }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
