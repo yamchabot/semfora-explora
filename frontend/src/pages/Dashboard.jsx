@@ -4,6 +4,9 @@ import { useNavigate } from "react-router-dom";
 import { RepoContext } from "../App";
 import { api } from "../api";
 
+const SEVERITY_COLOR = { high: "var(--red)", medium: "var(--yellow)", low: "var(--text3)" };
+const SEVERITY_BG    = { high: "var(--red-bg)", medium: "var(--yellow-bg)", low: "var(--bg3)" };
+
 const TOOLS = [
   { to: "/graph",        icon: "🕸️", name: "Call Graph",          desc: "Explore the full symbol dependency graph for this repo.", badge: "Explore", badgeCls: "badge-blue" },
   { to: "/blast-radius", icon: "💥", name: "Blast Radius",         desc: "Select any symbol — see the full transitive impact if it changes.", badge: "Risk", badgeCls: "badge-yellow" },
@@ -21,6 +24,11 @@ export default function Dashboard() {
   const { data, isLoading, error } = useQuery({
     queryKey: ["overview", repoId],
     queryFn: () => api.overview(repoId),
+  });
+
+  const { data: triageData } = useQuery({
+    queryKey: ["triage", repoId],
+    queryFn: () => api.triage(repoId),
   });
 
   if (isLoading) return <div className="loading">Loading overview…</div>;
@@ -60,6 +68,49 @@ export default function Dashboard() {
           <div className="stat-label">Cycle candidates</div>
         </div>
       </div>
+
+      {/* Triage — top issues */}
+      {triageData?.issues?.length > 0 && (
+        <div className="section" style={{ marginBottom: 28 }}>
+          <div className="section-title">⚡ Top Issues</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {triageData.issues.map((issue, i) => (
+              <div key={i} className="card" style={{
+                padding: "14px 18px",
+                borderColor: SEVERITY_COLOR[issue.severity] + "55",
+                display: "flex", gap: 14, alignItems: "flex-start"
+              }}>
+                <div style={{
+                  flexShrink: 0, marginTop: 2,
+                  width: 8, height: 8, borderRadius: "50%",
+                  background: SEVERITY_COLOR[issue.severity],
+                  boxShadow: `0 0 6px ${SEVERITY_COLOR[issue.severity]}`
+                }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4,
+                    fontFamily: issue.title.includes("`") ? "inherit" : undefined }}>
+                    {issue.title.replace(/`([^`]+)`/g, (_, m) => m)}
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.6, marginBottom: 6 }}>
+                    {issue.detail}
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--blue)", lineHeight: 1.5 }}>
+                    → {issue.action}
+                  </div>
+                </div>
+                <span style={{
+                  flexShrink: 0, fontSize: 10, fontWeight: 700,
+                  padding: "2px 8px", borderRadius: 10,
+                  background: SEVERITY_BG[issue.severity],
+                  color: SEVERITY_COLOR[issue.severity],
+                }}>
+                  {issue.severity}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Tool grid */}
       <div className="section">

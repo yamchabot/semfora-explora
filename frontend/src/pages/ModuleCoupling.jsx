@@ -3,6 +3,68 @@ import { useQuery } from "@tanstack/react-query";
 import { RepoContext } from "../App";
 import { api } from "../api";
 
+function DrillPanel({ repoId, fromModule, toModule, onClose }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ["module-edges-detail", repoId, fromModule, toModule],
+    queryFn: () => api.moduleEdgesDetail(repoId, fromModule, toModule),
+  });
+  return (
+    <div style={{ position: "fixed", right: 0, top: 0, bottom: 0, width: 420,
+      background: "var(--bg)", borderLeft: "1px solid var(--border2)",
+      boxShadow: "-8px 0 32px #0008", zIndex: 100, display: "flex", flexDirection: "column" }}>
+      <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--border)",
+        display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div>
+          <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 4 }}>DEPENDENCY DRILL-THROUGH</div>
+          <div style={{ fontSize: 12, fontFamily: "monospace" }}>
+            <span style={{ color: "var(--red)" }}>{fromModule}</span>
+            <span style={{ color: "var(--text3)", margin: "0 6px" }}>→</span>
+            <span style={{ color: "var(--green)" }}>{toModule}</span>
+          </div>
+        </div>
+        <button className="btn btn-sm btn-ghost" onClick={onClose}>✕</button>
+      </div>
+      {isLoading && <div style={{ padding: 20, color: "var(--text2)" }}>Loading calls…</div>}
+      {data && (
+        <>
+          <div style={{ padding: "8px 18px", borderBottom: "1px solid var(--border)",
+            fontSize: 12, color: "var(--text2)" }}>
+            {data.total} call{data.total !== 1 ? "s" : ""} across this boundary
+          </div>
+          <div style={{ flex: 1, overflowY: "auto" }}>
+            {data.calls.map((c, i) => (
+              <div key={i} style={{ padding: "10px 18px", borderBottom: "1px solid var(--border)", fontSize: 12 }}>
+                <div style={{ display: "flex", gap: 8, marginBottom: 3 }}>
+                  <span style={{ fontFamily: "monospace", fontWeight: 700, color: "var(--red)", flex: 1,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {c.caller_name}
+                  </span>
+                  <span style={{ color: "var(--text3)" }}>→</span>
+                  <span style={{ fontFamily: "monospace", fontWeight: 700, color: "var(--green)", flex: 1,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textAlign: "right" }}>
+                    {c.callee_name}
+                  </span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", color: "var(--text3)", fontSize: 11 }}>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "80%" }}>
+                    {c.caller_file?.split("/").pop()}
+                  </span>
+                  <span style={{ flexShrink: 0 }}>×{c.call_count}</span>
+                </div>
+              </div>
+            ))}
+            {data.calls.length === 0 && (
+              <div style={{ padding: 30, textAlign: "center", color: "var(--text3)" }}>
+                No direct function-level calls found between these modules.
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function InstabilityBar({ value }) {
   const color = value > 0.7 ? "var(--red)" : value > 0.4 ? "var(--yellow)" : "var(--green)";
   return (
@@ -19,6 +81,7 @@ export default function ModuleCoupling() {
   const { repoId } = useContext(RepoContext);
   const [sort, setSort] = useState("afferent_coupling");
   const [selected, setSelected] = useState(null);
+  const [drill, setDrill] = useState(null); // { from, to }
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["modules", repoId],
@@ -61,6 +124,7 @@ export default function ModuleCoupling() {
   }
 
   return (
+    <>
     <div>
       <div className="page-header">
         <h1>🧩 Module Coupling & Cohesion</h1>
@@ -162,17 +226,24 @@ export default function ModuleCoupling() {
                       {topModules.map((colMod) => {
                         const count = rowMod === colMod ? null : edgeMap[`${rowMod}__${colMod}`] || 0;
                         return (
-                          <td key={colMod} style={{
-                            background: rowMod === colMod ? "var(--bg3)" : cellColor(count),
-                            color: cellTextColor(count),
-                            textAlign: "center",
-                            fontSize: 11,
-                            fontWeight: 600,
-                            borderRadius: 4,
-                            minWidth: 44,
-                            height: 36,
-                          }}
-                            title={`${rowMod} → ${colMod}: ${count || 0} edges`}
+                          <td key={colMod}
+                            onClick={() => count > 0 && rowMod !== colMod && setDrill({ from: rowMod, to: colMod })}
+                            style={{
+                              background: rowMod === colMod ? "var(--bg3)" : cellColor(count),
+                              color: cellTextColor(count),
+                              textAlign: "center",
+                              fontSize: 11,
+                              fontWeight: 600,
+                              borderRadius: 4,
+                              minWidth: 44,
+                              height: 36,
+                              cursor: count > 0 && rowMod !== colMod ? "pointer" : "default",
+                              outline: drill?.from === rowMod && drill?.to === colMod
+                                ? "2px solid var(--blue)" : "none",
+                            }}
+                            title={count > 0 && rowMod !== colMod
+                              ? `Click to see the ${count} call(s) from ${rowMod} → ${colMod}`
+                              : `${rowMod} → ${colMod}: ${count || 0} edges`}
                           >
                             {rowMod === colMod ? "—" : count || ""}
                           </td>
@@ -192,5 +263,15 @@ export default function ModuleCoupling() {
         </div>
       )}
     </div>
+
+    {drill && (
+      <DrillPanel
+        repoId={repoId}
+        fromModule={drill.from}
+        toModule={drill.to}
+        onClose={() => setDrill(null)}
+      />
+    )}
+    </>
   );
 }

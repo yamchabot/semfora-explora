@@ -37,20 +37,30 @@ export default function DeadCode() {
           <div className="stat-label">Dead symbols</div>
         </div>
         <div className="stat-card">
-          <div className="stat-value" style={{ color: "var(--yellow)" }}>{data.file_groups.length}</div>
-          <div className="stat-label">Affected files</div>
+          <div className="stat-value" style={{ color: "var(--green)" }}>{data.safe_count ?? 0}</div>
+          <div className="stat-label">✓ Safe to delete</div>
         </div>
         <div className="stat-card">
-          <div className="stat-value" style={{ color: "var(--blue)" }}>
-            {data.file_groups.filter((g) => g.dead_count > 3).length}
-          </div>
-          <div className="stat-label">High-dead files</div>
+          <div className="stat-value" style={{ color: "var(--yellow)" }}>{data.review_count ?? 0}</div>
+          <div className="stat-label">Needs review</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value" style={{ color: "var(--text2)" }}>{data.caution_count ?? 0}</div>
+          <div className="stat-label">Likely false positive</div>
         </div>
       </div>
 
-      <div style={{ background: "var(--blue-bg)", border: "1px solid var(--blue)", borderRadius: 8, padding: "10px 16px", marginBottom: 20, fontSize: 13 }}>
-        💡 These are symbols with <strong>zero callers in the call graph</strong>. Test functions and
-        entrypoints may show here if not annotated — review before deleting.
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 20 }}>
+        {[
+          { label: "✓ Safe", color: "var(--green)", bg: "var(--green-bg)", desc: "Private names, low complexity, not in test files. High confidence actually unused." },
+          { label: "⚠ Review", color: "var(--yellow)", bg: "var(--yellow-bg)", desc: "No callers found but pattern not conclusively private. Verify before deleting." },
+          { label: "⊘ Caution", color: "var(--text3)", bg: "var(--bg3)", desc: "Likely a false positive: entrypoints, test hooks, public APIs, class definitions." },
+        ].map(({ label, color, bg, desc }) => (
+          <div key={label} style={{ background: bg, border: `1px solid ${color}44`, borderRadius: 8, padding: "10px 14px", fontSize: 12 }}>
+            <div style={{ fontWeight: 700, color, marginBottom: 4 }}>{label}</div>
+            <div style={{ color: "var(--text2)", lineHeight: 1.5 }}>{desc}</div>
+          </div>
+        ))}
       </div>
 
       {data.file_groups.map((group) => (
@@ -71,9 +81,16 @@ export default function DeadCode() {
             <span style={{ fontFamily: "monospace", fontSize: 12, color: "var(--blue)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {group.file}
             </span>
-            <span style={{ background: "var(--red-bg)", color: "var(--red)", fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 12, whiteSpace: "nowrap" }}>
-              {group.dead_count} dead
-            </span>
+            <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+              {group.safe_count > 0 && (
+                <span style={{ background: "var(--green-bg)", color: "var(--green)", fontSize: 10, fontWeight: 700, padding: "1px 7px", borderRadius: 12 }}>
+                  {group.safe_count} safe
+                </span>
+              )}
+              <span style={{ background: "var(--red-bg)", color: "var(--red)", fontSize: 10, fontWeight: 700, padding: "1px 7px", borderRadius: 12 }}>
+                {group.dead_count} dead
+              </span>
+            </div>
           </div>
 
           {expanded[group.file] && (
@@ -88,6 +105,7 @@ export default function DeadCode() {
                     alignItems: "flex-start",
                     gap: 10,
                     fontSize: 12,
+                    opacity: node.confidence === "caution" ? 0.55 : 1,
                   }}
                 >
                   <div style={{ flex: 1 }}>
@@ -95,6 +113,16 @@ export default function DeadCode() {
                     <span style={{ background: "var(--bg3)", color: "var(--text2)", fontSize: 10, padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>
                       {node.kind}
                     </span>
+                    {node.confidence === "safe" && (
+                      <span style={{ background: "var(--green-bg)", color: "var(--green)", fontSize: 10, padding: "1px 6px", borderRadius: 4, marginLeft: 4, fontWeight: 700 }}>
+                        ✓ safe
+                      </span>
+                    )}
+                    {node.confidence === "caution" && (
+                      <span style={{ background: "var(--bg3)", color: "var(--text3)", fontSize: 10, padding: "1px 6px", borderRadius: 4, marginLeft: 4 }}>
+                        ⊘ likely false positive
+                      </span>
+                    )}
                     {node.complexity > 5 && (
                       <span style={{ background: "var(--yellow-bg)", color: "var(--yellow)", fontSize: 10, padding: "1px 6px", borderRadius: 4, marginLeft: 4 }}>
                         complexity {node.complexity}

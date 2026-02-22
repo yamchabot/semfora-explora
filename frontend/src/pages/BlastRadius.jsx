@@ -1,5 +1,6 @@
-import { useContext, useState } from "react";
+import { useContext, useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useLocation } from "react-router-dom";
 import { RepoContext } from "../App";
 import { api } from "../api";
 
@@ -7,10 +8,23 @@ const DEPTH_COLORS = ["#f85149", "#e3b341", "#58a6ff", "#3fb950", "#a371f7", "#8
 
 export default function BlastRadius() {
   const { repoId } = useContext(RepoContext);
+  const location = useLocation();
   const [query, setQuery] = useState("");
   const [targetHash, setTargetHash] = useState(null);
   const [targetName, setTargetName] = useState("");
   const [depth, setDepth] = useState(4);
+
+  // Accept pre-population from Centrality / Triage / anywhere else
+  useEffect(() => {
+    const state = location.state;
+    if (state?.hash && state?.name) {
+      setTargetHash(state.hash);
+      setTargetName(state.name);
+      setQuery(state.name);
+      // Clear state so back-nav doesn't re-trigger
+      window.history.replaceState({}, "");
+    }
+  }, [location.state]);
   const [showAll, setShowAll] = useState(false);
 
   const { data: searchResults, isLoading: searching } = useQuery({

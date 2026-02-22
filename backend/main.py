@@ -148,6 +148,189 @@ def repo_overview(repo_id: str):
     }
 
 
+@app.get("/api/repos/{repo_id}/triage")
+def triage(repo_id: str):
+    """
+    Surface the top actionable structural issues — combines signals from
+    multiple analyses into a ranked, prescriptive list.
+    """
+    conn = get_db(repo_id)
+    cur = conn.cursor()
+    config = read_lb_config(repo_id)
+    declared_hashes  = set(config.get("declared_nodes", []))
+    declared_modules = set(config.get("declared_modules", []))
+    issues = []
+
+    # ── Issue type 1: Unexpected load-bearing nodes ──────────────────────────
+    cur.execute("""
+        SELECT n.hash, n.name, n.module, n.complexity,
+               COUNT(DISTINCT caller_mod.module) AS calling_modules,
+               n.caller_count
+        FROM nodes n
+        JOIN edges e ON e.callee_hash = n.hash
+        JOIN nodes caller_mod ON caller_mod.hash = e.caller_hash
+        WHERE n.hash NOT LIKE 'ext:%'
+          AND caller_mod.module IS NOT NULL
+          AND caller_mod.module != n.module
+        GROUP BY n.hash
+        HAVING calling_modules >= 5
+        ORDER BY calling_modules DESC, n.complexity DESC
+        LIMIT 10
+    """)
+    unexpected = [
+        r for r in cur.fetchall()
+        if r["hash"] not in declared_hashes
+        and (r["module"] or "") not in declared_modules
+    ]
+    for row in unexpected[:3]:
+        issues.append({
+            "type":     "unexpected_coupling",
+            "severity": "high" if row["calling_modules"] >= 8 else "medium",
+            "title":    f"`{row['name']}` is load-bearing without declaration",
+            "detail":   f"Called from {row['calling_modules']} modules but not declared as load-bearing. "
+                        f"Module: {row['module']}. This node will resist refactoring.",
+            "action":   "Open Building View → click this node → Declare load-bearing (if intentional) "
+                        "or plan to reduce its callers.",
+            "hash":     row["hash"],
+            "name":     row["name"],
+        })
+
+    # ── Issue type 2: Unstable high-traffic modules ───────────────────────────
+    cur.execute("""
+        SELECT caller_module, callee_module, SUM(edge_count) AS total
+        FROM module_edges
+        WHERE caller_module != callee_module
+        GROUP BY caller_module, callee_module
+        ORDER BY total DESC
+    """)
+    mod_edges = cur.fetchall()
+    afferent  = defaultdict(int)
+    efferent  = defaultdict(int)
+    for e in mod_edges:
+        afferent[e["callee_module"]]  += e["total"]
+        efferent[e["caller_module"]] += e["total"]
+    unstable_high_traffic = [
+        m for m in afferent
+        if afferent[m] > 5
+        and (efferent[m] / (afferent[m] + efferent[m])) > 0.65
+    ]
+    if unstable_high_traffic:
+        m = sorted(unstable_high_traffic, key=lambda x: afferent[x] + efferent[x], reverse=True)[0]
+        ca, ce = afferent[m], efferent[m]
+        instability = round(ce / (ca + ce), 2)
+        issues.append({
+            "type":     "unstable_module",
+            "severity": "medium",
+            "title":    f"`{m}` is high-traffic and unstable (I={instability})",
+            "detail":   f"Called from {ca} edges in, {ce} edges out. "
+                        f"Instability {instability} means changes here ripple widely.",
+            "action":   "Open Module Coupling → review this module's callers. "
+                        "Consider extracting stable core interfaces from this module.",
+            "module":   m,
+        })
+
+    # ── Issue type 3: Large cross-module cycles ───────────────────────────────
+    try:
+        G = build_nx_graph(conn)
+        sccs = [scc for scc in nx.strongly_connected_components(G) if len(scc) > 1]
+        cross_sccs = []
+        for scc in sccs:
+            mods = {G.nodes[h].get("module") for h in scc if h in G.nodes}
+            mods.discard(None)
+            if len(mods) > 1:
+                cross_sccs.append((scc, mods))
+        if cross_sccs:
+            biggest = max(cross_sccs, key=lambda x: len(x[0]))
+            scc_hashes, mods = biggest
+            # find weakest edge
+            intra = [(u, v, d) for u, v, d in G.edges(scc_hashes, data=True) if v in set(scc_hashes)]
+            if intra:
+                weakest = min(intra, key=lambda e: e[2].get("call_count", 0))
+                w_caller = G.nodes.get(weakest[0], {}).get("name", weakest[0])
+                w_callee = G.nodes.get(weakest[1], {}).get("name", weakest[1])
+                issues.append({
+                    "type":     "cross_module_cycle",
+                    "severity": "high",
+                    "title":    f"Cross-module cycle across {len(mods)} modules ({len(scc_hashes)} symbols)",
+                    "detail":   f"Modules involved: {', '.join(sorted(mods)[:4])}{'…' if len(mods) > 4 else ''}. "
+                                f"Circular dependencies prevent clean module extraction.",
+                    "action":   f"Open Cycles → cut the call `{w_caller}` → `{w_callee}` "
+                                f"(lowest call count in the cycle) to break it.",
+                    "modules":  sorted(mods),
+                })
+    except Exception:
+        pass
+
+    # ── Issue type 4: High dead code concentration ────────────────────────────
+    cur.execute("""
+        SELECT file_path,
+               COUNT(*) AS total,
+               SUM(CASE WHEN caller_count = 0 THEN 1 ELSE 0 END) AS dead
+        FROM nodes
+        WHERE hash NOT LIKE 'ext:%' AND kind IN ('function','method','class')
+          AND file_path IS NOT NULL
+        GROUP BY file_path
+        HAVING total >= 5 AND dead * 1.0 / total >= 0.6
+        ORDER BY dead DESC
+        LIMIT 1
+    """)
+    high_dead = cur.fetchone()
+    if high_dead and high_dead["dead"] >= 5:
+        pct = round(high_dead["dead"] / high_dead["total"] * 100)
+        issues.append({
+            "type":     "dead_code_concentration",
+            "severity": "low",
+            "title":    f"{pct}% of `{high_dead['file_path'].split('/')[-1]}` is unreachable",
+            "detail":   f"{high_dead['dead']} of {high_dead['total']} symbols have zero callers. "
+                        f"This file may be legacy code.",
+            "action":   "Open Dead Code → review this file's symbols. "
+                        "Private functions with low complexity are safest to delete first.",
+            "file":     high_dead["file_path"],
+        })
+
+    conn.close()
+    # Sort: high → medium → low
+    severity_order = {"high": 0, "medium": 1, "low": 2}
+    issues.sort(key=lambda x: severity_order.get(x["severity"], 3))
+    return {"issues": issues[:5]}
+
+
+@app.get("/api/repos/{repo_id}/module-edges-detail")
+def module_edges_detail(
+    repo_id: str,
+    from_module: str = Query(...),
+    to_module:   str = Query(...),
+    limit:       int = Query(50, le=200),
+):
+    """
+    Return the actual function-level calls that make up the edge
+    between two modules in the heatmap.
+    """
+    conn = get_db(repo_id)
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT
+            cn.name AS caller_name, cn.hash AS caller_hash, cn.file_path AS caller_file,
+            ee.name AS callee_name, ee.hash AS callee_hash, ee.file_path AS callee_file,
+            COALESCE(e.call_count, 1) AS call_count
+        FROM edges e
+        JOIN nodes cn ON cn.hash = e.caller_hash
+        JOIN nodes ee ON ee.hash = e.callee_hash
+        WHERE cn.module = ? AND ee.module = ?
+          AND cn.hash NOT LIKE 'ext:%' AND ee.hash NOT LIKE 'ext:%'
+        ORDER BY call_count DESC
+        LIMIT ?
+    """, (from_module, to_module, limit))
+    calls = [row_to_dict(r) for r in cur.fetchall()]
+    conn.close()
+    return {
+        "from_module": from_module,
+        "to_module":   to_module,
+        "total":       len(calls),
+        "calls":       calls,
+    }
+
+
 @app.get("/api/repos/{repo_id}/modules")
 def list_modules(repo_id: str):
     conn = get_db(repo_id)
@@ -321,9 +504,46 @@ def blast_radius(repo_id: str, node_hash: str, max_depth: int = Query(5, le=10))
     }
 
 
+_ENTRYPOINT_NAMES = {
+    "main", "setup", "teardown", "configure", "run", "start", "init",
+    "handler", "handle", "on_event", "register", "create_app", "app",
+    "cli", "command", "callback", "entry", "entrypoint", "wsgi", "asgi",
+    "lambda_handler", "index",
+}
+_FRAMEWORK_PATTERNS = {"test_", "Test", "Spec", "Fixture", "conftest", "setUp", "tearDown"}
+
+def _dead_confidence(node: dict) -> str:
+    """
+    Return 'safe' | 'review' | 'caution'.
+    'safe'    = high confidence actually unused
+    'review'  = probably unused but verify
+    'caution' = likely a false positive (entrypoint, test hook, public API)
+    """
+    name = node.get("name", "")
+    fp   = node.get("file_path", "") or ""
+    kind = node.get("kind", "")
+
+    # Strong false-positive signals → caution
+    if name.lower() in _ENTRYPOINT_NAMES:
+        return "caution"
+    if any(name.startswith(p) or name.endswith(p) for p in _FRAMEWORK_PATTERNS):
+        return "caution"
+    if any(seg in fp.lower() for seg in ["test", "spec", "fixture", "conftest", "__init__", "setup.py", "manage.py"]):
+        return "caution"
+    if kind == "class":
+        return "caution"   # class deletion almost never safe without checking subclasses
+
+    # Private name → higher confidence
+    is_private = name.startswith("_") or name.startswith("__")
+    if is_private and (node.get("complexity") or 0) <= 8:
+        return "safe"
+
+    return "review"
+
+
 @app.get("/api/repos/{repo_id}/dead-code")
 def dead_code(repo_id: str, limit: int = Query(200, le=1000)):
-    """Find nodes with no callers (unreachable)."""
+    """Find nodes with no callers (unreachable), with confidence tiers."""
     conn = get_db(repo_id)
     cur = conn.cursor()
     cur.execute("""
@@ -336,22 +556,35 @@ def dead_code(repo_id: str, limit: int = Query(200, le=1000)):
         LIMIT ?
     """, (limit,))
     dead = [row_to_dict(r) for r in cur.fetchall()]
-    # Group by file
+
+    # Attach confidence tier
+    for node in dead:
+        node["confidence"] = _dead_confidence(node)
+
+    # Group by file, preserving confidence info
     by_file = defaultdict(list)
     for node in dead:
         by_file[node.get("file_path", "unknown")].append(node)
+
     file_groups = [
         {
             "file": f,
             "dead_count": len(nodes),
+            "safe_count":    sum(1 for n in nodes if n["confidence"] == "safe"),
+            "review_count":  sum(1 for n in nodes if n["confidence"] == "review"),
+            "caution_count": sum(1 for n in nodes if n["confidence"] == "caution"),
             "nodes": nodes,
         }
         for f, nodes in sorted(by_file.items(), key=lambda x: -len(x[1]))
     ]
+
     conn.close()
     return {
-        "total_dead": len(dead),
-        "file_groups": file_groups,
+        "total_dead":    len(dead),
+        "safe_count":    sum(1 for n in dead if n["confidence"] == "safe"),
+        "review_count":  sum(1 for n in dead if n["confidence"] == "review"),
+        "caution_count": sum(1 for n in dead if n["confidence"] == "caution"),
+        "file_groups":   file_groups,
     }
 
 
@@ -389,17 +622,55 @@ def centrality(repo_id: str, top_n: int = Query(30, le=100)):
 
 @app.get("/api/repos/{repo_id}/cycles")
 def find_cycles(repo_id: str):
-    """Find strongly connected components (cycles) in the call graph."""
+    """Find strongly connected components (cycles) with break suggestions."""
     conn = get_db(repo_id)
     G = build_nx_graph(conn)
-    sccs = [list(scc) for scc in nx.strongly_connected_components(G) if len(scc) > 1]
     cur = conn.cursor()
+
+    sccs = [list(scc) for scc in nx.strongly_connected_components(G) if len(scc) > 1]
+
     result_cycles = []
     for scc in sorted(sccs, key=len, reverse=True)[:20]:
+        scc_set = set(scc)
         placeholders = ",".join("?" * len(scc))
-        cur.execute(f"SELECT hash, name, module, file_path FROM nodes WHERE hash IN ({placeholders})", scc)
-        nodes = [row_to_dict(r) for r in cur.fetchall()]
-        result_cycles.append({"size": len(scc), "nodes": nodes})
+        cur.execute(
+            f"SELECT hash, name, module, file_path FROM nodes WHERE hash IN ({placeholders})", scc
+        )
+        nodes_info = {r["hash"]: row_to_dict(r) for r in cur.fetchall()}
+        nodes = list(nodes_info.values())
+
+        # Cross-module? (more severe)
+        modules_in_cycle = {n.get("module") for n in nodes if n.get("module")}
+        cross_module = len(modules_in_cycle) > 1
+
+        # Find break suggestion: the intra-SCC edge with the lowest call_count
+        intra_edges = [
+            (u, v, d) for u, v, d in G.edges(scc, data=True)
+            if v in scc_set
+        ]
+        break_suggestion = None
+        if intra_edges:
+            weakest = min(intra_edges, key=lambda e: e[2].get("call_count", 0))
+            caller_info = nodes_info.get(weakest[0]) or {}
+            callee_info = nodes_info.get(weakest[1]) or {}
+            break_suggestion = {
+                "caller_hash":   weakest[0],
+                "callee_hash":   weakest[1],
+                "caller_name":   caller_info.get("name", weakest[0]),
+                "callee_name":   callee_info.get("name", weakest[1]),
+                "caller_module": caller_info.get("module", ""),
+                "callee_module": callee_info.get("module", ""),
+                "call_count":    weakest[2].get("call_count", 0),
+            }
+
+        result_cycles.append({
+            "size":             len(scc),
+            "cross_module":     cross_module,
+            "modules":          sorted(modules_in_cycle),
+            "nodes":            nodes,
+            "break_suggestion": break_suggestion,
+        })
+
     conn.close()
     return {"cycles": result_cycles, "total_cycles": len(sccs)}
 

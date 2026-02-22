@@ -40,6 +40,9 @@ export const api = {
   building: (id) => get(`/repos/${id}/building`),
   moduleGraph: (id, depth = 2) => get(`/repos/${id}/module-graph?depth=${depth}`),
   communities: (id, resolution = 1.0) => get(`/repos/${id}/communities?resolution=${resolution}`),
+  triage: (id) => get(`/repos/${id}/triage`),
+  moduleEdgesDetail: (id, fromModule, toModule) =>
+    get(`/repos/${id}/module-edges-detail?from_module=${encodeURIComponent(fromModule)}&to_module=${encodeURIComponent(toModule)}`),
   diff: (repoA, repoB) => post("/diff", { repo_a: repoA, repo_b: repoB }),
   diffGraph: (repoA, repoB, maxContext = 4) =>
     post(`/diff-graph?max_context=${maxContext}`, { repo_a: repoA, repo_b: repoB }),

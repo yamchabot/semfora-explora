@@ -418,10 +418,15 @@ export default function Communities() {
               {selectedComm ? (
                 <div className="card" style={{ padding: 14 }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                    <span style={{ fontSize: 12, fontWeight: 600,
-                      color: commColor(selectedComm.id, sorted) }}>
-                      Community {selectedComm.id}
-                    </span>
+                    <div>
+                      <span style={{ fontSize: 13, fontWeight: 700,
+                        color: commColor(selectedComm.id, sorted) }}>
+                        {selectedComm.dominant_module?.split(".").pop() ?? `cluster-${selectedComm.id}`}
+                      </span>
+                      <span style={{ fontSize: 10, color: "var(--text3)", marginLeft: 8 }}>
+                        community #{selectedComm.id}
+                      </span>
+                    </div>
                     <PurityBadge value={selectedComm.purity} />
                   </div>
                   <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.9, marginBottom: 10 }}>
@@ -469,8 +474,12 @@ export default function Communities() {
                     Communities
                   </div>
                   <div style={{ maxHeight: 340, overflowY: "auto" }}>
-                    {sorted.map(c => {
+                    {sorted.map((c, rank) => {
                       const color = commColor(c.id, sorted);
+                      // Use dominant module's last path segment as the community name
+                      const communityName = c.dominant_module
+                        ? c.dominant_module.split(".").pop()
+                        : `cluster-${rank + 1}`;
                       return (
                         <div key={c.id}
                           onClick={() => setSelected(c.id)}
@@ -479,8 +488,12 @@ export default function Communities() {
                           <div style={{ width: 10, height: 10, borderRadius: "50%",
                             background: color, flexShrink: 0 }} />
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 11, fontFamily: "monospace",
-                              color: "var(--text2)", overflow: "hidden",
+                            <div style={{ fontSize: 12, fontWeight: 600, color,
+                              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {communityName}
+                            </div>
+                            <div style={{ fontSize: 10, fontFamily: "monospace",
+                              color: "var(--text3)", overflow: "hidden",
                               textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                               {c.dominant_module}
                             </div>

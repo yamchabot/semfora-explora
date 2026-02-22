@@ -83,7 +83,8 @@ export default function Centrality() {
                 <td>
                   <button
                     className="btn btn-sm btn-ghost"
-                    onClick={() => nav(`/blast-radius`)}
+                    title="Open Blast Radius for this symbol"
+                    onClick={() => nav("/blast-radius", { state: { hash: node.hash, name: node.name } })}
                   >
                     💥
                   </button>

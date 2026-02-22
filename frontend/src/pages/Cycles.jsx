@@ -45,6 +45,12 @@ export default function Cycles() {
           </div>
           <div className="stat-label">Large cycles (5+ nodes)</div>
         </div>
+        <div className="stat-card">
+          <div className="stat-value" style={{ color: "var(--red)" }}>
+            {cycles.filter((c) => c.cross_module).length}
+          </div>
+          <div className="stat-label">Cross-module (high risk)</div>
+        </div>
       </div>
 
       {cycles.length === 0 && (
@@ -75,6 +81,12 @@ export default function Cycles() {
               <span style={{ fontSize: 12, color: "var(--text2)" }}>{expanded[i] ? "▾" : "▸"}</span>
               <div style={{ flex: 1 }}>
                 <span style={{ fontWeight: 600 }}>Cycle #{i + 1}</span>
+                {cycle.cross_module && (
+                  <span style={{ background: "var(--red-bg)", color: "var(--red)", fontSize: 10,
+                    fontWeight: 700, padding: "1px 6px", borderRadius: 8, marginLeft: 8 }}>
+                    cross-module
+                  </span>
+                )}
                 <span style={{ color: "var(--text2)", fontSize: 12, marginLeft: 8 }}>
                   {modules.join(" ↔ ")}
                 </span>
@@ -89,6 +101,32 @@ export default function Cycles() {
 
             {expanded[i] && (
               <div>
+                {/* Break suggestion */}
+                {cycle.break_suggestion && (
+                  <div style={{ padding: "12px 16px", background: "var(--blue-bg)",
+                    borderBottom: "1px solid var(--border)", fontSize: 12 }}>
+                    <div style={{ fontWeight: 600, color: "var(--blue)", marginBottom: 6 }}>
+                      ✂ Suggested break point
+                    </div>
+                    <div style={{ color: "var(--text2)", lineHeight: 1.7 }}>
+                      Cut the call from{" "}
+                      <code style={{ background: "var(--bg3)", padding: "1px 5px", borderRadius: 3 }}>
+                        {cycle.break_suggestion.caller_name}
+                      </code>
+                      {" → "}
+                      <code style={{ background: "var(--bg3)", padding: "1px 5px", borderRadius: 3 }}>
+                        {cycle.break_suggestion.callee_name}
+                      </code>
+                      {" "}(call count: {cycle.break_suggestion.call_count}).
+                      This is the lowest-traffic edge in the cycle — least disruptive to remove.
+                    </div>
+                    {cycle.break_suggestion.caller_module !== cycle.break_suggestion.callee_module && (
+                      <div style={{ marginTop: 4, fontSize: 11, color: "var(--text3)" }}>
+                        {cycle.break_suggestion.caller_module} → {cycle.break_suggestion.callee_module}
+                      </div>
+                    )}
+                  </div>
+                )}
                 {cycle.nodes.map((node) => (
                   <div
                     key={node.hash}
