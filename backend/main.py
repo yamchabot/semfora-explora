@@ -88,7 +88,7 @@ def list_repos():
             node_count = cur.fetchone()["n"]
             cur.execute("SELECT COUNT(*) as n FROM edges")
             edge_count = cur.fetchone()["n"]
-            cur.execute("SELECT COUNT(DISTINCT module) as n FROM nodes WHERE module IS NOT NULL")
+            cur.execute("SELECT COUNT(DISTINCT module) as n FROM nodes WHERE module IS NOT NULL AND hash NOT LIKE 'ext:%'")
             module_count = cur.fetchone()["n"]
             conn.close()
         except Exception:
@@ -112,7 +112,7 @@ def repo_overview(repo_id: str):
     node_count = cur.fetchone()["n"]
     cur.execute("SELECT COUNT(*) as n FROM edges")
     edge_count = cur.fetchone()["n"]
-    cur.execute("SELECT COUNT(DISTINCT module) as n FROM nodes WHERE module IS NOT NULL")
+    cur.execute("SELECT COUNT(DISTINCT module) as n FROM nodes WHERE module IS NOT NULL AND hash NOT LIKE 'ext:%'")
     module_count = cur.fetchone()["n"]
     # Dead code: nodes with caller_count = 0 and not external
     cur.execute("SELECT COUNT(*) as n FROM nodes WHERE caller_count = 0 AND hash NOT LIKE 'ext:%'")
@@ -129,7 +129,8 @@ def repo_overview(repo_id: str):
     # Top modules by node count
     cur.execute("""
         SELECT module, COUNT(*) as cnt FROM nodes
-        WHERE module IS NOT NULL GROUP BY module ORDER BY cnt DESC LIMIT 10
+        WHERE module IS NOT NULL AND hash NOT LIKE 'ext:%'
+        GROUP BY module ORDER BY cnt DESC LIMIT 10
     """)
     top_modules = [row_to_dict(r) for r in cur.fetchall()]
     # Risk distribution
@@ -345,7 +346,7 @@ def list_modules(repo_id: str):
             COALESCE(SUM(n.complexity), 0) as total_complexity,
             COALESCE(AVG(n.complexity), 0) as avg_complexity
         FROM nodes n
-        WHERE n.module IS NOT NULL
+        WHERE n.module IS NOT NULL AND n.hash NOT LIKE 'ext:%'
         GROUP BY n.module
     """)
     modules_raw = {r["module"]: row_to_dict(r) for r in cur.fetchall()}
