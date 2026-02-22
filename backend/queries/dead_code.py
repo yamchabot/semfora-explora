@@ -1,37 +1,21 @@
-"""
-Dead code queries — DB I/O only.
-"""
+"""Dead code queries."""
 from __future__ import annotations
-
 import sqlite3
+from queries.core import fetch_nodes
 
-from db import row_to_dict
+_DEAD_WHERE  = "caller_count = 0 AND kind IN ('function', 'method', 'class')"
+_DEAD_FIELDS = ["hash", "name", "kind", "module", "file_path",
+                "line_start", "line_end", "complexity"]
 
 
 def fetch_dead_candidates(conn: sqlite3.Connection, limit: int = 200) -> tuple[list[dict], int]:
     """
-    Fetch zero-caller nodes eligible for dead-code analysis.
-
-    Returns (candidates, total_symbol_count).
-    total_symbol_count is used by the analytics layer to compute dead_ratio.
+    Zero-caller nodes eligible for dead-code analysis.
+    Returns (candidates, total_internal_symbol_count).
     """
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT hash, name, kind, module, file_path, line_start, line_end, complexity
-        FROM nodes
-        WHERE caller_count = 0
-          AND hash NOT LIKE 'ext:%'
-          AND kind IN ('function', 'method', 'class')
-        ORDER BY complexity DESC, name ASC
-        LIMIT ?
-        """,
-        (limit,),
-    )
-    candidates = [row_to_dict(r) for r in cur.fetchall()]
-
+    candidates = fetch_nodes(conn, fields=_DEAD_FIELDS, extra_where=_DEAD_WHERE,
+                             order_by="complexity DESC, name ASC", limit=limit)
     total = conn.execute(
         "SELECT COUNT(*) as n FROM nodes WHERE hash NOT LIKE 'ext:%'"
     ).fetchone()["n"]
-
     return candidates, total
