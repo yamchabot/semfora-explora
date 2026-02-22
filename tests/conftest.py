@@ -189,6 +189,10 @@ TASKBOARD_SLUGS = [
     "antipattern-tight-coupling",
     "antipattern-unstable-foundation",
     "antipattern-util-dumping-ground",
+    # New antipatterns
+    "antipattern-shotgun-surgery",
+    "antipattern-anemic-domain-model",
+    "antipattern-hub-spoke",
 ]
 
 
