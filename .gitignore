@@ -4,7 +4,7 @@ frontend/.vite/
 venv/
 __pycache__/
 *.pyc
-data/*.db
+data/*.enriched.db
 *.db-shm
 *.db-wal
 .env

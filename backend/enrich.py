@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import shutil
 import sqlite3
 import sys
 import time
@@ -49,6 +50,11 @@ import networkx as nx
 from networkx.algorithms.community import louvain_communities
 
 DATA_DIR = Path(__file__).parent.parent / "data"
+
+
+def enriched_path(db_path: Path) -> Path:
+    """Return the path for the enriched copy of a raw DB."""
+    return db_path.parent / (db_path.stem + ".enriched.db")
 
 DDL = """
 CREATE TABLE IF NOT EXISTS node_features (
@@ -392,12 +398,23 @@ def _compute_community_signals(
 
 # ── Main enrichment ───────────────────────────────────────────────────────────
 
-def enrich(db_path: Path, verbose: bool = True) -> None:
-    t0 = time.time()
-    if verbose:
-        print(f"Enriching {db_path.name} ...", flush=True)
+def enrich(db_path: Path, verbose: bool = True) -> Path:
+    """
+    Enrich a raw semfora DB by writing computed signals into a copy.
 
-    conn = sqlite3.connect(db_path)
+    The original DB is never modified. The enriched copy is written to
+    ``{stem}.enriched.db`` in the same directory and returned.
+    """
+    t0 = time.time()
+    out_path = enriched_path(db_path)
+
+    if verbose:
+        print(f"Enriching {db_path.name} → {out_path.name} ...", flush=True)
+
+    # Copy raw DB so we never touch the original
+    shutil.copy2(db_path, out_path)
+
+    conn = sqlite3.connect(out_path)
     conn.row_factory = sqlite3.Row
     conn.execute(DDL)
     conn.commit()
@@ -409,7 +426,7 @@ def enrich(db_path: Path, verbose: bool = True) -> None:
 
     if n == 0:
         conn.close()
-        return
+        return out_path
 
     steps = [
         ("SCC signals",         lambda: _compute_scc_signals(G, node_meta)),
@@ -484,17 +501,20 @@ def enrich(db_path: Path, verbose: bool = True) -> None:
     if verbose:
         print(f"  Done. {len(rows)} rows written in {round(time.time()-t0,1)}s\n")
 
+    return out_path
+
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Enrich semfora DB with graph signals.")
-    parser.add_argument("db", nargs="?", help="Path to .db file")
-    parser.add_argument("--all", action="store_true", help="Enrich all DBs in data/")
+    parser.add_argument("db", nargs="?", help="Path to raw .db file")
+    parser.add_argument("--all", action="store_true", help="Enrich all raw DBs in data/")
     args = parser.parse_args()
 
     if args.all:
-        dbs = sorted(DATA_DIR.glob("*.db"))
+        # Only glob raw DBs — skip *.enriched.db copies
+        dbs = sorted(p for p in DATA_DIR.glob("*.db") if ".enriched" not in p.name)
         print(f"Enriching {len(dbs)} databases in {DATA_DIR}/\n")
         for db in dbs:
             try:
