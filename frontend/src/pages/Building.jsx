@@ -132,46 +132,90 @@ function Block({ pos, node, isSelected, onClick, diffStatus }) {
   );
 }
 
-// ── BuildingCanvas — shared by both BuildingPage and DiffBuildingView ────────
-export function BuildingCanvas({ nodes, edges, onNodeClick, selected, getDiffStatus }) {
-  const layers = [0, 1, 2, 3, 4];
+// ── Gravity-based layout: position each node under the centroid of its callers ─
+function computeLayout(nodes, edges) {
+  const totalW = CANVAS_W - PADDING * 2;
+  const allByHash = Object.fromEntries(nodes.map(n => [n.hash, n]));
+
+  // callersOf[hash] = list of hashes that call this node
+  const callersOf = {};
+  for (const e of edges) {
+    if (!callersOf[e.to]) callersOf[e.to] = [];
+    callersOf[e.to].push(e.from);
+  }
+
+  // Group nodes by layer
   const byLayer = {};
   for (const n of nodes) {
     const l = n.layer ?? 4;
     if (!byLayer[l]) byLayer[l] = [];
     byLayer[l].push(n);
   }
-  for (const l of layers) {
-    if (byLayer[l]) {
-      byLayer[l].sort((a, b) => {
-        if (a.is_load_bearing !== b.is_load_bearing) return b.is_load_bearing ? 1 : -1;
-        return b.caller_count - a.caller_count;
-      });
-    }
-  }
 
-  // Assign x positions
-  const nodePos = {};  // hash -> {x, y, w, h, cx, cy, layerTopY}
-  for (const l of layers) {
+  // Canonical module lane: sorted module names → fractional position [0,1]
+  // Used as gravity fallback when no callers have been positioned yet
+  const allModules = [...new Set(nodes.map(n => n.module || ""))].sort();
+  const moduleLane = Object.fromEntries(
+    allModules.map((m, i) => [m, allModules.length > 1 ? i / (allModules.length - 1) : 0.5])
+  );
+
+  const nodePos = {}; // hash → {cx, cy, x, y, w, h, ltY}
+
+  // Process top-down: Leaves (4) → Foundation (0)
+  // Each layer's callers are already positioned when we reach a lower layer
+  for (const l of [4, 3, 2, 1, 0]) {
     const lnodes = byLayer[l] || [];
-    const totalW = CANVAS_W - PADDING * 2;
-    const spacing = lnodes.length > 0 ? totalW / lnodes.length : totalW;
+    if (lnodes.length === 0) continue;
+
+    const spacing = totalW / lnodes.length;
     const nodeW = Math.min(NODE_MAX_W, Math.max(NODE_MIN_W, spacing - 6));
     const ltY = layerTopY(l);
-    lnodes.forEach((n, i) => {
+
+    // Gravity score for each node: weighted-average X of its positioned callers
+    // (callers that live in a higher layer — already laid out since we go top-down)
+    const gravityScore = lnodes.map(n => {
+      const callerXs = (callersOf[n.hash] || [])
+        .filter(h => {
+          const cn = allByHash[h];
+          return cn && nodePos[h] && (cn.layer ?? 4) > l;
+        })
+        .map(h => nodePos[h].cx);
+
+      if (callerXs.length > 0) {
+        // Actual gravity: centroid of callers
+        return { n, score: callerXs.reduce((a, b) => a + b, 0) / callerXs.length, hasGravity: true };
+      } else {
+        // No positioned callers — use module lane as a stable fallback
+        const lane = moduleLane[n.module || ""] ?? 0.5;
+        return { n, score: PADDING + lane * totalW, hasGravity: false };
+      }
+    });
+
+    // Sort by gravity score. Within same score, load-bearing columns sort to the
+    // center of their group (they act as a keystone, not an edge-cap)
+    gravityScore.sort((a, b) => {
+      if (Math.abs(a.score - b.score) < 1) {
+        // same gravity region: columns first, then by caller count desc
+        if (a.n.is_load_bearing !== b.n.is_load_bearing) return a.n.is_load_bearing ? 0 : 1;
+        return b.n.caller_count - a.n.caller_count;
+      }
+      return a.score - b.score;
+    });
+
+    gravityScore.forEach(({ n }, i) => {
       const cx = PADDING + i * spacing + spacing / 2;
       const blockY = ltY + (LAYER_H - NODE_H) / 2;
-      nodePos[n.hash] = {
-        x: cx - nodeW / 2,
-        y: blockY,
-        w: nodeW,
-        h: NODE_H,
-        cx,
-        cy: blockY + NODE_H / 2,
-        ltY,
-      };
+      nodePos[n.hash] = { x: cx - nodeW / 2, y: blockY, w: nodeW, h: NODE_H, cx, cy: blockY + NODE_H / 2, ltY };
     });
   }
+
+  return { nodePos, byLayer };
+}
+
+// ── BuildingCanvas — shared by both BuildingPage and DiffBuildingView ────────
+export function BuildingCanvas({ nodes, edges, onNodeClick, selected, getDiffStatus }) {
+  const layers = [0, 1, 2, 3, 4];
+  const { nodePos } = computeLayout(nodes, edges);
 
   const totalH = PADDING * 2 + 5 * (LAYER_H + GAP);
 
