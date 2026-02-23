@@ -225,16 +225,17 @@ export default function Explore() {
   }, [filteredData, compareRepo, effectiveDims]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Edge color overrides from diff_status on explore graph_edges
+  // added=green, modified=yellow, removed=red (removed edges won't appear in HEAD graph)
+  const DIFF_EDGE_COLORS = { added: "#3fb950", modified: "#e3b341", removed: "#f85149" };
   const diffEdgeOverrides = useMemo(() => {
     if (!compareRepo || !filteredData?.graph_edges) return null;
     const map = new Map();
     for (const e of filteredData.graph_edges) {
-      if (e.diff_status === "added") {
-        map.set(`${e.source}|${e.target}`, "#3fb950");
-      }
+      const color = DIFF_EDGE_COLORS[e.diff_status];
+      if (color) map.set(`${e.source}|${e.target}`, color);
     }
     return map.size > 0 ? map : null;
-  }, [filteredData, compareRepo]);
+  }, [filteredData, compareRepo]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Summary counts for the legend (derived from rows)
   const diffStats = useMemo(() => {

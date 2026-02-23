@@ -88,6 +88,12 @@ def _annotate_diff(result: dict, dims: list[str], conn, status_map: dict, snap_a
     if not graph_edges:
         return
 
+    # Edge status:
+    #   "added"     — new relationship in HEAD (green)
+    #   "modified"  — existed in both, but ≥1 endpoint has changed code (yellow)
+    #   "unchanged" — existed in both, all endpoints unchanged (no color override)
+    #   "removed"   — existed in base only; can't show in HEAD graph
+
     if symbol_mode:
         # Build base edge set as (caller_vid, callee_vid)
         bh_a = snap_a.get("nodes_by_hash", {})
@@ -99,16 +105,34 @@ def _annotate_diff(result: dict, dims: list[str], conn, status_map: dict, snap_a
             for e in snap_a.get("edges", [])
             if (sv := vid_from_hash(e["caller_hash"])) and (tv := vid_from_hash(e["callee_hash"]))
         }
+        for edge in graph_edges:
+            src, tgt = edge.get("source", ""), edge.get("target", "")
+            if (src, tgt) not in base_edges:
+                edge["diff_status"] = "added"
+            elif status_map.get(src) in ("modified", "added") or status_map.get(tgt) in ("modified", "added"):
+                edge["diff_status"] = "modified"
+            else:
+                edge["diff_status"] = "unchanged"
     else:
         # Module/kind grain: compare at the group level using module_edges
-        base_edges = {
+        base_mod_edges: set[tuple[str, str]] = {
             (e.get("caller_module", ""), e.get("callee_module", ""))
             for e in snap_a.get("module_edges", [])
         }
-
-    for edge in graph_edges:
-        src, tgt = edge.get("source", ""), edge.get("target", "")
-        edge["diff_status"] = "unchanged" if (src, tgt) in base_edges else "added"
+        # Precompute which modules have any changed symbols
+        changed_modules: set[str] = {
+            vid.split("::")[0]
+            for vid, status in status_map.items()
+            if "::" in vid and status in ("added", "modified", "removed")
+        }
+        for edge in graph_edges:
+            src, tgt = edge.get("source", ""), edge.get("target", "")
+            if (src, tgt) not in base_mod_edges:
+                edge["diff_status"] = "added"
+            elif src in changed_modules or tgt in changed_modules:
+                edge["diff_status"] = "modified"
+            else:
+                edge["diff_status"] = "unchanged"
 
 
 @router.get("/api/repos/{repo_id}/explore")
