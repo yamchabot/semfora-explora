@@ -916,10 +916,27 @@ function makeGroupCentroidForce(strength) {
   return force;
 }
 
-// Step colors for highlighted edges: 5 steps away from selected node (index = hop distance)
-const STEP_EDGE_COLORS  = ["#ff9500", "#ffb84d", "#ffd280", "#ffeba3", "#fff4cc"];
-const STEP_EDGE_WIDTHS  = [2.8, 2.1, 1.5, 1.0, 0.65];
-const STEP_ARROW_LEN    = [8,   7,   6,   5,   4  ];
+// Generate N-step gradients for edge highlight (bright orange → faint cream)
+function makeStepColors(n) {
+  const a = [255, 149,   0]; // #ff9500 (step 0 = direct)
+  const b = [255, 244, 204]; // #fff4cc (step n-1 = faintest)
+  return Array.from({ length: n }, (_, i) => {
+    const t = n < 2 ? 0 : i / (n - 1);
+    return `rgb(${Math.round(a[0]+(b[0]-a[0])*t)},${Math.round(a[1]+(b[1]-a[1])*t)},${Math.round(a[2]+(b[2]-a[2])*t)})`;
+  });
+}
+function makeStepWidths(n) {
+  return Array.from({ length: n }, (_, i) => {
+    const t = n < 2 ? 0 : i / (n - 1);
+    return 2.8 + (0.65 - 2.8) * t;
+  });
+}
+function makeStepArrows(n) {
+  return Array.from({ length: n }, (_, i) => {
+    const t = n < 2 ? 0 : i / (n - 1);
+    return Math.round(8 + (4 - 8) * t);
+  });
+}
 
 function GraphRenderer({ data, measures, onNodeClick }) {
   const containerRef  = useRef(null);
@@ -929,6 +946,7 @@ function GraphRenderer({ data, measures, onNodeClick }) {
   const [topK, setTopK]           = useState(0);
   const [colorKeyOverride, setColorKeyOverride] = useState(null);
   const [selectedNodeId, setSelectedNodeId]     = useState(null);
+  const [fanOutDepth, setFanOutDepth]           = useState(5);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -1040,10 +1058,9 @@ function GraphRenderer({ data, measures, onNodeClick }) {
   }, [data, minWeight, topK, colorKey, colorStats, sizeKey, dim0, dim1, isBlobMode]);
 
   // BFS from selectedNodeId following directed edges forward (source → target).
-  // Returns Map<nodeId, hopDistance> for nodes reachable within 5 hops.
+  // Returns Map<nodeId, hopDistance> for nodes reachable within fanOutDepth hops.
   const bfsDistances = useMemo(() => {
     if (!selectedNodeId || !graphData.links.length) return new Map();
-    // Build adjacency from directed edges (follow forward direction)
     const adj = new Map();
     for (const link of graphData.links) {
       const src = typeof link.source === "object" ? link.source.id : link.source;
@@ -1056,13 +1073,18 @@ function GraphRenderer({ data, measures, onNodeClick }) {
     while (queue.length) {
       const cur = queue.shift();
       const d = dist.get(cur);
-      if (d >= 5) continue;
+      if (d >= fanOutDepth) continue;
       for (const nb of (adj.get(cur) || [])) {
         if (!dist.has(nb)) { dist.set(nb, d + 1); queue.push(nb); }
       }
     }
     return dist;
-  }, [selectedNodeId, graphData.links]);
+  }, [selectedNodeId, graphData.links, fanOutDepth]);
+
+  // Dynamic step arrays — recomputed when fanOutDepth changes
+  const stepColors = useMemo(() => makeStepColors(fanOutDepth), [fanOutDepth]);
+  const stepWidths = useMemo(() => makeStepWidths(fanOutDepth), [fanOutDepth]);
+  const stepArrows = useMemo(() => makeStepArrows(fanOutDepth), [fanOutDepth]);
 
   useEffect(() => {
     const fg = fgRef.current;
@@ -1121,6 +1143,13 @@ function GraphRenderer({ data, measures, onNodeClick }) {
           <input type="number" min={0} placeholder="all" value={topK||""}
             onChange={e => setTopK(Math.max(0,+e.target.value||0))}
             style={{ width:70, padding:"3px 8px", fontSize:12 }}
+          />
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:8, fontSize:12 }}>
+          <span style={{ color:"var(--text2)" }}>Fan-out depth:</span>
+          <input type="number" min={1} max={10} value={fanOutDepth}
+            onChange={e => setFanOutDepth(Math.max(1, Math.min(10, +e.target.value || 1)))}
+            style={{ width:55, padding:"3px 8px", fontSize:12 }}
           />
         </div>
         <span style={{ fontSize:11, color:"var(--text3)" }}>{visibleEdges} / {totalEdges} edges shown</span>
@@ -1218,22 +1247,22 @@ function GraphRenderer({ data, measures, onNodeClick }) {
                 if (!selectedNodeId) return Math.log(1 + (link.value||1)) * 0.8 + 0.3;
                 const src = typeof link.source === "object" ? link.source.id : link.source;
                 const d   = bfsDistances.get(src);
-                if (d == null || d >= STEP_EDGE_WIDTHS.length) return 0.3;
-                return STEP_EDGE_WIDTHS[d];
+                if (d == null || d >= stepWidths.length) return 0.3;
+                return stepWidths[d];
               }}
               linkColor={link => {
                 if (!selectedNodeId) return "#30363d";
                 const src = typeof link.source === "object" ? link.source.id : link.source;
                 const d   = bfsDistances.get(src);
-                if (d == null || d >= STEP_EDGE_COLORS.length) return "rgba(48,54,61,0.15)";
-                return STEP_EDGE_COLORS[d];
+                if (d == null || d >= stepColors.length) return "rgba(48,54,61,0.15)";
+                return stepColors[d];
               }}
               linkDirectionalArrowLength={link => {
                 if (!selectedNodeId) return 5;
                 const src = typeof link.source === "object" ? link.source.id : link.source;
                 const d   = bfsDistances.get(src);
-                if (d == null || d >= STEP_ARROW_LEN.length) return 2;
-                return STEP_ARROW_LEN[d];
+                if (d == null || d >= stepArrows.length) return 2;
+                return stepArrows[d];
               }}
               linkDirectionalArrowRelPos={1}
               onNodeClick={node => {
