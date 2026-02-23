@@ -1152,12 +1152,22 @@ function GraphRenderer({ data, measures, onNodeClick }) {
       const v = typeof link.target === "object" ? link.target.id : link.target;
       let minLen = Infinity;
       for (let i = 0; i < sel.length; i++) {
-        const du = fwd[i].get(u);
+        const du  = fwd[i].get(u);  // hops from sel[i] → u
         if (du == null) continue;
+        const dvu = fwd[i].get(v);  // hops from sel[i] → v
+        // Monotone-forward guard: v must be strictly farther from S than u.
+        // Edges that loop back (e.g. D→B where dist(S,B) < dist(S,D)) are rejected.
+        if (dvu == null || dvu <= du) continue;
+
         for (let j = 0; j < sel.length; j++) {
           if (i === j) continue;
-          const dv = bwd[j].get(v); // hops from v back to sel[j]
+          const dv  = bwd[j].get(v);  // hops from v → sel[j] (via reverse graph)
           if (dv == null) continue;
+          const duT = bwd[j].get(u);  // hops from u → sel[j]
+          // Monotone-backward guard: u must be strictly farther from T than v.
+          // Ensures the edge is making progress toward T, not diverging.
+          if (duT == null || duT <= dv) continue;
+
           const len = du + 1 + dv;
           if (len <= fanOutDepth) minLen = Math.min(minLen, len);
         }
