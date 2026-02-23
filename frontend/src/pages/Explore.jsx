@@ -5,6 +5,20 @@ import ForceGraph2D from "react-force-graph-2d";
 import { RepoContext } from "../App";
 import { api } from "../api";
 import { applyFilters, filterEdgesToNodes } from "../utils/filterUtils.js";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  horizontalListSortingStrategy,
+  useSortable,
+  arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 // ── Metadata ───────────────────────────────────────────────────────────────────
 
@@ -284,7 +298,7 @@ function RatioCell({ value }) {
 
 // ── MeasureChip — with inline agg dropdown ─────────────────────────────────────
 
-function MeasureChip({ m, onRemove, onChangeAgg }) {
+function MeasureChip({ m, onRemove, onChangeAgg, dragHandleProps }) {
   const [open, setOpen] = useState(false);
   const ref             = useRef(null);
 
@@ -300,7 +314,13 @@ function MeasureChip({ m, onRemove, onChangeAgg }) {
       background:"var(--bg3)", border:"1px solid var(--border2)",
       borderRadius:6, fontSize:12, userSelect:"none", position:"relative",
     }}>
-      <span style={{ padding:"3px 8px", color:"var(--text)" }}>{measureLabel(m)}</span>
+      {/* Drag handle */}
+      <span
+        {...dragHandleProps}
+        style={{ padding:"3px 4px 3px 6px", color:"var(--text3)", fontSize:11, cursor:"grab", touchAction:"none" }}
+        title="Drag to reorder"
+      >⠿</span>
+      <span style={{ padding:"3px 8px 3px 2px", color:"var(--text)" }}>{measureLabel(m)}</span>
 
       {/* Agg selector — only for dynamic (field) measures */}
       {!m.special && (
@@ -431,13 +451,69 @@ function dimDisplayLabel(d) {
   return d;
 }
 
-function DimChip({ label, index, onRemove }) {
+function DimChip({ label, index, onRemove, dragHandleProps }) {
   return (
     <div style={{ display:"flex", alignItems:"center", gap:5, background:"var(--blue-bg)", border:"1px solid var(--blue)", borderRadius:6, padding:"3px 6px 3px 4px" }}>
+      {/* Drag handle */}
+      <span
+        {...dragHandleProps}
+        style={{ color:"var(--blue)", fontSize:11, cursor:"grab", lineHeight:1, padding:"0 1px", touchAction:"none" }}
+        title="Drag to reorder"
+      >⠿</span>
       <span style={{ background:"var(--blue)", color:"#fff", borderRadius:"50%", width:16, height:16, display:"flex", alignItems:"center", justifyContent:"center", fontSize:9, fontWeight:700, flexShrink:0 }}>{index+1}</span>
       <span style={{ fontFamily:"monospace", fontSize:12, color:"var(--text)" }}>{dimDisplayLabel(label)}</span>
       <button onClick={onRemove} style={{ background:"none", border:"none", color:"var(--text3)", cursor:"pointer", padding:"0 2px", fontSize:13, lineHeight:1 }}>×</button>
     </div>
+  );
+}
+
+// ── Sortable wrappers (DnD) ────────────────────────────────────────────────────
+
+function SortableDimChip({ id, label, index, onRemove }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity:   isDragging ? 0.45 : 1,
+        zIndex:    isDragging ? 50 : "auto",
+        display:   "inline-flex",
+      }}
+    >
+      <DimChip
+        label={label}
+        index={index}
+        onRemove={onRemove}
+        dragHandleProps={{ ...attributes, ...listeners }}
+      />
+    </div>
+  );
+}
+
+function SortableMeasureChip({ id, m, onRemove, onChangeAgg }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id });
+  return (
+    <span
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity:   isDragging ? 0.45 : 1,
+        zIndex:    isDragging ? 50 : "auto",
+        display:   "inline-flex",
+      }}
+    >
+      <MeasureChip
+        m={m}
+        onRemove={onRemove}
+        onChangeAgg={onChangeAgg}
+        dragHandleProps={{ ...attributes, ...listeners }}
+      />
+    </span>
   );
 }
 
@@ -1211,6 +1287,29 @@ export default function Explore() {
   );
   const [hoveredGraphNode, setHoveredGraphNode] = useState(null);
 
+  // DnD sensors — require 5px of movement before activating so clicks still work
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+  );
+
+  function handleDimDragEnd({ active, over }) {
+    if (!over || active.id === over.id) return;
+    setDims(prev => {
+      const oldIdx = prev.indexOf(active.id);
+      const newIdx = prev.indexOf(over.id);
+      return arrayMove(prev, oldIdx, newIdx);
+    });
+  }
+
+  function handleMeasureDragEnd({ active, over }) {
+    if (!over || active.id === over.id) return;
+    setMeasures(prev => {
+      const oldIdx = prev.findIndex(m => measureKey(m) === active.id);
+      const newIdx = prev.findIndex(m => measureKey(m) === over.id);
+      return arrayMove(prev, oldIdx, newIdx);
+    });
+  }
+
   // On mount: if URL has a repo param, sync it to context
   useEffect(() => {
     const r = searchParams.get("r");
@@ -1325,7 +1424,13 @@ export default function Explore() {
         {renderer!=="nodes" && (
           <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12, flexWrap:"wrap" }}>
             <span style={{ fontSize:11, fontWeight:600, color:"var(--text3)", textTransform:"uppercase", letterSpacing:"0.08em", width:80 }}>Group by</span>
-            {dims.map((d,i)=><DimChip key={d} label={d} index={i} onRemove={()=>setDims(p=>p.filter(x=>x!==d))}/>)}
+            <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDimDragEnd}>
+              <SortableContext items={dims} strategy={horizontalListSortingStrategy}>
+                {dims.map((d,i) => (
+                  <SortableDimChip key={d} id={d} label={d} index={i} onRemove={() => setDims(p => p.filter(x => x !== d))} />
+                ))}
+              </SortableContext>
+            </DndContext>
             <AddDimMenu available={availableDims} onAdd={d=>setDims(p=>[...p,d])}/>
             {symbolMode && (
               <span style={{ fontSize:11, color:"var(--text3)", fontStyle:"italic", marginLeft:4 }}>
@@ -1351,14 +1456,19 @@ export default function Explore() {
           <div style={{ display:"flex", alignItems:"flex-start", gap:8, flexWrap:"wrap", marginBottom:12 }}>
             <span style={{ fontSize:11, fontWeight:600, color:"var(--text3)", textTransform:"uppercase", letterSpacing:"0.08em", width:80, paddingTop:5 }}>Measures</span>
             <div style={{ display:"flex", flexWrap:"wrap", gap:6, alignItems:"center" }}>
-              {measures.map(m=>(
-                <MeasureChip
-                  key={measureKey(m)}
-                  m={m}
-                  onRemove={()=>removeMeasure(measureKey(m))}
-                  onChangeAgg={agg=>changeAgg(measureKey(m),agg)}
-                />
-              ))}
+              <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleMeasureDragEnd}>
+                <SortableContext items={measures.map(measureKey)} strategy={horizontalListSortingStrategy}>
+                  {measures.map(m => (
+                    <SortableMeasureChip
+                      key={measureKey(m)}
+                      id={measureKey(m)}
+                      m={m}
+                      onRemove={() => removeMeasure(measureKey(m))}
+                      onChangeAgg={agg => changeAgg(measureKey(m), agg)}
+                    />
+                  ))}
+                </SortableContext>
+              </DndContext>
               <AddMeasureMenu onAdd={addMeasure} hasEnriched={hasEnriched}/>
             </div>
           </div>
