@@ -1365,8 +1365,16 @@ function GraphRenderer({ data, measures, onNodeClick }) {
           />
         </div>
         {selectedNodeIds.size >= 2 && (
-          <span style={{ fontSize:11, color:"var(--blue)", fontWeight:600 }}>
-            🔗 {selectedNodeIds.size} nodes — showing connecting chains
+          <span style={{ display:"flex", alignItems:"center", gap:6 }}>
+            <span style={{ fontSize:11, color:"var(--blue)", fontWeight:600 }}>
+              🔗 {selectedNodeIds.size} nodes — showing connecting chains
+            </span>
+            <button
+              onClick={() => setSelectedNodeIds(new Set())}
+              style={{ fontSize:11, padding:"2px 7px", background:"var(--bg3)",
+                border:"1px solid var(--border2)", borderRadius:4,
+                color:"var(--text2)", cursor:"pointer" }}
+            >clear</button>
           </span>
         )}
         <span style={{ fontSize:11, color:"var(--text3)" }}>{visibleEdges} / {totalEdges} edges shown</span>
