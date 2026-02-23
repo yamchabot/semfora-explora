@@ -21,64 +21,14 @@ const MAX_LABEL = 22;
 
 const BLOB_PALETTE = ["#58a6ff","#3fb950","#e3b341","#f85149","#a371f7","#39c5cf","#ff7b54","#56d364"];
 
-// ── Voronoi helpers ──────────────────────────────────────────────────────────
-
-/**
- * Sutherland-Hodgman halfplane clip.
- * Keeps the portion of `poly` on the side where dot((P-B), N) >= 0.
- */
-function clipHalfplane(poly, bx, by, nx, ny) {
-  const out = [];
-  for (let i = 0; i < poly.length; i++) {
-    const P = poly[i];
-    const Q = poly[(i + 1) % poly.length];
-    const pd = nx * (P[0] - bx) + ny * (P[1] - by);
-    const qd = nx * (Q[0] - bx) + ny * (Q[1] - by);
-    if (pd >= 0) out.push(P);
-    if ((pd >= 0) !== (qd >= 0)) {
-      const denom = nx * (Q[0] - P[0]) + ny * (Q[1] - P[1]);
-      if (Math.abs(denom) > 1e-10) {
-        const t = (nx * (bx - P[0]) + ny * (by - P[1])) / denom;
-        out.push([P[0] + t * (Q[0] - P[0]), P[1] + t * (Q[1] - P[1])]);
-      }
-    }
-  }
-  return out;
-}
-
-/**
- * Compute the Voronoi cell polygon for a centroid, clipped to a bounding box.
- * `allCentroids` = [[cx,cy], ...] for ALL groups (including the own centroid).
- * `shrink` = inset the boundaries by this many graph-units (creates a visible gap).
- */
-function voronoiCell(ownCx, ownCy, allCentroids, bbox, shrink = 0) {
-  const [xMin, yMin, xMax, yMax] = bbox;
-  let poly = [[xMin, yMin], [xMax, yMin], [xMax, yMax], [xMin, yMax]];
-
-  for (const [ox, oy] of allCentroids) {
-    if (ox === ownCx && oy === ownCy) continue;
-    // Midpoint on the Voronoi boundary (perpendicular bisector)
-    const bx = (ownCx + ox) / 2;
-    const by = (ownCy + oy) / 2;
-    // Inward normal: from other toward own (scaled so we can shrink)
-    const len = Math.sqrt((ownCx - ox) ** 2 + (ownCy - oy) ** 2) || 1;
-    const nx  = (ownCx - ox) / len;
-    const ny  = (ownCy - oy) / len;
-    // Shift the boundary inward by `shrink` graph-units
-    poly = clipHalfplane(poly, bx + nx * shrink, by + ny * shrink, nx, ny);
-    if (poly.length < 3) return [];
-  }
-  return poly;
-}
-
 // ── Blob drawing ─────────────────────────────────────────────────────────────
 
 /**
  * Draw a smooth blob (filled + stroked) around hull points.
- * When `voronoiPoly` is provided, the blob is canvas-clipped to that polygon,
- * guaranteeing it never overlaps an adjacent group's blob.
+ * Fill and stroke are drawn with the same unclipped blob path so the shape is
+ * always a complete smooth oval (no flat edge at adjacent-blob boundaries).
  */
-function drawBlob(ctx, hull, padding, lineWidth, color, voronoiPoly = null) {
+function drawBlob(ctx, hull, padding, lineWidth, color) {
   if (!hull?.length) return;
   // Expand each point outward from centroid
   const cx = hull.reduce((s,p)=>s+p[0],0) / hull.length;
@@ -107,67 +57,26 @@ function drawBlob(ctx, hull, padding, lineWidth, color, voronoiPoly = null) {
 
   const n = exp.length;
 
-  // Build the blob path first (we need it for both fill and stroke)
+  // Draw the blob path once — fill and stroke use the same shape, no clipping.
+  // Previously the fill was clipped to the Voronoi cell which caused a flat edge
+  // on the side facing an adjacent blob. Now both are unclipped so the shape is
+  // always a complete smooth oval. Adjacent fills at 12% opacity barely overlap.
   ctx.beginPath();
   if (n === 1) {
-    ctx.arc(exp[0][0], exp[0][1], padding, 0, Math.PI*2);
+    ctx.arc(exp[0][0], exp[0][1], padding, 0, Math.PI * 2);
   } else {
-    const mid = i => [(exp[i][0]+exp[(i+1)%n][0])/2, (exp[i][1]+exp[(i+1)%n][1])/2];
+    const mid = i => [(exp[i][0] + exp[(i+1)%n][0]) / 2, (exp[i][1] + exp[(i+1)%n][1]) / 2];
     const m0 = mid(0);
     ctx.moveTo(m0[0], m0[1]);
     for (let i = 0; i < n; i++) {
-      const m = mid((i+1)%n);
+      const m = mid((i+1) % n);
       ctx.quadraticCurveTo(exp[(i+1)%n][0], exp[(i+1)%n][1], m[0], m[1]);
     }
   }
   ctx.closePath();
-
-  // Fill — clipped to Voronoi cell so adjacent blobs never overlap visually.
-  // The canvas path is NOT part of the saved state, so it persists through
-  // save/restore and we can reuse it for the unclipped stroke below.
-  ctx.save();
-  if (voronoiPoly?.length >= 3) {
-    ctx.beginPath();
-    ctx.moveTo(voronoiPoly[0][0], voronoiPoly[0][1]);
-    for (let i = 1; i < voronoiPoly.length; i++) ctx.lineTo(voronoiPoly[i][0], voronoiPoly[i][1]);
-    ctx.closePath();
-    ctx.clip();
-    // Rebuild blob path inside clip context (clip() resets the path)
-    ctx.beginPath();
-    if (n === 1) {
-      ctx.arc(exp[0][0], exp[0][1], padding, 0, Math.PI*2);
-    } else {
-      const mid = i => [(exp[i][0]+exp[(i+1)%n][0])/2, (exp[i][1]+exp[(i+1)%n][1])/2];
-      const m0 = mid(0);
-      ctx.moveTo(m0[0], m0[1]);
-      for (let i = 0; i < n; i++) {
-        const m = mid((i+1)%n);
-        ctx.quadraticCurveTo(exp[(i+1)%n][0], exp[(i+1)%n][1], m[0], m[1]);
-      }
-    }
-    ctx.closePath();
-  }
-  ctx.fillStyle = color + "1e";   // ~12% opacity fill
+  ctx.fillStyle   = color + "1e";   // ~12% opacity fill
   ctx.fill();
-  ctx.restore();  // removes Voronoi clip — path is NOT preserved here so redraw below
-
-  // Stroke — drawn WITHOUT Voronoi clipping so the border is visible even where
-  // two adjacent blobs meet. The stroke bleeds slightly past the boundary gap,
-  // giving each blob a visible colored outline at every edge.
-  ctx.beginPath();
-  if (n === 1) {
-    ctx.arc(exp[0][0], exp[0][1], padding, 0, Math.PI*2);
-  } else {
-    const mid = i => [(exp[i][0]+exp[(i+1)%n][0])/2, (exp[i][1]+exp[(i+1)%n][1])/2];
-    const m0 = mid(0);
-    ctx.moveTo(m0[0], m0[1]);
-    for (let i = 0; i < n; i++) {
-      const m = mid((i+1)%n);
-      ctx.quadraticCurveTo(exp[(i+1)%n][0], exp[(i+1)%n][1], m[0], m[1]);
-    }
-  }
-  ctx.closePath();
-  ctx.strokeStyle = color + "99";   // ~60% opacity stroke (slightly stronger than fill-only)
+  ctx.strokeStyle = color + "99";   // ~60% opacity stroke
   ctx.lineWidth   = lineWidth;
   ctx.stroke();
 }
@@ -175,70 +84,113 @@ function drawBlob(ctx, hull, padding, lineWidth, color, voronoiPoly = null) {
 // ── Group forces ─────────────────────────────────────────────────────────────
 
 /**
- * Voronoi containment force for blob mode.
+ * Group separation force for blob mode.
  *
- * Two effects per tick:
- *   1. Gentle centroid attraction (keeps groups cohesive)
- *   2. Boundary restoring force: when a node crosses the Voronoi boundary
- *      into another group's territory, push it back proportionally.
+ * Three-stage approach per tick:
+ *   1. Gentle per-node centroid attraction (velocity, alpha-dependent)
+ *   2. Group-level blob separation: if two groups' blobs overlap (centroid
+ *      distance < sum of radii + padding), push ALL nodes in each group apart
+ *      as a unit.  This is a direct position push, alpha-independent, so it
+ *      works even on a fully cooled simulation and can overcome link forces.
+ *   3. Individual straggler enforcement: any node that ends up on the wrong
+ *      side of the Voronoi boundary gets pulled back.
  *
- * This replaces the old simple centroid-only force and ensures that nodes
- * stay inside their correct blob even when cross-group link forces are strong.
+ * @param {number} attractStrength   – centroid attraction per tick (velocity)
+ * @param {number} separationStrength – group-push magnitude per overlap unit
+ * @param {number} blobPadding       – minimum gap (graph units) between blob edges
  */
-export function makeVoronoiContainmentForce(attractStrength = 0.08, boundaryStrength = 0.6) {
+export function makeVoronoiContainmentForce(
+  attractStrength   = 0.10,
+  separationStrength = 0.35,
+  blobPadding        = 60,
+) {
   let _nodes = [];
-  function force(alpha) {
-    // Compute group centroids from current positions
-    const centroids = new Map();
-    for (const n of _nodes) {
-      if (!n.group) continue;
-      if (!centroids.has(n.group)) centroids.set(n.group, {x:0, y:0, count:0});
-      const c = centroids.get(n.group);
-      c.x += n.x; c.y += n.y; c.count++;
-    }
-    for (const c of centroids.values()) { c.x /= c.count; c.y /= c.count; }
-    const centList = [...centroids.entries()];
 
+  function force(alpha) {
+    // ── 1. Compute per-group centroid + max-radius ──────────────────────────
+    const groups = new Map(); // group → { x, y, count, r }
     for (const n of _nodes) {
       if (!n.group || n.x == null) continue;
-      const own = centroids.get(n.group);
-      if (!own) continue;
+      if (!groups.has(n.group)) groups.set(n.group, { x: 0, y: 0, count: 0, r: 0 });
+      const g = groups.get(n.group);
+      g.x += n.x; g.y += n.y; g.count++;
+    }
+    for (const g of groups.values()) { g.x /= g.count; g.y /= g.count; }
+    // max distance from centroid → rough blob radius
+    for (const n of _nodes) {
+      if (!n.group || n.x == null) continue;
+      const g = groups.get(n.group);
+      const d = Math.sqrt((n.x - g.x) ** 2 + (n.y - g.y) ** 2);
+      if (d > g.r) g.r = d;
+    }
 
-      // 1. Gentle attraction toward own centroid
+    const groupList = [...groups.entries()];
+
+    // ── 2. Gentle per-node centroid attraction ──────────────────────────────
+    for (const n of _nodes) {
+      if (!n.group || n.x == null) continue;
+      const own = groups.get(n.group);
+      if (!own) continue;
       n.vx += (own.x - n.x) * attractStrength * alpha;
       n.vy += (own.y - n.y) * attractStrength * alpha;
+    }
 
-      // 2. Voronoi boundary enforcement — alpha-INDEPENDENT direct position push.
-      // Velocity-based forces fade to zero as the simulation cools, allowing
-      // strong link forces to drag nodes permanently across blob boundaries.
-      // Instead, we directly adjust n.x/n.y each tick, which works regardless
-      // of the current alpha, keeping nodes contained even in a frozen layout.
-      const ownDist = Math.sqrt((n.x - own.x) ** 2 + (n.y - own.y) ** 2) || 0.001;
-      for (const [g, c] of centList) {
-        if (g === n.group) continue;
-        const odx = n.x - c.x, ody = n.y - c.y;
-        const otherDist = Math.sqrt(odx * odx + ody * ody) || 0.001;
-        if (otherDist < ownDist) {
-          // Node is on the wrong side of the Voronoi boundary.
-          // crossDist = how far past the midpoint it has traveled.
-          const crossDist = (ownDist - otherDist) * 0.5;
-          // Push position directly toward own centroid (no alpha factor).
-          const frac = (crossDist / ownDist) * boundaryStrength;
-          n.x += (own.x - n.x) * frac;
-          n.y += (own.y - n.y) * frac;
-          // Also cancel velocity in the direction of the wrong centroid
-          // so the node doesn't immediately drift back across.
-          const cx = c.x - n.x, cy = c.y - n.y;
-          const clen = Math.sqrt(cx * cx + cy * cy) || 1;
-          const proj = n.vx * (cx / clen) + n.vy * (cy / clen);
-          if (proj > 0) {
-            n.vx -= (cx / clen) * proj * 0.6;
-            n.vy -= (cy / clen) * proj * 0.6;
+    // ── 3. Group-level separation (alpha-independent position push) ─────────
+    // Push entire groups apart when their blobs overlap or are too close.
+    // Moving all nodes in a group together preserves internal structure while
+    // driving blobs into non-overlapping positions.
+    for (let i = 0; i < groupList.length; i++) {
+      const [gA, cA] = groupList[i];
+      for (let j = i + 1; j < groupList.length; j++) {
+        const [gB, cB] = groupList[j];
+        const dx = cA.x - cB.x, dy = cA.y - cB.y;
+        const d  = Math.sqrt(dx * dx + dy * dy) || 0.001;
+
+        // Desired minimum centroid-to-centroid distance
+        const rA          = Math.max(cA.r, 40);
+        const rB          = Math.max(cB.r, 40);
+        const desiredDist = rA + rB + blobPadding;
+
+        if (d < desiredDist) {
+          // Normalised push direction (A away from B)
+          const nx = dx / d, ny = dy / d;
+          // Push proportional to how much they overlap, independent of alpha
+          const overlap  = (desiredDist - d) / desiredDist;
+          const pushMag  = overlap * separationStrength;
+
+          for (const n of _nodes) {
+            if (n.x == null) continue;
+            if (n.group === gA) { n.x += nx * pushMag; n.y += ny * pushMag; }
+            if (n.group === gB) { n.x -= nx * pushMag; n.y -= ny * pushMag; }
           }
         }
       }
     }
+
+    // ── 4. Per-node straggler enforcement (catch nodes that still crossed) ──
+    for (const n of _nodes) {
+      if (!n.group || n.x == null) continue;
+      const own = groups.get(n.group);
+      if (!own) continue;
+      const ownDist = Math.sqrt((n.x - own.x) ** 2 + (n.y - own.y) ** 2) || 0.001;
+      for (const [g, c] of groupList) {
+        if (g === n.group) continue;
+        const otherDist = Math.sqrt((n.x - c.x) ** 2 + (n.y - c.y) ** 2) || 0.001;
+        if (otherDist < ownDist) {
+          const crossDist = (ownDist - otherDist) * 0.5;
+          const frac      = Math.min((crossDist / ownDist) * 0.5, 0.3);
+          n.x += (own.x - n.x) * frac;
+          n.y += (own.y - n.y) * frac;
+          // Cancel velocity toward wrong group
+          const cx = c.x - n.x, cy = c.y - n.y;
+          const cl = Math.sqrt(cx * cx + cy * cy) || 1;
+          const proj = n.vx * (cx / cl) + n.vy * (cy / cl);
+          if (proj > 0) { n.vx -= (cx / cl) * proj; n.vy -= (cy / cl) * proj; }
+        }
+      }
+    }
   }
+
   force.initialize = nodes => { _nodes = nodes; };
   return force;
 }
@@ -320,7 +272,11 @@ export default function GraphRenderer({ data, measures, onNodeClick,
   const SPREAD_DEFAULT = 350;
   const [forceSpread, setForceSpread] = useState(SPREAD_DEFAULT);
   const zoomTransformRef  = useRef({ k: 1, x: 0, y: 0 });
-  const didOffsetRef = useRef(false);
+  const didOffsetRef      = useRef(false);
+  // Persist node positions across graphData rebuilds (measure changes keep layout stable).
+  // Maps nodeId → {x, y}; saved periodically in onRenderFramePre.
+  const nodePositionsRef  = useRef(new Map());
+  const posFrameCountRef  = useRef(0);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -383,10 +339,55 @@ export default function GraphRenderer({ data, measures, onNodeClick,
     };
   }, [colorKey]);
 
-  const graphData = useMemo(
-    () => buildGraphData(data, { minWeight, topK, colorKey, colorStats, sizeKey, hideIsolated, colorFn: diffColorFn }),
-    [data, minWeight, topK, colorKey, colorStats, sizeKey, hideIsolated, diffColorFn],
-  );
+  const graphData = useMemo(() => {
+    const gd = buildGraphData(data, { minWeight, topK, colorKey, colorStats, sizeKey, hideIsolated, colorFn: diffColorFn });
+
+    // ── Position seeding ─────────────────────────────────────────────────────
+    // D3 only randomises a node's position when isNaN(node.x), so anything we
+    // set here will be respected by the simulation.  We do two things:
+    //
+    //   1. Restore previously saved positions (nodePositionsRef) so that layout
+    //      survives measure-only changes (same nodes, new colours/sizes).
+    //
+    //   2. For nodes that have no saved position (first load, new nodes),
+    //      pre-position them in a group-circle layout so the simulation starts
+    //      near the desired separated state rather than fully random.
+
+    // 1. Restore saved positions
+    const savedPos = nodePositionsRef.current;
+    for (const node of gd.nodes) {
+      const p = savedPos.get(node.id);
+      if (p) { node.x = p.x; node.y = p.y; node.vx = 0; node.vy = 0; }
+    }
+
+    // 2. Pre-position un-placed nodes in blob mode
+    if (gd.isBlobMode) {
+      const groupsList = [...new Set(gd.nodes.map(n => n.group).filter(Boolean))];
+      const numGroups  = groupsList.length;
+      if (numGroups > 1) {
+        // Space groups in a circle with radius proportional to group count.
+        const spread = Math.max(300, 120 * Math.sqrt(numGroups));
+        const groupPos = new Map(groupsList.map((g, i) => {
+          const angle = (2 * Math.PI * i) / numGroups;
+          return [g, { x: Math.cos(angle) * spread, y: Math.sin(angle) * spread }];
+        }));
+        for (const node of gd.nodes) {
+          if (node.x == null || isNaN(node.x)) {
+            const gp = groupPos.get(node.group);
+            if (gp) {
+              // Deterministic jitter based on node index (avoids useMemo non-purity)
+              const idx = gd.nodes.indexOf(node);
+              const jitter = 80;
+              node.x = gp.x + Math.cos(idx * 2.399) * jitter * (0.5 + Math.abs(Math.sin(idx)));
+              node.y = gp.y + Math.sin(idx * 2.399) * jitter * (0.5 + Math.abs(Math.cos(idx)));
+            }
+          }
+        }
+      }
+    }
+
+    return gd;
+  }, [data, minWeight, topK, colorKey, colorStats, sizeKey, hideIsolated, diffColorFn]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reset coupling view when the underlying API data changes (new repo, dims, etc.).
   // Depends on `data` (the prop) rather than `graphData` (derived useMemo) so that
@@ -478,14 +479,55 @@ export default function GraphRenderer({ data, measures, onNodeClick,
   useEffect(() => {
     const fg = fgRef.current;
     if (!fg) return;
+
     const charge = fg.d3Force("charge");
     if (charge) charge.strength(-forceSpread).distanceMax(Math.round(400 * forceSpread / SPREAD_DEFAULT));
+
     const link = fg.d3Force("link");
-    if (link) link.distance(linkDistBase);
-    // boundaryStrength=0.25: direct position push (alpha-independent) so nodes
-    // stay in their blob even after the simulation cools. 0.25 keeps convergence
-    // smooth without oscillation (max movement ~12.5% of ownDist per tick).
-    fg.d3Force("groupCentroid", graphData.isBlobMode ? makeVoronoiContainmentForce(0.08, 0.25) : null);
+    if (link) {
+      link.distance(linkDistBase);
+      if (graphData.isBlobMode) {
+        // Cross-group links are drawn but their physics pull is heavily damped.
+        // Default link strength is 0.5; cross-group links at 0.02 are 25× weaker,
+        // so they cannot overcome the group-separation force that keeps blobs apart.
+        const nodeGroupMap = new Map(graphData.nodes.map(n => [n.id, n.group]));
+        link.strength(l => {
+          const src = typeof l.source === "object" ? l.source.id : l.source;
+          const tgt = typeof l.target === "object" ? l.target.id : l.target;
+          return nodeGroupMap.get(src) !== nodeGroupMap.get(tgt) ? 0.02 : 0.4;
+        });
+      } else {
+        link.strength(0.5);
+      }
+    }
+
+    if (graphData.isBlobMode) {
+      // Pre-position nodes that have no coordinates yet into a group-circle
+      // layout so the simulation starts from a near-separated state rather than
+      // fully random (which can create deep interleaving that's hard to untangle).
+      const groupsList = [...new Set(graphData.nodes.map(n => n.group).filter(Boolean))];
+      const numGroups  = groupsList.length;
+      if (numGroups > 1) {
+        const spread   = Math.max(250, 100 * Math.sqrt(numGroups));
+        const groupPos = new Map(groupsList.map((g, i) => {
+          const angle = (2 * Math.PI * i) / numGroups;
+          return [g, { x: Math.cos(angle) * spread, y: Math.sin(angle) * spread }];
+        }));
+        for (const node of graphData.nodes) {
+          if (node.x == null && node.group != null) {
+            const gp = groupPos.get(node.group);
+            if (gp) {
+              node.x = gp.x + (Math.random() - 0.5) * 100;
+              node.y = gp.y + (Math.random() - 0.5) * 100;
+            }
+          }
+        }
+      }
+    }
+
+    fg.d3Force("groupCentroid", graphData.isBlobMode
+      ? makeVoronoiContainmentForce(0.10, 0.35, 60)
+      : null);
     fg.d3ReheatSimulation?.();
   }, [graphData, forceSpread]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -746,9 +788,19 @@ export default function GraphRenderer({ data, measures, onNodeClick,
               nodeVal={n => n.val}
               nodeColor={n => n.color}
               onRenderFramePre={graphData.isBlobMode ? (ctx, gs) => {
+                // Periodically persist node positions so they survive
+                // measure-only changes (same nodes, new colors/sizes).
+                posFrameCountRef.current++;
+                if (posFrameCountRef.current % 45 === 0) {
+                  for (const node of graphData.nodes) {
+                    if (node.x != null && !isNaN(node.x))
+                      nodePositionsRef.current.set(node.id, { x: node.x, y: node.y });
+                  }
+                }
+
                 // Draw amorphous blobs behind nodes — one per outer-dim group.
-                // Each blob is clipped to its Voronoi cell so blobs can never
-                // visually overlap, even when groups are tightly coupled.
+                // Blobs are separated by the physics force, not canvas clipping,
+                // so fill and stroke use the same unclipped path (no flat edges).
 
                 // 1. Collect node positions per group
                 const groupPos = new Map();
@@ -759,40 +811,24 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                 }
 
                 // 2. Compute group centroids
-                const centroids = new Map(); // group → [cx, cy]
+                const centroids = new Map();
                 for (const [group, pts] of groupPos) {
                   centroids.set(group, [
-                    pts.reduce((s,p)=>s+p[0],0)/pts.length,
-                    pts.reduce((s,p)=>s+p[1],0)/pts.length,
+                    pts.reduce((s,p) => s+p[0], 0) / pts.length,
+                    pts.reduce((s,p) => s+p[1], 0) / pts.length,
                   ]);
                 }
 
-                // 3. Compute bounding box (large enough to cover all Voronoi cells)
-                const allPts = [...groupPos.values()].flat();
-                const margin = 400 / gs;
-                const bbox = [
-                  Math.min(...allPts.map(p=>p[0])) - margin,
-                  Math.min(...allPts.map(p=>p[1])) - margin,
-                  Math.max(...allPts.map(p=>p[0])) + margin,
-                  Math.max(...allPts.map(p=>p[1])) + margin,
-                ];
-
-                const centroidArr = [...centroids.values()]; // [[cx,cy], ...]
-                const SHRINK = 6 / gs; // gap between adjacent blobs (graph-units)
-
-                // 4. Draw each blob clipped to its Voronoi cell
+                // 3. Draw each blob
                 for (const [group, pts] of groupPos) {
-                  const color = groupColorMap.get(group) || "#888888";
-                  const hull  = pts.length >= 3 ? convexHull(pts) : pts.map(p => [...p]);
+                  const color    = groupColorMap.get(group) || "#888888";
+                  const hull     = pts.length >= 3 ? convexHull(pts) : pts.map(p => [...p]);
                   const [cx, cy] = centroids.get(group);
-                  const cell  = centroids.size > 1
-                    ? voronoiCell(cx, cy, centroidArr, bbox, SHRINK)
-                    : null;   // single group — no clipping needed
-                  drawBlob(ctx, hull, 32/gs, 1.5/gs, color, cell);
+                  drawBlob(ctx, hull, 32/gs, 1.5/gs, color);
 
                   // Group label at centroid
                   ctx.font         = `bold ${15/gs}px sans-serif`;
-                  ctx.fillStyle    = (groupColorMap.get(group)||"#888888") + "99";
+                  ctx.fillStyle    = (groupColorMap.get(group) || "#888888") + "99";
                   ctx.textAlign    = "center";
                   ctx.textBaseline = "middle";
                   ctx.fillText(String(group), cx, cy);
