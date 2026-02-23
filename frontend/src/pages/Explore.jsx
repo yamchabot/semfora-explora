@@ -91,7 +91,7 @@ function DimFilterEditor({ filter, availableValues, onUpdate }) {
       {filter.mode === "regex" ? (
         <input
           autoFocus
-          placeholder="e.g. ^core|utils$"
+          placeholder="e.g. ^core|utils$  ·  !test (exclude matching)"
           value={filter.pattern}
           onChange={e => onUpdate({ ...filter, pattern: e.target.value })}
           style={{ width:"100%", padding:"5px 8px", fontSize:12, fontFamily:"monospace",

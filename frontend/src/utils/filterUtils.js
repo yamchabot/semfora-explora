@@ -95,7 +95,13 @@ export function applyFilters(rows, filters) {
         // to filter on — let the row pass rather than silently removing it.
         if (!(f.field in (row.key ?? {}))) return true;
         try {
-          return new RegExp(f.pattern, "i").test(val);
+          // Leading ! negates the match — acts as an exclusion regex.
+          // e.g. !test  →  exclude rows whose value contains "test"
+          const negate  = f.pattern.startsWith("!");
+          const pat     = negate ? f.pattern.slice(1) : f.pattern;
+          if (!pat) return true; // empty after stripping ! → pass
+          const matches = new RegExp(pat, "i").test(val);
+          return negate ? !matches : matches;
         } catch {
           return true; // invalid regex → pass
         }
