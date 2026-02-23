@@ -267,6 +267,8 @@ export default function GraphRenderer({ data, measures, onNodeClick,
   // Coupling mode: set of node ids that have ≥1 cross-boundary outgoing edge.
   // Active only in blob mode. Independent of selectedNodeIds.
   const [couplingIds, setCouplingIds] = useState(new Set());
+  // When true, the graph only shows cross-boundary nodes + edges (no non-coupling nodes).
+  const [couplingOnly, setCouplingOnly] = useState(false);
   // Dot mode: render nodes as plain circles instead of labelled pills.
   // Useful when the graph is too dense to read individual labels.
   const [nodeDot, setNodeDot] = useState(false);
@@ -471,9 +473,36 @@ export default function GraphRenderer({ data, measures, onNodeClick,
     return set;
   }, [graphData]);
 
+  // All nodes that are an endpoint (source OR target) of any cross-boundary edge
+  const couplingEndpoints = useMemo(() => {
+    const s = new Set();
+    for (const key of crossEdgeSet) {
+      const [src, tgt] = key.split("|");
+      s.add(src); s.add(tgt);
+    }
+    return s;
+  }, [crossEdgeSet]);
+
+  // Filtered graphData for coupling-only mode: only cross-boundary nodes + edges.
+  // Passed to ForceGraph2D in place of the full graphData when couplingOnly is on.
+  const couplingOnlyData = useMemo(() => {
+    if (!couplingOnly || couplingEndpoints.size === 0) return null;
+    const nodes = graphData.nodes.filter(n => couplingEndpoints.has(n.id));
+    const links = graphData.links.filter(l => {
+      const src = typeof l.source === "object" ? l.source.id : l.source;
+      const tgt = typeof l.target === "object" ? l.target.id : l.target;
+      return crossEdgeSet.has(`${src}|${tgt}`);
+    });
+    return { ...graphData, nodes, links };
+  }, [couplingOnly, couplingEndpoints, graphData, crossEdgeSet]);
+
   function handleCouplingToggle() {
-    if (couplingIds.size > 0) { setCouplingIds(new Set()); return; }
-    // Compute nodes that are the source of ≥1 cross-boundary edge
+    if (couplingIds.size > 0) {
+      setCouplingIds(new Set());
+      setCouplingOnly(false);
+      return;
+    }
+    // Highlight nodes that are sources of ≥1 cross-boundary edge
     const sources = new Set();
     for (const key of crossEdgeSet) sources.add(key.split("|")[0]);
     setCouplingIds(sources);
@@ -748,12 +777,12 @@ export default function GraphRenderer({ data, measures, onNodeClick,
             color:       hideIsolated ? "#fff"       : "var(--text2)" }}
         >{hideIsolated ? "✕ isolated hidden" : "show isolated"}</button>
         {/* Coupling mode — blob mode only */}
-        {graphData.isBlobMode && (
+        {graphData.isBlobMode && (<>
           <button
             onClick={handleCouplingToggle}
             title={couplingIds.size > 0
               ? "Clear coupling highlight"
-              : `Highlight nodes that call across group boundaries (${crossEdgeSet.size} cross-boundary edges)`}
+              : `Highlight nodes that call across group boundaries (${crossEdgeSet.size} cross-boundary edges, ${couplingEndpoints.size} endpoints)`}
             style={{ fontSize:11, padding:"3px 9px", cursor:"pointer", borderRadius:4,
               border:"1px solid var(--border2)",
               background: couplingIds.size > 0 ? "#ff9f1c" : "var(--bg3)",
@@ -763,7 +792,22 @@ export default function GraphRenderer({ data, measures, onNodeClick,
               ? `✕ coupling (${couplingIds.size} nodes)`
               : `🔀 coupling`}
           </button>
-        )}
+          {/* "Show only" sub-toggle — only visible when coupling is active */}
+          {couplingIds.size > 0 && (
+            <button
+              onClick={() => setCouplingOnly(o => !o)}
+              title={couplingOnly
+                ? `Show full graph (currently showing only ${couplingEndpoints.size} cross-boundary nodes)`
+                : `Show only the ${couplingEndpoints.size} nodes with cross-boundary connections`}
+              style={{ fontSize:11, padding:"3px 9px", cursor:"pointer", borderRadius:4,
+                border:"1px solid var(--border2)",
+                background: couplingOnly ? "#ff9f1c" : "var(--bg3)",
+                color:       couplingOnly ? "#0d1117"  : "var(--text2)" }}
+            >
+              {couplingOnly ? "✕ show only" : "show only"}
+            </button>
+          )}
+        </>)}
         {/* Search shortcut hint */}
         <button
           onClick={() => setShowSearch(true)}
@@ -792,18 +836,22 @@ export default function GraphRenderer({ data, measures, onNodeClick,
               // Without this, d3's cached node references go stale after filters
               // change the node list, producing "node not found" or "Cannot set
               // property vx on string" crashes.
-              key={graphData.nodes.map(n => n.id).sort().join("|")}
+              // In coupling-only mode the node set changes, so include that in the key.
+              key={(couplingOnlyData ?? graphData).nodes.map(n => n.id).sort().join("|")}
               width={size.w} height={size.h}
-              graphData={graphData}
+              graphData={couplingOnlyData ?? graphData}
               nodeLabel=""
               nodeVal={n => n.val}
               nodeColor={n => n.color}
               onRenderFramePre={graphData.isBlobMode ? (ctx, gs) => {
+                // Use the active dataset (filtered in coupling-only mode, full otherwise)
+                const activeNodes = (couplingOnlyData ?? graphData).nodes;
+
                 // Periodically persist node positions so they survive
                 // measure-only changes (same nodes, new colors/sizes).
                 posFrameCountRef.current++;
                 if (posFrameCountRef.current % 45 === 0) {
-                  for (const node of graphData.nodes) {
+                  for (const node of activeNodes) {
                     if (node.x != null && !isNaN(node.x))
                       nodePositionsRef.current.set(node.id, { x: node.x, y: node.y });
                   }
@@ -815,7 +863,7 @@ export default function GraphRenderer({ data, measures, onNodeClick,
 
                 // 1. Collect node positions per group
                 const groupPos = new Map();
-                for (const node of graphData.nodes) {
+                for (const node of activeNodes) {
                   if (node.x == null) continue;
                   if (!groupPos.has(node.group)) groupPos.set(node.group, []);
                   groupPos.get(node.group).push([node.x, node.y]);
@@ -856,10 +904,11 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                 const hasCoupling = couplingIds.size > 0;
 
                 // Dimming priority:
+                //  coupling-only  → all nodes full (non-coupling were already removed)
                 //  coupling mode  → coupling nodes full, others 18% (selection can rescue)
                 //  selection mode → reachable nodes full, others 18%
                 //  neither        → all full
-                const isVisible = hasCoupling
+                const isVisible = (hasCoupling && !couplingOnly)
                   ? (isCoupling || (anySelected && isReachable))
                   : anySelected ? isReachable : true;
                 ctx.globalAlpha = isVisible ? 1.0 : 0.18;
