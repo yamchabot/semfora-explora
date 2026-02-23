@@ -970,7 +970,7 @@ function makeSelectionRadialForce(selectedId, bfsDists, radiusPer) {
       const dx = n.x - sel.x, dy = n.y - sel.y;
       const dist = Math.sqrt(dx * dx + dy * dy) || 0.001;
       const target = depth * radiusPer;
-      const k = alpha * 0.18;
+      const k = alpha * 0.14;
       n.vx += (dx / dist) * (target - dist) * k;
       n.vy += (dy / dist) * (target - dist) * k;
     }
@@ -992,8 +992,8 @@ function makeChainCentroidForce(selectedIds, chainIds) {
     const cy = sels.reduce((s, n) => s + n.y, 0) / sels.length;
     for (const n of simNodes) {
       if (selectedIds.has(n.id) || !chainIds.has(n.id) || n.x == null) continue;
-      n.vx += (cx - n.x) * alpha * 0.1;
-      n.vy += (cy - n.y) * alpha * 0.1;
+      n.vx += (cx - n.x) * alpha * 0.06;
+      n.vy += (cy - n.y) * alpha * 0.06;
     }
   }
   force.initialize = ns => { simNodes = ns; };
@@ -1211,7 +1211,7 @@ function GraphRenderer({ data, measures, onNodeClick }) {
       // Pin the selected node so reachable nodes fan out around it
       if (selNode?.x != null) { selNode.fx = selNode.x; selNode.fy = selNode.y; }
 
-      fg.d3Force("selRadial",    makeSelectionRadialForce(selId, bfsDistances, 110));
+      fg.d3Force("selRadial",    makeSelectionRadialForce(selId, bfsDistances, 120));
       fg.d3Force("chainCentroid", null);
       // Restore uniform link distances (chain mode may have changed them)
       if (linkForce) linkForce.distance(120).strength(0.5);
@@ -1224,16 +1224,17 @@ function GraphRenderer({ data, measures, onNodeClick }) {
       }
       fg.d3Force("chainCentroid", makeChainCentroidForce(selectedNodeIds, chainNodeIds));
       fg.d3Force("selRadial", null);
-      // Chain edges pull tight; non-chain edges get slack → bridge effect
+      // Chain edges stay at a readable distance; non-chain edges get long slack
+      // so unrelated nodes drift to the periphery without crowding the path.
       if (linkForce) {
         linkForce.distance(link => {
           const u = link.source?.id ?? link.source;
           const v = link.target?.id ?? link.target;
-          return chainEdgeMap.has(`${u}|${v}`) ? 45 : 200;
+          return chainEdgeMap.has(`${u}|${v}`) ? 130 : 260;
         }).strength(link => {
           const u = link.source?.id ?? link.source;
           const v = link.target?.id ?? link.target;
-          return chainEdgeMap.has(`${u}|${v}`) ? 0.8 : 0.08;
+          return chainEdgeMap.has(`${u}|${v}`) ? 0.45 : 0.04;
         });
       }
 
