@@ -107,17 +107,7 @@ function drawBlob(ctx, hull, padding, lineWidth, color, voronoiPoly = null) {
 
   const n = exp.length;
 
-  ctx.save();
-
-  // Clip to Voronoi cell — this is what guarantees non-overlapping blobs
-  if (voronoiPoly?.length >= 3) {
-    ctx.beginPath();
-    ctx.moveTo(voronoiPoly[0][0], voronoiPoly[0][1]);
-    for (let i = 1; i < voronoiPoly.length; i++) ctx.lineTo(voronoiPoly[i][0], voronoiPoly[i][1]);
-    ctx.closePath();
-    ctx.clip();
-  }
-
+  // Build the blob path first (we need it for both fill and stroke)
   ctx.beginPath();
   if (n === 1) {
     ctx.arc(exp[0][0], exp[0][1], padding, 0, Math.PI*2);
@@ -131,13 +121,55 @@ function drawBlob(ctx, hull, padding, lineWidth, color, voronoiPoly = null) {
     }
   }
   ctx.closePath();
-  ctx.fillStyle   = color + "1e";   // ~12% opacity fill
+
+  // Fill — clipped to Voronoi cell so adjacent blobs never overlap visually.
+  // The canvas path is NOT part of the saved state, so it persists through
+  // save/restore and we can reuse it for the unclipped stroke below.
+  ctx.save();
+  if (voronoiPoly?.length >= 3) {
+    ctx.beginPath();
+    ctx.moveTo(voronoiPoly[0][0], voronoiPoly[0][1]);
+    for (let i = 1; i < voronoiPoly.length; i++) ctx.lineTo(voronoiPoly[i][0], voronoiPoly[i][1]);
+    ctx.closePath();
+    ctx.clip();
+    // Rebuild blob path inside clip context (clip() resets the path)
+    ctx.beginPath();
+    if (n === 1) {
+      ctx.arc(exp[0][0], exp[0][1], padding, 0, Math.PI*2);
+    } else {
+      const mid = i => [(exp[i][0]+exp[(i+1)%n][0])/2, (exp[i][1]+exp[(i+1)%n][1])/2];
+      const m0 = mid(0);
+      ctx.moveTo(m0[0], m0[1]);
+      for (let i = 0; i < n; i++) {
+        const m = mid((i+1)%n);
+        ctx.quadraticCurveTo(exp[(i+1)%n][0], exp[(i+1)%n][1], m[0], m[1]);
+      }
+    }
+    ctx.closePath();
+  }
+  ctx.fillStyle = color + "1e";   // ~12% opacity fill
   ctx.fill();
-  ctx.strokeStyle = color + "66";   // ~40% opacity stroke
+  ctx.restore();  // removes Voronoi clip — path is NOT preserved here so redraw below
+
+  // Stroke — drawn WITHOUT Voronoi clipping so the border is visible even where
+  // two adjacent blobs meet. The stroke bleeds slightly past the boundary gap,
+  // giving each blob a visible colored outline at every edge.
+  ctx.beginPath();
+  if (n === 1) {
+    ctx.arc(exp[0][0], exp[0][1], padding, 0, Math.PI*2);
+  } else {
+    const mid = i => [(exp[i][0]+exp[(i+1)%n][0])/2, (exp[i][1]+exp[(i+1)%n][1])/2];
+    const m0 = mid(0);
+    ctx.moveTo(m0[0], m0[1]);
+    for (let i = 0; i < n; i++) {
+      const m = mid((i+1)%n);
+      ctx.quadraticCurveTo(exp[(i+1)%n][0], exp[(i+1)%n][1], m[0], m[1]);
+    }
+  }
+  ctx.closePath();
+  ctx.strokeStyle = color + "99";   // ~60% opacity stroke (slightly stronger than fill-only)
   ctx.lineWidth   = lineWidth;
   ctx.stroke();
-
-  ctx.restore();
 }
 
 // ── Group forces ─────────────────────────────────────────────────────────────
@@ -176,19 +208,33 @@ export function makeVoronoiContainmentForce(attractStrength = 0.08, boundaryStre
       n.vx += (own.x - n.x) * attractStrength * alpha;
       n.vy += (own.y - n.y) * attractStrength * alpha;
 
-      // 2. Voronoi boundary enforcement
-      const ownDist2 = (n.x - own.x) ** 2 + (n.y - own.y) ** 2;
+      // 2. Voronoi boundary enforcement — alpha-INDEPENDENT direct position push.
+      // Velocity-based forces fade to zero as the simulation cools, allowing
+      // strong link forces to drag nodes permanently across blob boundaries.
+      // Instead, we directly adjust n.x/n.y each tick, which works regardless
+      // of the current alpha, keeping nodes contained even in a frozen layout.
+      const ownDist = Math.sqrt((n.x - own.x) ** 2 + (n.y - own.y) ** 2) || 0.001;
       for (const [g, c] of centList) {
         if (g === n.group) continue;
-        const otherDist2 = (n.x - c.x) ** 2 + (n.y - c.y) ** 2;
-        if (otherDist2 < ownDist2) {
-          // Node is past the Voronoi boundary — push it back.
-          // Force scales with how far past the boundary it is.
-          const crossDist = (Math.sqrt(ownDist2) - Math.sqrt(otherDist2)) * 0.5;
-          const dist = Math.sqrt(ownDist2) || 1;
-          const k = boundaryStrength * alpha;
-          n.vx += (own.x - n.x) / dist * crossDist * k;
-          n.vy += (own.y - n.y) / dist * crossDist * k;
+        const odx = n.x - c.x, ody = n.y - c.y;
+        const otherDist = Math.sqrt(odx * odx + ody * ody) || 0.001;
+        if (otherDist < ownDist) {
+          // Node is on the wrong side of the Voronoi boundary.
+          // crossDist = how far past the midpoint it has traveled.
+          const crossDist = (ownDist - otherDist) * 0.5;
+          // Push position directly toward own centroid (no alpha factor).
+          const frac = (crossDist / ownDist) * boundaryStrength;
+          n.x += (own.x - n.x) * frac;
+          n.y += (own.y - n.y) * frac;
+          // Also cancel velocity in the direction of the wrong centroid
+          // so the node doesn't immediately drift back across.
+          const cx = c.x - n.x, cy = c.y - n.y;
+          const clen = Math.sqrt(cx * cx + cy * cy) || 1;
+          const proj = n.vx * (cx / clen) + n.vy * (cy / clen);
+          if (proj > 0) {
+            n.vx -= (cx / clen) * proj * 0.6;
+            n.vy -= (cy / clen) * proj * 0.6;
+          }
         }
       }
     }
@@ -199,7 +245,7 @@ export function makeVoronoiContainmentForce(attractStrength = 0.08, boundaryStre
 
 // Keep old name as alias so any external references still compile.
 export const makeGroupCentroidForce = (strength) =>
-  makeVoronoiContainmentForce(strength, strength * 6);
+  makeVoronoiContainmentForce(strength, strength * 3);
 
 /**
  * Single-select physics: pull BFS-reachable nodes to concentric rings around the
@@ -436,7 +482,10 @@ export default function GraphRenderer({ data, measures, onNodeClick,
     if (charge) charge.strength(-forceSpread).distanceMax(Math.round(400 * forceSpread / SPREAD_DEFAULT));
     const link = fg.d3Force("link");
     if (link) link.distance(linkDistBase);
-    fg.d3Force("groupCentroid", graphData.isBlobMode ? makeVoronoiContainmentForce(0.08, 0.6) : null);
+    // boundaryStrength=0.25: direct position push (alpha-independent) so nodes
+    // stay in their blob even after the simulation cools. 0.25 keeps convergence
+    // smooth without oscillation (max movement ~12.5% of ownDist per tick).
+    fg.d3Force("groupCentroid", graphData.isBlobMode ? makeVoronoiContainmentForce(0.08, 0.25) : null);
     fg.d3ReheatSimulation?.();
   }, [graphData, forceSpread]); // eslint-disable-line react-hooks/exhaustive-deps
 
