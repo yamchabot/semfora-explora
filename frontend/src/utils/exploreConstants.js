@@ -48,6 +48,28 @@ export const BUCKET_FIELDS_META = {
   betweenness:     "betweenness ✦",
 };
 
+// ── UI-only colour constants ───────────────────────────────────────────────────
+
+export const RISK_COLOR = {
+  critical: "var(--red)",
+  high:     "var(--yellow)",
+  medium:   "var(--blue)",
+  low:      "var(--green)",
+};
+
+export const RISK_BG = {
+  critical: "var(--red-bg)",
+  high:     "var(--yellow-bg)",
+  medium:   "var(--blue-bg)",
+  low:      "var(--green-bg)",
+};
+
+/** Colour palette for kind-filter chips and blob groups. */
+export const KIND_PALETTE = [
+  "#58a6ff", "#3fb950", "#e3b341", "#f85149",
+  "#a371f7", "#39c5cf", "#ff9966", "#56d364",
+];
+
 export const DEFAULT_DIMS = ["module"];
 
 export const DEFAULT_MEASURES = [
