@@ -186,6 +186,14 @@ export default function Explore() {
     return g;
   }, [allRepos]);
 
+  // Apply client-side filters on top of pivot results
+  // Declared here (before diff memos) to avoid TDZ in production builds.
+  const filteredData = useMemo(() => {
+    if (!pivotQuery.data) return null;
+    if (!filters.length)  return pivotQuery.data;
+    return { ...pivotQuery.data, rows: applyFilters(pivotQuery.data.rows, filters) };
+  }, [pivotQuery.data, filters]);
+
   // ── Diff overlay — driven by diff_status_value measure in pivot rows ────────
   // When compareRepo is set, the explore endpoint annotates rows with
   // diff_status_value (0.0=added, 0.25=modified, 0.5=unchanged, 1.0=removed)
@@ -276,13 +284,6 @@ export default function Explore() {
     }
     return out;
   }, [serverDimValues, pivotQuery.data, dims]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Apply client-side filters on top of pivot results
-  const filteredData = useMemo(() => {
-    if (!pivotQuery.data) return null;
-    if (!filters.length)  return pivotQuery.data;
-    return { ...pivotQuery.data, rows: applyFilters(pivotQuery.data.rows, filters) };
-  }, [pivotQuery.data, filters]);
 
   // Keep GraphRenderer mounted through loading cycles so local selection state
   // (selectedNodeIds) survives measure/kind changes that temporarily null filteredData.
