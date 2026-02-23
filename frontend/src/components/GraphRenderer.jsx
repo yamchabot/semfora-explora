@@ -160,6 +160,10 @@ export default function GraphRenderer({ data, measures, onNodeClick,
   // Coupling mode: set of node ids that have ≥1 cross-boundary outgoing edge.
   // Active only in blob mode. Independent of selectedNodeIds.
   const [couplingIds, setCouplingIds] = useState(new Set());
+  // Spread: scales charge repulsion and link distance together.
+  // 350 = default; higher = more spread; lower = tighter.
+  const SPREAD_DEFAULT = 350;
+  const [forceSpread, setForceSpread] = useState(SPREAD_DEFAULT);
   const zoomTransformRef  = useRef({ k: 1, x: 0, y: 0 });
   const didOffsetRef = useRef(false);
 
@@ -269,6 +273,9 @@ export default function GraphRenderer({ data, measures, onNodeClick,
     [chainEdgeMap, selectedNodeIds]
   );
 
+  // Base link distance — scales with forceSpread so selection physics stays consistent
+  const linkDistBase = Math.round(120 * (forceSpread / SPREAD_DEFAULT));
+
   // Dynamic step arrays — recomputed when fanOutDepth changes
   const stepColors = useMemo(() => makeStepColors(fanOutDepth), [fanOutDepth]);
   const stepWidths = useMemo(() => makeStepWidths(fanOutDepth), [fanOutDepth]);
@@ -302,12 +309,12 @@ export default function GraphRenderer({ data, measures, onNodeClick,
     const fg = fgRef.current;
     if (!fg) return;
     const charge = fg.d3Force("charge");
-    if (charge) charge.strength(-350).distanceMax(400);
+    if (charge) charge.strength(-forceSpread).distanceMax(Math.round(400 * forceSpread / SPREAD_DEFAULT));
     const link = fg.d3Force("link");
-    if (link) link.distance(120);
+    if (link) link.distance(linkDistBase);
     fg.d3Force("groupCentroid", graphData.isBlobMode ? makeGroupCentroidForce(0.1) : null);
     fg.d3ReheatSimulation?.();
-  }, [graphData]);
+  }, [graphData, forceSpread]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Selection-driven physics ────────────────────────────────────────────────
   useEffect(() => {
@@ -325,10 +332,10 @@ export default function GraphRenderer({ data, measures, onNodeClick,
       // Pin the selected node so reachable nodes fan out around it
       if (selNode?.x != null) { selNode.fx = selNode.x; selNode.fy = selNode.y; }
 
-      fg.d3Force("selRadial",    makeSelectionRadialForce(selId, bfsDistances, 120));
+      fg.d3Force("selRadial",    makeSelectionRadialForce(selId, bfsDistances, linkDistBase));
       fg.d3Force("chainCentroid", null);
       // Restore uniform link distances (chain mode may have changed them)
-      if (linkForce) linkForce.distance(120).strength(0.5);
+      if (linkForce) linkForce.distance(linkDistBase).strength(0.5);
 
     } else if (selectedNodeIds.size >= 2) {
       // Pin each selected node so they act as stable poles
@@ -344,7 +351,7 @@ export default function GraphRenderer({ data, measures, onNodeClick,
         linkForce.distance(link => {
           const u = link.source?.id ?? link.source;
           const v = link.target?.id ?? link.target;
-          return chainEdgeMap.has(`${u}|${v}`) ? 130 : 260;
+          return chainEdgeMap.has(`${u}|${v}`) ? linkDistBase : linkDistBase * 2;
         }).strength(link => {
           const u = link.source?.id ?? link.source;
           const v = link.target?.id ?? link.target;
@@ -356,12 +363,12 @@ export default function GraphRenderer({ data, measures, onNodeClick,
       // No selection — restore defaults
       fg.d3Force("selRadial",    null);
       fg.d3Force("chainCentroid", null);
-      if (linkForce) linkForce.distance(120).strength(0.5);
+      if (linkForce) linkForce.distance(linkDistBase).strength(0.5);
     }
 
     fg.d3ReheatSimulation?.();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedNodeIds, bfsDistances, chainNodeIds, chainEdgeMap]);
+  }, [selectedNodeIds, bfsDistances, chainNodeIds, chainEdgeMap, linkDistBase]);
 
   // ── Scroll pan / pinch zoom ──────────────────────────────────────────────────
   // onZoom reports {k, x, y} where x/y are graph-space center (NOT d3 translation).
@@ -477,6 +484,25 @@ export default function GraphRenderer({ data, measures, onNodeClick,
             onChange={e => setFanOutDepth(Math.max(1, Math.min(10, +e.target.value || 1)))}
             style={{ width:55, padding:"3px 8px", fontSize:12 }}
           />
+        </div>
+        {/* Spread slider — scales charge repulsion and link distance */}
+        <div style={{ display:"flex", alignItems:"center", gap:6, fontSize:12 }}>
+          <span style={{ color:"var(--text2)" }} title="Scale the repulsion force and link distance together">Spread:</span>
+          <input
+            type="range" min={50} max={1500} step={25}
+            value={forceSpread}
+            onChange={e => setForceSpread(+e.target.value)}
+            style={{ width:80, cursor:"pointer", accentColor:"var(--blue)" }}
+          />
+          {forceSpread !== SPREAD_DEFAULT && (
+            <button
+              onClick={() => setForceSpread(SPREAD_DEFAULT)}
+              title="Reset spread to default"
+              style={{ fontSize:10, padding:"1px 6px", background:"var(--bg3)",
+                border:"1px solid var(--border2)", borderRadius:3,
+                color:"var(--text3)", cursor:"pointer", lineHeight:"16px" }}
+            >↺</button>
+          )}
         </div>
         {selectedNodeIds.size >= 2 && (
           <span style={{ display:"flex", alignItems:"center", gap:6 }}>
