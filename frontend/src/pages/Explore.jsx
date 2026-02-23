@@ -430,6 +430,17 @@ function AddMeasureMenu({ onAdd, hasEnriched }) {
 
 // ── DimChip + AddDimMenu ───────────────────────────────────────────────────────
 
+const BUCKET_MODES = ["median", "quartile", "decile"];
+
+// Parse a dim string into {field, mode} if it's bucketed, else null
+function parseBucketedDim(d) {
+  if (!d.includes(":")) return null;
+  const colon = d.indexOf(":");
+  const field  = d.slice(0, colon);
+  const mode   = d.slice(colon + 1);
+  return BUCKET_MODES.includes(mode) ? { field, mode } : null;
+}
+
 const DIM_LABELS = {
   module:    "module",
   risk:      "risk",
@@ -451,25 +462,83 @@ function dimDisplayLabel(d) {
   return d;
 }
 
-function DimChip({ label, index, onRemove, dragHandleProps }) {
+function DimChip({ label, index, onRemove, onChangeMode, dragHandleProps }) {
+  const [open, setOpen] = useState(false);
+  const ref             = useRef(null);
+  const bucketed        = parseBucketedDim(label);
+
+  useEffect(() => {
+    const h = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, []);
+
+  // Display label: for bucketed dims show just the field name (mode goes in the dropdown button)
+  const displayLabel = bucketed
+    ? (BUCKET_FIELDS_META[bucketed.field] ?? bucketed.field)
+    : dimDisplayLabel(label);
+
   return (
-    <div style={{ display:"flex", alignItems:"center", gap:5, background:"var(--blue-bg)", border:"1px solid var(--blue)", borderRadius:6, padding:"3px 6px 3px 4px" }}>
+    <div ref={ref} style={{ display:"flex", alignItems:"center", gap:0, background:"var(--blue-bg)", border:"1px solid var(--blue)", borderRadius:6, position:"relative" }}>
       {/* Drag handle */}
       <span
         {...dragHandleProps}
-        style={{ color:"var(--blue)", fontSize:11, cursor:"grab", lineHeight:1, padding:"0 1px", touchAction:"none" }}
+        style={{ color:"var(--blue)", fontSize:11, cursor:"grab", lineHeight:1, padding:"3px 3px 3px 4px", touchAction:"none" }}
         title="Drag to reorder"
       >⠿</span>
-      <span style={{ background:"var(--blue)", color:"#fff", borderRadius:"50%", width:16, height:16, display:"flex", alignItems:"center", justifyContent:"center", fontSize:9, fontWeight:700, flexShrink:0 }}>{index+1}</span>
-      <span style={{ fontFamily:"monospace", fontSize:12, color:"var(--text)" }}>{dimDisplayLabel(label)}</span>
-      <button onClick={onRemove} style={{ background:"none", border:"none", color:"var(--text3)", cursor:"pointer", padding:"0 2px", fontSize:13, lineHeight:1 }}>×</button>
+
+      {/* Index badge */}
+      <span style={{ background:"var(--blue)", color:"#fff", borderRadius:"50%", width:16, height:16, display:"flex", alignItems:"center", justifyContent:"center", fontSize:9, fontWeight:700, flexShrink:0, margin:"0 4px" }}>{index+1}</span>
+
+      {/* Label */}
+      <span style={{ fontFamily:"monospace", fontSize:12, color:"var(--text)", padding:"3px 0" }}>{displayLabel}</span>
+
+      {/* Mode dropdown — only for bucketed dims */}
+      {bucketed && (
+        <button
+          onClick={() => setOpen(v => !v)}
+          style={{
+            background:"var(--bg2)", border:"none",
+            borderLeft:"1px solid var(--blue)", borderRight:"1px solid var(--blue)",
+            padding:"3px 6px", fontSize:11, color:"var(--blue)", cursor:"pointer",
+            fontFamily:"monospace", margin:"0 0 0 4px",
+          }}
+        >{bucketed.mode} ▾</button>
+      )}
+
+      {/* Mode dropdown list */}
+      {open && bucketed && (
+        <div style={{
+          position:"absolute", top:"calc(100% + 3px)", left:0, zIndex:70,
+          background:"var(--bg2)", border:"1px solid var(--border2)",
+          borderRadius:6, boxShadow:"0 4px 12px #0008", minWidth:90,
+        }}>
+          {BUCKET_MODES.map(mode => (
+            <div
+              key={mode}
+              onClick={() => { onChangeMode?.(`${bucketed.field}:${mode}`); setOpen(false); }}
+              style={{
+                padding:"5px 12px", fontSize:12, cursor:"pointer",
+                fontFamily:"monospace",
+                color:      mode === bucketed.mode ? "var(--blue)" : "var(--text)",
+                fontWeight: mode === bucketed.mode ? 700 : 400,
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = "var(--bg3)"}
+              onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+            >{mode}</div>
+          ))}
+        </div>
+      )}
+
+      {/* Remove button */}
+      <button onClick={onRemove} style={{ background:"none", border:"none", color:"var(--text3)", cursor:"pointer", padding:"3px 6px", fontSize:13, lineHeight:1 }}>×</button>
     </div>
   );
 }
 
 // ── Sortable wrappers (DnD) ────────────────────────────────────────────────────
 
-function SortableDimChip({ id, label, index, onRemove }) {
+function SortableDimChip({ id, label, index, onRemove, onChangeMode }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id });
   return (
@@ -487,6 +556,7 @@ function SortableDimChip({ id, label, index, onRemove }) {
         label={label}
         index={index}
         onRemove={onRemove}
+        onChangeMode={onChangeMode}
         dragHandleProps={{ ...attributes, ...listeners }}
       />
     </div>
@@ -1401,6 +1471,11 @@ export default function Explore() {
     setMeasures(p => p.map(m => measureKey(m)===key ? {...m, agg} : m));
   }
 
+  // Replace a bucketed dim in-place with the same field but a new mode
+  function changeDimMode(oldDim, newDim) {
+    setDims(p => p.map(d => d === oldDim ? newDim : d));
+  }
+
   return (
     <div>
       <div className="page-header">
@@ -1427,7 +1502,11 @@ export default function Explore() {
             <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDimDragEnd}>
               <SortableContext items={dims} strategy={horizontalListSortingStrategy}>
                 {dims.map((d,i) => (
-                  <SortableDimChip key={d} id={d} label={d} index={i} onRemove={() => setDims(p => p.filter(x => x !== d))} />
+                  <SortableDimChip
+                    key={d} id={d} label={d} index={i}
+                    onRemove={() => setDims(p => p.filter(x => x !== d))}
+                    onChangeMode={newDim => changeDimMode(d, newDim)}
+                  />
                 ))}
               </SortableContext>
             </DndContext>
