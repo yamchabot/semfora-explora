@@ -6,6 +6,14 @@ import { RepoContext } from "../App";
 import { api } from "../api";
 import { applyFilters, filterEdgesToNodes } from "../utils/filterUtils.js";
 import {
+  SPECIAL_LABELS, FIELD_META, AGGS, BUCKET_MODES, DIM_LABELS,
+  BUCKET_FIELDS_META, DEFAULT_DIMS, DEFAULT_MEASURES,
+} from "../utils/exploreConstants.js";
+import { measureKey, measureStr, measureLabel, fmtValue, parseMeasuresParam } from "../utils/measureUtils.js";
+import { parseBucketedDim, dimDisplayLabel, parseFiltersParam } from "../utils/dimUtils.js";
+import { hex, lerpColor, makeStepColors, makeStepWidths, makeStepArrows } from "../utils/colorUtils.js";
+import { bfsFromNode, buildAdjacencyMaps, convexHull, findChainEdges, collectChainNodeIds } from "../utils/graphAlgo.js";
+import {
   DndContext,
   closestCenter,
   PointerSensor,
@@ -20,53 +28,18 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
-// ── Metadata ───────────────────────────────────────────────────────────────────
-
-const SPECIAL_LABELS = {
-  symbol_count:    "symbol count",
-  dead_ratio:      "dead ratio",
-  high_risk_ratio: "high-risk %",
-  in_cycle_ratio:  "in-cycle %",
-};
-
-const FIELD_META = {
-  caller_count: { label: "callers",     enriched: false },
-  callee_count: { label: "callees",     enriched: false },
-  complexity:   { label: "complexity",  enriched: false },
-  utility:      { label: "utility",     enriched: true  },
-  pagerank:     { label: "pagerank",    enriched: true  },
-  xmod_fan_in:  { label: "xmod_fan_in", enriched: true  },
-  topo_depth:   { label: "topo_depth",  enriched: true  },
-  betweenness:  { label: "betweenness", enriched: true  },
-};
-
-const AGGS = ["avg", "min", "max", "sum", "stddev", "count"];
+// ── Metadata (UI-only constants not in exploreConstants.js) ───────────────────
 
 const RISK_COLOR = { critical:"var(--red)", high:"var(--yellow)", medium:"var(--blue)", low:"var(--green)" };
 const RISK_BG    = { critical:"var(--red-bg)", high:"var(--yellow-bg)", medium:"var(--blue-bg)", low:"var(--green-bg)" };
 const KIND_PALETTE = ["#58a6ff","#3fb950","#e3b341","#f85149","#a371f7","#39c5cf","#ff9966","#56d364"];
 
-const DEFAULT_DIMS     = ["module"];
-const DEFAULT_MEASURES = [
-  { special: "symbol_count" },
-  { special: "dead_ratio"   },
-  { field: "caller_count", agg: "avg" },
-];
-
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-function measureKey(m)   { return m.special ?? `${m.field}_${m.agg}`; }
-function measureStr(m)   { return m.special ?? `${m.field}:${m.agg}`; }
-function measureLabel(m) {
-  if (m.special) return SPECIAL_LABELS[m.special] ?? m.special;
-  return FIELD_META[m.field]?.label ?? m.field;
-}
-
+/** JSX-aware formatter — use fmtValue (measureUtils) for pure-string contexts. */
 function fmt(value, type) {
   if (value == null) return <span style={{ color:"var(--text3)" }}>—</span>;
-  if (type === "ratio") return `${((value || 0) * 100).toFixed(1)}%`;
-  if (type === "float") { const v = value || 0; return v < 0.01 ? v.toExponential(2) : v.toFixed(3); }
-  return Math.round(value);
+  return fmtValue(value, type);
 }
 
 // ── Filter helpers ─────────────────────────────────────────────────────────────
@@ -429,39 +402,7 @@ function AddMeasureMenu({ onAdd, hasEnriched }) {
 }
 
 // ── DimChip + AddDimMenu ───────────────────────────────────────────────────────
-
-const BUCKET_MODES = ["median", "quartile", "decile"];
-
-// Parse a dim string into {field, mode} if it's bucketed, else null
-function parseBucketedDim(d) {
-  if (!d.includes(":")) return null;
-  const colon = d.indexOf(":");
-  const field  = d.slice(0, colon);
-  const mode   = d.slice(colon + 1);
-  return BUCKET_MODES.includes(mode) ? { field, mode } : null;
-}
-
-const DIM_LABELS = {
-  module:                  "module",
-  risk:                    "risk",
-  kind:                    "kind",
-  symbol:                  "symbol",
-  dead:                    "dead/alive",
-  high_risk:               "high-risk",
-  in_cycle:                "in-cycle ✦",
-  community: "community ✦",
-};
-
-function dimDisplayLabel(d) {
-  if (DIM_LABELS[d]) return DIM_LABELS[d];
-  if (d.includes(":")) {
-    const colon = d.indexOf(":");
-    const field = d.slice(0, colon), mode = d.slice(colon + 1);
-    const base = BUCKET_FIELDS_META[field] ?? field;
-    return `${base} (${mode})`;
-  }
-  return d;
-}
+// parseBucketedDim / dimDisplayLabel imported from ../utils/dimUtils.js
 
 function DimChip({ label, index, onRemove, onChangeMode, dragHandleProps }) {
   const [open, setOpen] = useState(false);
@@ -588,18 +529,7 @@ function SortableMeasureChip({ id, m, onRemove, onChangeAgg }) {
   );
 }
 
-const BUCKET_FIELDS_META = {
-  caller_count:    "callers",
-  callee_count:    "callees",
-  complexity:      "complexity",
-  dead_ratio:      "dead ratio",
-  high_risk_ratio: "high-risk ratio",
-  in_cycle_ratio:  "in-cycle ratio ✦",
-  pagerank:        "pagerank ✦",
-  utility:         "utility ✦",
-  xmod_fan_in:     "xmod_fan_in ✦",
-  betweenness:     "betweenness ✦",
-};
+// BUCKET_FIELDS_META imported from ../utils/exploreConstants.js
 
 function AddDimMenu({ available, onAdd }) {
   const [open, setOpen] = useState(false);
@@ -803,12 +733,7 @@ function PivotTable({ data, measures }) {
 
 // ── GraphRenderer ──────────────────────────────────────────────────────────────
 
-function hex(n) { return Math.max(0,Math.min(255,Math.round(n))).toString(16).padStart(2,"0"); }
-function lerpColor(a, b, t) {
-  const p = c => [parseInt(c.slice(1,3),16),parseInt(c.slice(3,5),16),parseInt(c.slice(5,7),16)];
-  const ca=p(a), cb=p(b);
-  return "#"+ca.map((v,i)=>hex(v+(cb[i]-v)*t)).join("");
-}
+// hex / lerpColor imported from ../utils/colorUtils.js
 
 function drawPill(ctx, cx, cy, w, h) {
   const r = h / 2;
@@ -824,24 +749,7 @@ const MAX_LABEL = 22;
 
 const BLOB_PALETTE = ["#58a6ff","#3fb950","#e3b341","#f85149","#a371f7","#39c5cf","#ff7b54","#56d364"];
 
-// Andrew's monotone chain convex hull
-function convexHull(pts) {
-  if (pts.length < 3) return pts.map(p => [...p]);
-  const s = [...pts].sort((a,b) => a[0]-b[0] || a[1]-b[1]);
-  const cross = (O,A,B) => (A[0]-O[0])*(B[1]-O[1]) - (A[1]-O[1])*(B[0]-O[0]);
-  const lower = [], upper = [];
-  for (const p of s) {
-    while (lower.length >= 2 && cross(lower.at(-2),lower.at(-1),p) <= 0) lower.pop();
-    lower.push(p);
-  }
-  for (let i = s.length-1; i >= 0; i--) {
-    const p = s[i];
-    while (upper.length >= 2 && cross(upper.at(-2),upper.at(-1),p) <= 0) upper.pop();
-    upper.push(p);
-  }
-  lower.pop(); upper.pop();
-  return [...lower, ...upper];
-}
+// convexHull imported from ../utils/graphAlgo.js
 
 // Draw a smooth blob (filled + stroked) around hull points
 function drawBlob(ctx, hull, padding, lineWidth, color) {
@@ -917,42 +825,8 @@ function makeGroupCentroidForce(strength) {
   return force;
 }
 
-// Generate N-step gradients for edge highlight (bright orange → faint cream)
-function makeStepColors(n) {
-  const a = [255, 149,   0]; // #ff9500 (step 0 = direct)
-  const b = [255, 244, 204]; // #fff4cc (step n-1 = faintest)
-  return Array.from({ length: n }, (_, i) => {
-    const t = n < 2 ? 0 : i / (n - 1);
-    return `rgb(${Math.round(a[0]+(b[0]-a[0])*t)},${Math.round(a[1]+(b[1]-a[1])*t)},${Math.round(a[2]+(b[2]-a[2])*t)})`;
-  });
-}
-function makeStepWidths(n) {
-  return Array.from({ length: n }, (_, i) => {
-    const t = n < 2 ? 0 : i / (n - 1);
-    return 2.8 + (0.65 - 2.8) * t;
-  });
-}
-function makeStepArrows(n) {
-  return Array.from({ length: n }, (_, i) => {
-    const t = n < 2 ? 0 : i / (n - 1);
-    return Math.round(8 + (4 - 8) * t);
-  });
-}
-
-/** Pure BFS — returns Map<nodeId, hops> from `start` following `adj`, bounded by `maxD`. */
-function bfsFromNode(start, adj, maxD) {
-  const dist = new Map([[start, 0]]);
-  const queue = [start];
-  while (queue.length) {
-    const cur = queue.shift();
-    const d   = dist.get(cur);
-    if (d >= maxD) continue;
-    for (const nb of (adj.get(cur) || [])) {
-      if (!dist.has(nb)) { dist.set(nb, d + 1); queue.push(nb); }
-    }
-  }
-  return dist;
-}
+// makeStepColors/Widths/Arrows imported from ../utils/colorUtils.js
+// bfsFromNode imported from ../utils/graphAlgo.js
 
 /**
  * Single-select physics: pull BFS-reachable nodes to concentric rings around the
@@ -1154,16 +1028,10 @@ function GraphRenderer({ data, measures, onNodeClick,
   }, [data, minWeight, topK, colorKey, colorStats, sizeKey, dim0, dim1, isBlobMode, hideIsolated]);
 
   // Build forward + reverse adjacency maps from current graph links
-  const { fwdAdj, bwdAdj } = useMemo(() => {
-    const fwd = new Map(), bwd = new Map();
-    for (const link of graphData.links) {
-      const src = typeof link.source === "object" ? link.source.id : link.source;
-      const tgt = typeof link.target === "object" ? link.target.id : link.target;
-      if (!fwd.has(src)) fwd.set(src, []);  fwd.get(src).push(tgt);
-      if (!bwd.has(tgt)) bwd.set(tgt, []);  bwd.get(tgt).push(src);
-    }
-    return { fwdAdj: fwd, bwdAdj: bwd };
-  }, [graphData.links]);
+  const { fwdAdj, bwdAdj } = useMemo(
+    () => buildAdjacencyMaps(graphData.links),
+    [graphData.links]
+  );
 
   // Single-select fan-out: BFS forward from the one selected node (depth ≤ fanOutDepth)
   const bfsDistances = useMemo(() => {
@@ -1171,107 +1039,18 @@ function GraphRenderer({ data, measures, onNodeClick,
     return bfsFromNode([...selectedNodeIds][0], fwdAdj, fanOutDepth);
   }, [selectedNodeIds, fwdAdj, fanOutDepth]);
 
-  // Multi-select chain mode — proper graph traversal, not array filtering.
-  //
-  // For each ordered pair (S, T) of selected nodes:
-  //   1. Build the "progress subgraph": edges (u→v) where both monotone guards hold
-  //      AND the total path length ≤ maxHops. This subgraph only contains edges
-  //      that could plausibly be on a valid S→T path.
-  //   2. BFS forward from S within that subgraph → forwardReachable
-  //   3. BFS backward from T within that subgraph → backwardReachable
-  //   4. Keep only edges where source ∈ forwardReachable AND target ∈ backwardReachable.
-  //
-  // Because we start from S and only follow edges, the result is always connected —
-  // a traversal cannot reach a node it has no path to.
-  const chainEdgeMap = useMemo(() => {
-    if (selectedNodeIds.size < 2) return new Map(); // Map<"u|v", minChainLen>
-    const sel = [...selectedNodeIds];
-    const fwd = sel.map(s => bfsFromNode(s, fwdAdj, fanOutDepth));
-    const bwd = sel.map(t => bfsFromNode(t, bwdAdj, fanOutDepth));
+    // Multi-select chain mode — delegates to findChainEdges in graphAlgo.js
+  // (see that module for full algorithm documentation)
+  const chainEdgeMap = useMemo(
+    () => findChainEdges([...selectedNodeIds], fwdAdj, bwdAdj, graphData.links, fanOutDepth),
+    [selectedNodeIds, fwdAdj, bwdAdj, graphData.links, fanOutDepth]
+  );
 
-    const result = new Map();
-
-    for (let i = 0; i < sel.length; i++) {
-      for (let j = 0; j < sel.length; j++) {
-        if (i === j) continue;
-        const S = sel[i], T = sel[j];
-
-        // ── Step 1: build the progress subgraph for this (S, T) pair ──────────
-        // progressOut[u] = list of v nodes reachable from u via progress edges
-        // progressIn[v]  = list of u nodes that lead to v via progress edges
-        const progressOut  = new Map();
-        const progressIn   = new Map();
-        const pairEdgeLens = new Map(); // "u|v" → chain length for this pair
-
-        for (const link of graphData.links) {
-          const u = typeof link.source === "object" ? link.source.id : link.source;
-          const v = typeof link.target === "object" ? link.target.id : link.target;
-
-          const du  = fwd[i].get(u);  if (du  == null) continue;
-          const dvu = fwd[i].get(v);  if (dvu == null || dvu <= du) continue; // fwd guard
-          const dv  = bwd[j].get(v);  if (dv  == null) continue;
-          const duT = bwd[j].get(u);  if (duT == null || duT <= dv) continue; // bwd guard
-          const len = du + 1 + dv;    if (len  > fanOutDepth)       continue;
-
-          pairEdgeLens.set(`${u}|${v}`, len);
-          if (!progressOut.has(u)) progressOut.set(u, []);
-          progressOut.get(u).push(v);
-          if (!progressIn.has(v)) progressIn.set(v, []);
-          progressIn.get(v).push(u);
-        }
-
-        if (!pairEdgeLens.size) continue;
-
-        // ── Step 2: BFS forward from S in the progress subgraph ───────────────
-        const forwardReachable = new Set([S]);
-        const fq = [S];
-        while (fq.length) {
-          const u = fq.shift();
-          for (const v of (progressOut.get(u) || [])) {
-            if (!forwardReachable.has(v)) { forwardReachable.add(v); fq.push(v); }
-          }
-        }
-        if (!forwardReachable.has(T)) continue; // T unreachable from S → skip pair
-
-        // ── Step 3: BFS backward from T in the progress subgraph ─────────────
-        const backwardReachable = new Set([T]);
-        const bq = [T];
-        while (bq.length) {
-          const v = bq.shift();
-          for (const u of (progressIn.get(v) || [])) {
-            if (!backwardReachable.has(u)) { backwardReachable.add(u); bq.push(u); }
-          }
-        }
-
-        // ── Step 4: keep only edges in the forward ∩ backward intersection ───
-        // An edge (u→v) is on a valid S→T path iff u is forward-reachable from S
-        // AND v can reach T backward. This is the only set of edges that cannot
-        // produce disconnected subgraphs.
-        for (const [key, len] of pairEdgeLens) {
-          const bar = key.indexOf("|");
-          const u = key.slice(0, bar), v = key.slice(bar + 1);
-          if (forwardReachable.has(u) && backwardReachable.has(v)) {
-            const prev = result.get(key);
-            if (prev == null || len < prev) result.set(key, len);
-          }
-        }
-      }
-    }
-
-    return result;
-  }, [selectedNodeIds, fwdAdj, bwdAdj, graphData.links, fanOutDepth]);
-
-  // Nodes that lie on at least one connecting chain (+ the selected nodes themselves)
-  const chainNodeIds = useMemo(() => {
-    if (chainEdgeMap.size === 0) return new Set();
-    const ids = new Set(selectedNodeIds);
-    for (const key of chainEdgeMap.keys()) {
-      const bar = key.indexOf("|");
-      ids.add(key.slice(0, bar));
-      ids.add(key.slice(bar + 1));
-    }
-    return ids;
-  }, [chainEdgeMap, selectedNodeIds]);
+  // Nodes on at least one connecting chain (+ selected endpoints)
+  const chainNodeIds = useMemo(
+    () => collectChainNodeIds(chainEdgeMap, [...selectedNodeIds]),
+    [chainEdgeMap, selectedNodeIds]
+  );
 
   // Dynamic step arrays — recomputed when fanOutDepth changes
   const stepColors = useMemo(() => makeStepColors(fanOutDepth), [fanOutDepth]);
@@ -1409,7 +1188,7 @@ function GraphRenderer({ data, measures, onNodeClick,
     if (v == null) return "—";
     const t = colorMeasure ? types[measureKey(colorMeasure)] : null;
     if (t === "ratio") return `${(v*100).toFixed(1)}%`;
-    if (t === "float") return v < 0.01 ? v.toExponential(2) : v.toFixed(3);
+    if (t === "float") return v !== 0 && v < 0.01 ? v.toExponential(2) : v.toFixed(3);
     return Number.isInteger(v) ? v.toString() : v.toFixed(2);
   }
 
@@ -1871,26 +1650,8 @@ function NodeTable({ repoId, hasEnriched, kinds }) {
 
 // ── Main ───────────────────────────────────────────────────────────────────────
 
-// ── URL ↔ state helpers ────────────────────────────────────────────────────────
-
-function parseMeasuresParam(raw) {
-  if (!raw) return DEFAULT_MEASURES;
-  return raw.split(",").filter(Boolean).map(s => {
-    if (SPECIAL_LABELS[s] !== undefined) return { special: s };
-    if (s.includes(":")) {
-      const colon = s.indexOf(":");
-      return { field: s.slice(0, colon), agg: s.slice(colon + 1) };
-    }
-    return { special: s };
-  }).filter(m => m.special ? SPECIAL_LABELS[m.special] !== undefined : FIELD_META[m.field]);
-}
-
-function parseFiltersParam(raw) {
-  if (!raw) return [];
-  try { return JSON.parse(raw); } catch { return []; }
-}
-
 // ── Main ───────────────────────────────────────────────────────────────────────
+// parseMeasuresParam / parseFiltersParam imported from ../utils/measureUtils.js and ../utils/dimUtils.js
 
 export default function Explore() {
   const { repoId, setRepoId } = useContext(RepoContext);
