@@ -157,6 +157,9 @@ export default function GraphRenderer({ data, measures, onNodeClick,
   });
   const [showSearch, setShowSearch]   = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  // Coupling mode: set of node ids that have ≥1 cross-boundary outgoing edge.
+  // Active only in blob mode. Independent of selectedNodeIds.
+  const [couplingIds, setCouplingIds] = useState(new Set());
   const zoomTransformRef  = useRef({ k: 1, x: 0, y: 0 });
   const didOffsetRef = useRef(false);
 
@@ -211,6 +214,10 @@ export default function GraphRenderer({ data, measures, onNodeClick,
     [data, minWeight, topK, colorKey, colorStats, sizeKey, hideIsolated],
   );
 
+  // Reset coupling view when the graph data changes (new repo, new dims, etc.)
+  // Must be after graphData is declared to avoid TDZ in the dependency array.
+  useEffect(() => { setCouplingIds(new Set()); }, [graphData]);
+
   // Build forward + reverse adjacency maps from current graph links
   const { fwdAdj, bwdAdj } = useMemo(
     () => buildAdjacencyMaps(graphData.links),
@@ -264,6 +271,30 @@ export default function GraphRenderer({ data, measures, onNodeClick,
   const stepColors = useMemo(() => makeStepColors(fanOutDepth), [fanOutDepth]);
   const stepWidths = useMemo(() => makeStepWidths(fanOutDepth), [fanOutDepth]);
   const stepArrows = useMemo(() => makeStepArrows(fanOutDepth), [fanOutDepth]);
+
+  // ── Coupling mode ─────────────────────────────────────────────────────────
+  // The set of edges that cross blob-group boundaries (src.group ≠ tgt.group).
+  // Only meaningful in blob mode; empty set otherwise.
+  const crossEdgeSet = useMemo(() => {
+    if (!graphData.isBlobMode) return new Set();
+    const nodeGroup = new Map(graphData.nodes.map(n => [n.id, n.group]));
+    const set = new Set();
+    for (const link of graphData.links) {
+      const src = typeof link.source === "object" ? link.source.id : link.source;
+      const tgt = typeof link.target === "object" ? link.target.id : link.target;
+      const sg = nodeGroup.get(src), tg = nodeGroup.get(tgt);
+      if (sg != null && tg != null && sg !== tg) set.add(`${src}|${tgt}`);
+    }
+    return set;
+  }, [graphData]);
+
+  function handleCouplingToggle() {
+    if (couplingIds.size > 0) { setCouplingIds(new Set()); return; }
+    // Compute nodes that are the source of ≥1 cross-boundary edge
+    const sources = new Set();
+    for (const key of crossEdgeSet) sources.add(key.split("|")[0]);
+    setCouplingIds(sources);
+  }
 
   useEffect(() => {
     const fg = fgRef.current;
@@ -467,6 +498,23 @@ export default function GraphRenderer({ data, measures, onNodeClick,
             background: hideIsolated ? "var(--blue)" : "var(--bg3)",
             color:       hideIsolated ? "#fff"       : "var(--text2)" }}
         >{hideIsolated ? "✕ isolated hidden" : "show isolated"}</button>
+        {/* Coupling mode — blob mode only */}
+        {graphData.isBlobMode && (
+          <button
+            onClick={handleCouplingToggle}
+            title={couplingIds.size > 0
+              ? "Clear coupling highlight"
+              : `Highlight nodes that call across group boundaries (${crossEdgeSet.size} cross-boundary edges)`}
+            style={{ fontSize:11, padding:"3px 9px", cursor:"pointer", borderRadius:4,
+              border:"1px solid var(--border2)",
+              background: couplingIds.size > 0 ? "#ff9f1c" : "var(--bg3)",
+              color:       couplingIds.size > 0 ? "#0d1117"  : "var(--text2)" }}
+          >
+            {couplingIds.size > 0
+              ? `✕ coupling (${couplingIds.size} nodes)`
+              : `🔀 coupling`}
+          </button>
+        )}
         {/* Search shortcut hint */}
         <button
           onClick={() => setShowSearch(true)}
@@ -522,6 +570,8 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                 const isReachable = !anySelected ? true
                   : selectedNodeIds.size === 1 ? bfsDistances.has(node.id)
                   : chainNodeIds.has(node.id);
+                const isCoupling  = couplingIds.has(node.id);
+                const hasCoupling = couplingIds.size > 0;
 
                 // For symbol mode the id is "module::name" — show only the name part
                 const full  = node.name || "";
@@ -534,8 +584,22 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                 const w     = Math.max(tw + padX * 2, 30);
                 const h     = fs + padY * 2;
 
-                // Dim nodes not on any chain (or not reachable in fan-out mode)
-                ctx.globalAlpha = anySelected ? (isReachable ? 1.0 : 0.18) : 1.0;
+                // Dimming priority:
+                //  coupling mode  → coupling nodes full, others 18% (selection can rescue)
+                //  selection mode → reachable nodes full, others 18%
+                //  neither        → all full
+                const isVisible = hasCoupling
+                  ? (isCoupling || (anySelected && isReachable))
+                  : anySelected ? isReachable : true;
+                ctx.globalAlpha = isVisible ? 1.0 : 0.18;
+
+                // Coupling halo — outermost, orange, drawn before selection ring
+                if (isCoupling) {
+                  drawPill(ctx, node.x, node.y, w + 12, h + 12);
+                  ctx.strokeStyle = "rgba(255,159,28,0.85)";
+                  ctx.lineWidth   = 2.5;
+                  ctx.stroke();
+                }
 
                 // Selection halo — drawn slightly larger, behind the pill
                 if (isSelected) {
@@ -572,7 +636,13 @@ export default function GraphRenderer({ data, measures, onNodeClick,
               linkWidth={link => {
                 const src = typeof link.source === "object" ? link.source.id : link.source;
                 const tgt = typeof link.target === "object" ? link.target.id : link.target;
-                if (selectedNodeIds.size === 0) return Math.log(1 + (link.value||1)) * 0.8 + 0.3;
+                if (selectedNodeIds.size === 0) {
+                  if (couplingIds.size > 0) {
+                    // Cross-boundary edges slightly thicker so they stand out
+                    return crossEdgeSet.has(`${src}|${tgt}`) ? 2.0 : 0.4;
+                  }
+                  return Math.log(1 + (link.value||1)) * 0.8 + 0.3;
+                }
                 if (selectedNodeIds.size === 1) {
                   // Bidirectional: forward edge from src, OR backward edge into tgt
                   const fD = fwdDistances.get(src);
@@ -588,7 +658,13 @@ export default function GraphRenderer({ data, measures, onNodeClick,
               linkColor={link => {
                 const src = typeof link.source === "object" ? link.source.id : link.source;
                 const tgt = typeof link.target === "object" ? link.target.id : link.target;
-                if (selectedNodeIds.size === 0) return "#30363d";
+                if (selectedNodeIds.size === 0) {
+                  if (couplingIds.size > 0) {
+                    // Cyan for cross-boundary; nearly invisible for within-group
+                    return crossEdgeSet.has(`${src}|${tgt}`) ? "#39c5cf" : "rgba(48,54,61,0.08)";
+                  }
+                  return "#30363d";
+                }
                 if (selectedNodeIds.size === 1) {
                   const fD = fwdDistances.get(src);
                   const bD = bwdDistances.get(tgt);
@@ -603,7 +679,12 @@ export default function GraphRenderer({ data, measures, onNodeClick,
               linkDirectionalArrowLength={link => {
                 const src = typeof link.source === "object" ? link.source.id : link.source;
                 const tgt = typeof link.target === "object" ? link.target.id : link.target;
-                if (selectedNodeIds.size === 0) return 5;
+                if (selectedNodeIds.size === 0) {
+                  if (couplingIds.size > 0) {
+                    return crossEdgeSet.has(`${src}|${tgt}`) ? 7 : 2;
+                  }
+                  return 5;
+                }
                 if (selectedNodeIds.size === 1) {
                   const fD = fwdDistances.get(src);
                   const bD = bwdDistances.get(tgt);
@@ -618,7 +699,14 @@ export default function GraphRenderer({ data, measures, onNodeClick,
               linkDirectionalParticles={link => {
                 // Control particle count per-link so the library doesn't freeze
                 // them when selection state changes. 0 = no particles at all.
-                if (selectedNodeIds.size === 0) return 2;
+                if (selectedNodeIds.size === 0) {
+                  if (couplingIds.size > 0) {
+                    const u = typeof link.source === "object" ? link.source.id : link.source;
+                    const v = typeof link.target === "object" ? link.target.id : link.target;
+                    return crossEdgeSet.has(`${u}|${v}`) ? 3 : 0;
+                  }
+                  return 2;
+                }
                 const u = typeof link.source === "object" ? link.source.id : link.source;
                 const v = typeof link.target === "object" ? link.target.id : link.target;
                 // Bidirectional: lit if edge goes forward from u, or backward into v
@@ -627,13 +715,27 @@ export default function GraphRenderer({ data, measures, onNodeClick,
               }}
               linkDirectionalParticleSpeed={0.004}
               linkDirectionalParticleWidth={link => {
-                if (selectedNodeIds.size === 0) return 3;
+                if (selectedNodeIds.size === 0) {
+                  if (couplingIds.size > 0) {
+                    const u = typeof link.source === "object" ? link.source.id : link.source;
+                    const v = typeof link.target === "object" ? link.target.id : link.target;
+                    return crossEdgeSet.has(`${u}|${v}`) ? 4 : 0;
+                  }
+                  return 3;
+                }
                 const u = typeof link.source === "object" ? link.source.id : link.source;
                 const v = typeof link.target === "object" ? link.target.id : link.target;
                 if (selectedNodeIds.size === 1) return (fwdDistances.has(u) || bwdDistances.has(v)) ? 5 : 0;
                 return chainEdgeMap.has(`${u}|${v}`) ? 5 : 0;
               }}
-              linkDirectionalParticleColor={() => "#ffffff"}
+              linkDirectionalParticleColor={link => {
+                if (selectedNodeIds.size === 0 && couplingIds.size > 0) {
+                  const u = typeof link.source === "object" ? link.source.id : link.source;
+                  const v = typeof link.target === "object" ? link.target.id : link.target;
+                  return crossEdgeSet.has(`${u}|${v}`) ? "#39c5cf" : "#ffffff";
+                }
+                return "#ffffff";
+              }}
               onZoom={t => { zoomTransformRef.current = t; }}
               onEngineStop={() => {
                 // Once per mount: nudge the camera so the node cloud is centred
