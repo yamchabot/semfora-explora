@@ -152,14 +152,19 @@ export function makeVoronoiContainmentForce(
 
     const groupList = [...groups.entries()];
 
-    // ── 2. Gentle per-node centroid attraction ──────────────────────────────
+    // ── 2. Per-node centroid attraction ─────────────────────────────────────
+    // effAlpha is floored at 0.05 so the centripetal pull never fully dies.
+    // Without this, Stage 2 → 0 as the simulation cools, leaving the charge
+    // force unchallenged — nodes drift to the blob boundary and park there
+    // permanently (the "flat-edge" / "ring" accumulation bug).
+    const effAlpha = Math.max(alpha, 0.05);
     for (const n of _nodes) {
       const gk = getGroupKey(n, blobLevel);
       if (!gk || n.x == null) continue;
       const own = groups.get(gk);
       if (!own) continue;
-      n.vx += (own.x - n.x) * attractStrength * alpha;
-      n.vy += (own.y - n.y) * attractStrength * alpha;
+      n.vx += (own.x - n.x) * attractStrength * effAlpha;
+      n.vy += (own.y - n.y) * attractStrength * effAlpha;
     }
 
     // ── 3. Group-level separation (alpha-independent position push) ─────────
