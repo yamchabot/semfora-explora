@@ -1003,20 +1003,30 @@ function makeChainCentroidForce(selectedIds, chainIds) {
 function GraphRenderer({ data, measures, onNodeClick,
   minWeight, setMinWeight, topK, setTopK,
   colorKeyOverride, setColorKeyOverride, fanOutDepth, setFanOutDepth,
-  selectedNodeIds, setSelectedNodeIds, hideIsolated, setHideIsolated }) {
+  selectedNodeIds, setSelectedNodeIds, hideIsolated, setHideIsolated,
+  controlsH = 0 }) {
   const containerRef  = useRef(null);
   const fgRef         = useRef(null);
   const [size, setSize]     = useState({ w:800, h:640 });
   const [showSearch, setShowSearch]   = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   // Tracks the live d3-zoom transform so the wheel-pan handler has a consistent baseline
-  const zoomTransformRef = useRef({ k: 1, x: 0, y: 0 });
+  const zoomTransformRef  = useRef({ k: 1, x: 0, y: 0 });
+  // One-shot flag: offset graph center down so nodes are centered in visible
+  // area below the floating config card. Resets on each ForceGraph2D remount
+  // (which happens when the node set changes via the `key` prop).
+  const didOffsetRef = useRef(false);
 
   useEffect(() => {
     if (!containerRef.current) return;
     const obs = new ResizeObserver(([e]) => {
       const w = e.contentRect.width;
-      setSize({ w, h: Math.max(600, Math.round(w * 0.68)) });
+      // Use actual container height when the container is sized by CSS (overlay
+      // mode); fall back to aspect-ratio formula for the normal-flow layout.
+      const h = e.contentRect.height > 100
+        ? e.contentRect.height
+        : Math.max(600, Math.round(w * 0.68));
+      setSize({ w, h });
     });
     obs.observe(containerRef.current);
     return () => obs.disconnect();
@@ -1628,6 +1638,16 @@ function GraphRenderer({ data, measures, onNodeClick,
               }}
               linkDirectionalParticleColor={() => "#ffffff"}
               onZoom={t => { zoomTransformRef.current = t; }}
+              onEngineStop={() => {
+                // Once per mount: nudge the camera so the node cloud is centred
+                // in the visible area below the floating config card.
+                if (didOffsetRef.current || !fgRef.current || controlsH <= 20) return;
+                didOffsetRef.current = true;
+                const fg = fgRef.current;
+                const k  = fg.zoom() || 1;
+                const c  = fg.centerAt() || { x: 0, y: 0 };
+                fg.centerAt(c.x, c.y + controlsH / (2 * k), 400);
+              }}
               onNodeClick={(node, event) => {
                 const id = node?.id ?? null;
                 if (!id) return;
@@ -1916,7 +1936,7 @@ export default function Explore() {
     });
     obs.observe(configCardRef.current);
     return () => obs.disconnect();
-  }, [sidebarOpen]); // re-run when card appears/disappears
+  }, [sidebarOpen, renderer]); // re-run when card appears/disappears or layout changes
 
   // DnD sensors — require 5px of movement before activating so clicks still work
   const dndSensors = useSensors(
@@ -2051,162 +2071,137 @@ export default function Explore() {
     setDims(p => p.map(d => d === oldDim ? newDim : d));
   }
 
+  // ── Shared config card content (rendered in both graph + normal layouts) ──
+  const configContent = (<>
+    <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:14 }}>
+      <span style={{ fontSize:11, fontWeight:600, color:"var(--text3)", textTransform:"uppercase", letterSpacing:"0.08em", width:80 }}>View</span>
+      {[{key:"pivot",label:"📊 Pivot"},{key:"graph",label:"🕸 Graph"},{key:"nodes",label:"🔬 Nodes"}].map(({key,label})=>(
+        <button key={key} className={`btn btn-sm ${renderer===key?"":"btn-ghost"}`} onClick={()=>setRenderer(key)}>{label}</button>
+      ))}
+    </div>
+    {renderer!=="nodes" && (
+      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12, flexWrap:"wrap" }}>
+        <span style={{ fontSize:11, fontWeight:600, color:"var(--text3)", textTransform:"uppercase", letterSpacing:"0.08em", width:80 }}>Group by</span>
+        <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDimDragEnd}>
+          <SortableContext items={dims} strategy={horizontalListSortingStrategy}>
+            {dims.map((d,i) => (
+              <SortableDimChip key={d} id={d} label={d} index={i}
+                onRemove={() => setDims(p => p.filter(x => x !== d))}
+                onChangeMode={newDim => changeDimMode(d, newDim)}/>
+            ))}
+          </SortableContext>
+        </DndContext>
+        <AddDimMenu available={availableDims} onAdd={d=>setDims(p=>[...p,d])}/>
+        {symbolMode && <span style={{ fontSize:11, color:"var(--text3)", fontStyle:"italic", marginLeft:4 }}>No grouping → showing individual symbols</span>}
+      </div>
+    )}
+    <div style={{ marginBottom:12 }}>
+      {availableKinds.length > 0
+        ? <KindFilter availableKinds={availableKinds} kinds={kinds} onChange={setKinds}/>
+        : <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+            <span style={{ fontSize:11, fontWeight:600, color:"var(--text3)", textTransform:"uppercase", letterSpacing:"0.08em", width:80 }}>Kind filter</span>
+            <span style={{ fontSize:11, color:"var(--text3)" }}>{kindsQuery.isLoading ? "loading…" : "no kinds found"}</span>
+          </div>
+      }
+    </div>
+    {renderer!=="nodes" && (
+      <div style={{ display:"flex", alignItems:"flex-start", gap:8, flexWrap:"wrap", marginBottom:12 }}>
+        <span style={{ fontSize:11, fontWeight:600, color:"var(--text3)", textTransform:"uppercase", letterSpacing:"0.08em", width:80, paddingTop:5 }}>Measures</span>
+        <div style={{ display:"flex", flexWrap:"wrap", gap:6, alignItems:"center" }}>
+          <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleMeasureDragEnd}>
+            <SortableContext items={measures.map(measureKey)} strategy={horizontalListSortingStrategy}>
+              {measures.map(m => (
+                <SortableMeasureChip key={measureKey(m)} id={measureKey(m)} m={m}
+                  onRemove={() => removeMeasure(measureKey(m))}
+                  onChangeAgg={agg => changeAgg(measureKey(m), agg)}/>
+              ))}
+            </SortableContext>
+          </DndContext>
+          <AddMeasureMenu onAdd={addMeasure} hasEnriched={hasEnriched}/>
+        </div>
+      </div>
+    )}
+    <div style={{ display:"flex", alignItems:"flex-start", gap:8, flexWrap:"wrap" }}>
+      <span style={{ fontSize:11, fontWeight:600, color:"var(--text3)", textTransform:"uppercase", letterSpacing:"0.08em", width:80, paddingTop:5 }}>Filters</span>
+      <div style={{ display:"flex", flexWrap:"wrap", gap:6, alignItems:"center" }}>
+        {filters.map(f => (
+          <FilterChip key={f.id} filter={f}
+            availableValues={f.kind === "dim" ? (dimValues[f.field] || []) : []}
+            onUpdate={updated => setFilters(p => p.map(x => x.id === f.id ? updated : x))}
+            onRemove={() => setFilters(p => p.filter(x => x.id !== f.id))}/>
+        ))}
+        <AddFilterMenu dims={allDims} measures={renderer !== "nodes" ? measures : []}
+          onAdd={f => setFilters(p => [...p, f])}/>
+      </div>
+    </div>
+  </>);
+
+  // ── GRAPH mode: full-viewport overlay ─────────────────────────────────────
+  if (renderer === "graph") return (
+    // Negative margin bleeds out of Layout's 28px/32px padding → graph fills viewport
+    <div style={{ position:"relative", height:"100vh", margin:"-28px -32px", overflow:"hidden" }}>
+      {/* Graph fills the entire background */}
+      {measures.length === 0
+        ? <div style={{ display:"flex", alignItems:"center", justifyContent:"center", height:"100%", color:"var(--text3)", fontSize:13 }}>Select at least one measure.</div>
+        : pivotQuery.isLoading
+        ? <div style={{ display:"flex", alignItems:"center", justifyContent:"center", height:"100%", color:"var(--text3)", fontSize:13 }}>Computing…</div>
+        : pivotQuery.error
+        ? <div className="error" style={{ margin:40 }}>{pivotQuery.error.message}</div>
+        : stableFilteredData
+        ? <GraphRenderer
+            data={stableFilteredData} measures={measures} onNodeClick={setSelectedNode}
+            minWeight={minWeight}               setMinWeight={setMinWeight}
+            topK={topK}                         setTopK={setTopK}
+            colorKeyOverride={colorKeyOverride} setColorKeyOverride={setColorKeyOverride}
+            fanOutDepth={fanOutDepth}           setFanOutDepth={setFanOutDepth}
+            selectedNodeIds={selectedNodeIds}   setSelectedNodeIds={setSelectedNodeIds}
+            hideIsolated={hideIsolated}         setHideIsolated={setHideIsolated}
+            controlsH={controlsRect.height}
+          />
+        : null}
+      {/* Floating config card */}
+      <div ref={configCardRef} className="card" style={{
+        position:"absolute", top:12, left:12, zIndex:10,
+        width:340, maxHeight:"calc(100% - 24px)", overflowY:"auto",
+        padding:"16px 20px", boxShadow:"0 4px 24px rgba(0,0,0,0.5)",
+      }}>
+        {configContent}
+        {selectedNode && <>
+          <div style={{ borderTop:"1px solid var(--border)", margin:"12px 0 8px" }}/>
+          <GraphNodeDetails node={selectedNode} measures={measures}
+            types={stableFilteredData?.measure_types || {}}/>
+        </>}
+      </div>
+    </div>
+  );
+
+  // ── PIVOT / NODES mode: normal flow layout ─────────────────────────────────
   return (
     <div>
-      <div className="page-header">
-        <h1>📐 Explore</h1>
-        <p>Group, filter by kind, pick measures with any aggregation — or browse raw nodes and their edges.</p>
-      </div>
-
-      {/* ── Config row: Query Builder + Node Details ──────────────────────── */}
       <div style={{ display:"flex", gap:16, alignItems:"flex-start", marginBottom:20 }}>
-      <div className="card" style={{ padding:"16px 20px", flex:1 }}>
-
-        {/* View */}
-        <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:14 }}>
-          <span style={{ fontSize:11, fontWeight:600, color:"var(--text3)", textTransform:"uppercase", letterSpacing:"0.08em", width:80 }}>View</span>
-          {[{key:"pivot",label:"📊 Pivot"},{key:"graph",label:"🕸 Graph"},{key:"nodes",label:"🔬 Nodes"}].map(({key,label})=>(
-            <button key={key} className={`btn btn-sm ${renderer===key?"":"btn-ghost"}`} onClick={()=>setRenderer(key)}>{label}</button>
-          ))}
+        <div ref={configCardRef} className="card" style={{ padding:"16px 20px", flex:1 }}>
+          {configContent}
         </div>
-
-        {/* Group By */}
-        {renderer!=="nodes" && (
-          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12, flexWrap:"wrap" }}>
-            <span style={{ fontSize:11, fontWeight:600, color:"var(--text3)", textTransform:"uppercase", letterSpacing:"0.08em", width:80 }}>Group by</span>
-            <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDimDragEnd}>
-              <SortableContext items={dims} strategy={horizontalListSortingStrategy}>
-                {dims.map((d,i) => (
-                  <SortableDimChip
-                    key={d} id={d} label={d} index={i}
-                    onRemove={() => setDims(p => p.filter(x => x !== d))}
-                    onChangeMode={newDim => changeDimMode(d, newDim)}
-                  />
-                ))}
-              </SortableContext>
-            </DndContext>
-            <AddDimMenu available={availableDims} onAdd={d=>setDims(p=>[...p,d])}/>
-            {symbolMode && (
-              <span style={{ fontSize:11, color:"var(--text3)", fontStyle:"italic", marginLeft:4 }}>
-                No grouping → showing individual symbols
-              </span>
-            )}
-          </div>
-        )}
-
-        {/* Kind filter — always shows, all active by default */}
-        <div style={{ marginBottom:12 }}>
-          {availableKinds.length > 0
-            ? <KindFilter availableKinds={availableKinds} kinds={kinds} onChange={setKinds}/>
-            : <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                <span style={{ fontSize:11, fontWeight:600, color:"var(--text3)", textTransform:"uppercase", letterSpacing:"0.08em", width:80 }}>Kind filter</span>
-                <span style={{ fontSize:11, color:"var(--text3)" }}>{kindsQuery.isLoading ? "loading…" : "no kinds found"}</span>
-              </div>
-          }
-        </div>
-
-        {/* Measures */}
-        {renderer!=="nodes" && (
-          <div style={{ display:"flex", alignItems:"flex-start", gap:8, flexWrap:"wrap", marginBottom:12 }}>
-            <span style={{ fontSize:11, fontWeight:600, color:"var(--text3)", textTransform:"uppercase", letterSpacing:"0.08em", width:80, paddingTop:5 }}>Measures</span>
-            <div style={{ display:"flex", flexWrap:"wrap", gap:6, alignItems:"center" }}>
-              <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleMeasureDragEnd}>
-                <SortableContext items={measures.map(measureKey)} strategy={horizontalListSortingStrategy}>
-                  {measures.map(m => (
-                    <SortableMeasureChip
-                      key={measureKey(m)}
-                      id={measureKey(m)}
-                      m={m}
-                      onRemove={() => removeMeasure(measureKey(m))}
-                      onChangeAgg={agg => changeAgg(measureKey(m), agg)}
-                    />
-                  ))}
-                </SortableContext>
-              </DndContext>
-              <AddMeasureMenu onAdd={addMeasure} hasEnriched={hasEnriched}/>
+      </div>
+      {renderer==="pivot" && (<>
+        {measures.length===0 && <div style={{ padding:"40px 0", textAlign:"center", color:"var(--text3)" }}>Select at least one measure.</div>}
+        {measures.length>0 && <>
+          {pivotQuery.isLoading && <div className="loading">Computing…</div>}
+          {pivotQuery.error    && <div className="error">{pivotQuery.error.message}</div>}
+          {filteredData && <>
+            <div style={{ fontSize:12, color:"var(--text2)", marginBottom:10 }}>
+              {symbolMode
+                ? <>{filteredData.rows.length}{pivotQuery.data.symbol_total > filteredData.rows.length && ` of ${pivotQuery.data.symbol_total}`} symbols{pivotQuery.data.symbol_total > 500 && <span style={{ color:"var(--text3)", marginLeft:4 }}>(top {filteredData.rows.length} by caller count)</span>}</>
+                : <>{filteredData.rows.length}{pivotQuery.data.rows.length !== filteredData.rows.length && ` of ${pivotQuery.data.rows.length}`} groups{effectiveDims.length>1&&` · click ▶ to drill into ${effectiveDims[1]}`}</>
+              }
+              {kinds.length>0&&<span style={{ marginLeft:6 }}>· kind: {kinds.join(", ")}</span>}
+              {filters.length>0&&<span style={{ color:"var(--blue)", marginLeft:6 }}>· {filters.length} filter{filters.length>1?"s":""} active</span>}
             </div>
-          </div>
-        )}
-
-        {/* Filters */}
-        <div style={{ display:"flex", alignItems:"flex-start", gap:8, flexWrap:"wrap" }}>
-          <span style={{ fontSize:11, fontWeight:600, color:"var(--text3)", textTransform:"uppercase", letterSpacing:"0.08em", width:80, paddingTop:5 }}>Filters</span>
-          <div style={{ display:"flex", flexWrap:"wrap", gap:6, alignItems:"center" }}>
-            {filters.map(f => (
-              <FilterChip
-                key={f.id}
-                filter={f}
-                availableValues={f.kind === "dim" ? (dimValues[f.field] || []) : []}
-                onUpdate={updated => setFilters(p => p.map(x => x.id === f.id ? updated : x))}
-                onRemove={() => setFilters(p => p.filter(x => x.id !== f.id))}
-              />
-            ))}
-            <AddFilterMenu
-              dims={allDims}
-              measures={renderer !== "nodes" ? measures : []}
-              onAdd={f => setFilters(p => [...p, f])}
-            />
-          </div>
-        </div>
-      </div>{/* end query builder card */}
-
-      {/* Node details panel — visible in graph mode */}
-      {renderer === "graph" && (
-        <GraphNodeDetails
-          node={selectedNode}
-          measures={measures}
-          types={(renderer === "graph" ? stableFilteredData : filteredData)?.measure_types || {}}
-        />
-      )}
-      </div>{/* end config row */}
-
-      {/* ── Results ───────────────────────────────────────────────────────── */}
-
-      {(renderer==="pivot"||renderer==="graph") && (
-        <>
-          {measures.length===0 && <div style={{ padding:"40px 0", textAlign:"center", color:"var(--text3)" }}>Select at least one measure.</div>}
-          {measures.length>0 && (
-            <>
-              {pivotQuery.isLoading && <div className="loading">Computing…</div>}
-              {pivotQuery.error    && <div className="error">{pivotQuery.error.message}</div>}
-              {filteredData && renderer==="pivot" && (
-                <>
-                  <div style={{ fontSize:12, color:"var(--text2)", marginBottom:10 }}>
-                    {symbolMode
-                      ? <>
-                          {filteredData.rows.length}{pivotQuery.data.symbol_total > filteredData.rows.length && ` of ${pivotQuery.data.symbol_total}`} symbols
-                          {pivotQuery.data.symbol_total > 500 && <span style={{ color:"var(--text3)", marginLeft:4 }}>(top {filteredData.rows.length} by caller count)</span>}
-                        </>
-                      : <>
-                          {filteredData.rows.length}{pivotQuery.data.rows.length !== filteredData.rows.length && ` of ${pivotQuery.data.rows.length}`} groups
-                          {effectiveDims.length>1&&` · click ▶ to drill into ${effectiveDims[1]}`}
-                        </>
-                    }
-                    {kinds.length>0&&<span style={{ marginLeft:6 }}>· kind: {kinds.join(", ")}</span>}
-                    {filters.length>0&&<span style={{ color:"var(--blue)", marginLeft:6 }}>· {filters.length} filter{filters.length>1?"s":""} active</span>}
-                  </div>
-                  <PivotTable data={filteredData} measures={measures}/>
-                </>
-              )}
-              {renderer==="graph" && stableFilteredData && (
-                <GraphRenderer
-                  data={stableFilteredData} measures={measures} onNodeClick={setSelectedNode}
-                  minWeight={minWeight}               setMinWeight={setMinWeight}
-                  topK={topK}                         setTopK={setTopK}
-                  colorKeyOverride={colorKeyOverride} setColorKeyOverride={setColorKeyOverride}
-                  fanOutDepth={fanOutDepth}           setFanOutDepth={setFanOutDepth}
-                  selectedNodeIds={selectedNodeIds}   setSelectedNodeIds={setSelectedNodeIds}
-                  hideIsolated={hideIsolated}         setHideIsolated={setHideIsolated}
-                />
-              )}
-            </>
-          )}
-        </>
-      )}
-
-      {renderer==="nodes" && (
-        <NodeTable repoId={repoId} hasEnriched={hasEnriched} kinds={kinds}/>
-      )}
+            <PivotTable data={filteredData} measures={measures}/>
+          </>}
+        </>}
+      </>)}
+      {renderer==="nodes" && <NodeTable repoId={repoId} hasEnriched={hasEnriched} kinds={kinds}/>}
     </div>
   );
 }
