@@ -111,11 +111,13 @@ function drawBlob(ctx, hull, padding, lineWidth, color) {
 export function makeNestedBlobForce(level, blobCount = 1) {
   // Inner levels need stronger containment; outer levels are gentler.
   const levelFactor = Math.max(0.4, 1 - level * 0.25);
+  const padding     = Math.max(15, 60 - level * 15);
   return makeVoronoiContainmentForce(
     0.10 * levelFactor,
     0.35 * levelFactor,
-    Math.max(15, 60 - level * 15),  // tighter padding at inner levels
+    padding,
     level,
+    Math.round(padding * 0.6),  // boundary margin ≈ 60% of padding (prevents flat-edge dead zone)
   );
 }
 
@@ -124,6 +126,7 @@ export function makeVoronoiContainmentForce(
   separationStrength = 0.35,
   blobPadding        = 60,
   blobLevel          = 0,    // which groupPath level to use for grouping
+  boundaryMargin     = 0,    // pre-emptive push zone (graph units) before the Voronoi edge
 ) {
   let _nodes = [];
 
@@ -186,7 +189,21 @@ export function makeVoronoiContainmentForce(
       }
     }
 
-    // ── 4. Per-node straggler enforcement ───────────────────────────────────
+    // ── 4. Per-node straggler enforcement + boundary margin zone ────────────
+    //
+    // Signed boundary distance (sbd): distance of a node from the Voronoi
+    // midpoint between its own centroid and a neighbour centroid.
+    //   sbd > 0  →  node has crossed into the other group's territory
+    //   sbd = 0  →  exactly at the Voronoi midpoint
+    //   sbd < 0  →  safely inside own territory (distance = |sbd|)
+    //
+    // Without `boundaryMargin`, Stage 4 only fires when sbd > 0 (already
+    // crossed) — creating a dead zone just inside the boundary where nodes
+    // accumulate and form a flat edge.
+    //
+    // With `boundaryMargin > 0`, correction starts at sbd = -boundaryMargin
+    // and ramps linearly from 0 (outer edge) to a max push at the boundary.
+    // This pre-empts pile-up before it can form.
     for (const n of _nodes) {
       const gk = getGroupKey(n, blobLevel);
       if (!gk || n.x == null) continue;
@@ -196,16 +213,35 @@ export function makeVoronoiContainmentForce(
       for (const [g, c] of groupList) {
         if (g === gk) continue;
         const otherDist = Math.sqrt((n.x - c.x) ** 2 + (n.y - c.y) ** 2) || 0.001;
-        if (otherDist < ownDist) {
-          const crossDist = (ownDist - otherDist) * 0.5;
-          const frac      = Math.min((crossDist / ownDist) * 0.5, 0.3);
-          n.x += (own.x - n.x) * frac;
-          n.y += (own.y - n.y) * frac;
-          const cx = c.x - n.x, cy = c.y - n.y;
-          const cl = Math.sqrt(cx * cx + cy * cy) || 1;
-          const proj = n.vx * (cx / cl) + n.vy * (cy / cl);
-          if (proj > 0) { n.vx -= (cx / cl) * proj; n.vy -= (cy / cl) * proj; }
+
+        // sbd > 0 → crossed; sbd < 0 → inside (magnitude = gap to boundary)
+        const sbd = (ownDist - otherDist) / 2;
+        if (sbd <= -boundaryMargin) continue;   // well inside blob — nothing to do
+
+        const dx = own.x - n.x, dy = own.y - n.y;
+        const dl = Math.sqrt(dx * dx + dy * dy) || 1;
+
+        if (boundaryMargin > 0) {
+          // Margin-zone fix: linear ramp from 0 (at outer edge) to max (at/past boundary).
+          // Uses a fixed-pixel push (direction: toward own centroid) so the force is
+          // alpha-independent and can't be overwhelmed by a dead simulation.
+          const depth  = (sbd + boundaryMargin) / boundaryMargin; // 0 → 1+ as node approaches/crosses
+          const pushPx = Math.min(depth * boundaryMargin * 0.08, 6);
+          n.x += (dx / dl) * pushPx;
+          n.y += (dy / dl) * pushPx;
+        } else {
+          // Original behaviour (boundaryMargin = 0): fractional pull toward centroid,
+          // proportional to how far past the boundary the node has drifted.
+          const frac = Math.min((sbd / ownDist) * 0.5, 0.3);
+          n.x += dx * frac;
+          n.y += dy * frac;
         }
+
+        // Velocity damping: cancel any velocity component pointing toward the other centroid.
+        const cx = c.x - n.x, cy = c.y - n.y;
+        const cl = Math.sqrt(cx * cx + cy * cy) || 1;
+        const proj = n.vx * (cx / cl) + n.vy * (cy / cl);
+        if (proj > 0) { n.vx -= (cx / cl) * proj; n.vy -= (cy / cl) * proj; }
       }
     }
   }
