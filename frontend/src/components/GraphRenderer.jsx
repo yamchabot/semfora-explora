@@ -21,8 +21,64 @@ const MAX_LABEL = 22;
 
 const BLOB_PALETTE = ["#58a6ff","#3fb950","#e3b341","#f85149","#a371f7","#39c5cf","#ff7b54","#56d364"];
 
-// Draw a smooth blob (filled + stroked) around hull points
-function drawBlob(ctx, hull, padding, lineWidth, color) {
+// ── Voronoi helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Sutherland-Hodgman halfplane clip.
+ * Keeps the portion of `poly` on the side where dot((P-B), N) >= 0.
+ */
+function clipHalfplane(poly, bx, by, nx, ny) {
+  const out = [];
+  for (let i = 0; i < poly.length; i++) {
+    const P = poly[i];
+    const Q = poly[(i + 1) % poly.length];
+    const pd = nx * (P[0] - bx) + ny * (P[1] - by);
+    const qd = nx * (Q[0] - bx) + ny * (Q[1] - by);
+    if (pd >= 0) out.push(P);
+    if ((pd >= 0) !== (qd >= 0)) {
+      const denom = nx * (Q[0] - P[0]) + ny * (Q[1] - P[1]);
+      if (Math.abs(denom) > 1e-10) {
+        const t = (nx * (bx - P[0]) + ny * (by - P[1])) / denom;
+        out.push([P[0] + t * (Q[0] - P[0]), P[1] + t * (Q[1] - P[1])]);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Compute the Voronoi cell polygon for a centroid, clipped to a bounding box.
+ * `allCentroids` = [[cx,cy], ...] for ALL groups (including the own centroid).
+ * `shrink` = inset the boundaries by this many graph-units (creates a visible gap).
+ */
+function voronoiCell(ownCx, ownCy, allCentroids, bbox, shrink = 0) {
+  const [xMin, yMin, xMax, yMax] = bbox;
+  let poly = [[xMin, yMin], [xMax, yMin], [xMax, yMax], [xMin, yMax]];
+
+  for (const [ox, oy] of allCentroids) {
+    if (ox === ownCx && oy === ownCy) continue;
+    // Midpoint on the Voronoi boundary (perpendicular bisector)
+    const bx = (ownCx + ox) / 2;
+    const by = (ownCy + oy) / 2;
+    // Inward normal: from other toward own (scaled so we can shrink)
+    const len = Math.sqrt((ownCx - ox) ** 2 + (ownCy - oy) ** 2) || 1;
+    const nx  = (ownCx - ox) / len;
+    const ny  = (ownCy - oy) / len;
+    // Shift the boundary inward by `shrink` graph-units
+    poly = clipHalfplane(poly, bx + nx * shrink, by + ny * shrink, nx, ny);
+    if (poly.length < 3) return [];
+  }
+  return poly;
+}
+
+// ── Blob drawing ─────────────────────────────────────────────────────────────
+
+/**
+ * Draw a smooth blob (filled + stroked) around hull points.
+ * When `voronoiPoly` is provided, the blob is canvas-clipped to that polygon,
+ * guaranteeing it never overlaps an adjacent group's blob.
+ */
+function drawBlob(ctx, hull, padding, lineWidth, color, voronoiPoly = null) {
   if (!hull?.length) return;
   // Expand each point outward from centroid
   const cx = hull.reduce((s,p)=>s+p[0],0) / hull.length;
@@ -41,21 +97,31 @@ function drawBlob(ctx, hull, padding, lineWidth, color) {
     const dx  = exp[1][0] - exp[0][0];
     const dy  = exp[1][1] - exp[0][1];
     const len = Math.sqrt(dx*dx + dy*dy) || 1;
-    const wing = padding * 0.65;         // perpendicular bulge ≈ 65% of padding
-    const nx   = -dy / len * wing;       // perpendicular unit × wing
+    const wing = padding * 0.65;
+    const nx   = -dy / len * wing;
     const ny   =  dx / len * wing;
-
     const mx   = (exp[0][0] + exp[1][0]) / 2;
     const my   = (exp[0][1] + exp[1][1]) / 2;
     exp = [exp[0], [mx + nx, my + ny], exp[1], [mx - nx, my - ny]];
   }
 
   const n = exp.length;
+
+  ctx.save();
+
+  // Clip to Voronoi cell — this is what guarantees non-overlapping blobs
+  if (voronoiPoly?.length >= 3) {
+    ctx.beginPath();
+    ctx.moveTo(voronoiPoly[0][0], voronoiPoly[0][1]);
+    for (let i = 1; i < voronoiPoly.length; i++) ctx.lineTo(voronoiPoly[i][0], voronoiPoly[i][1]);
+    ctx.closePath();
+    ctx.clip();
+  }
+
   ctx.beginPath();
   if (n === 1) {
     ctx.arc(exp[0][0], exp[0][1], padding, 0, Math.PI*2);
   } else {
-    // Smooth path: move to midpoint of each edge, quadratic through vertex
     const mid = i => [(exp[i][0]+exp[(i+1)%n][0])/2, (exp[i][1]+exp[(i+1)%n][1])/2];
     const m0 = mid(0);
     ctx.moveTo(m0[0], m0[1]);
@@ -70,12 +136,27 @@ function drawBlob(ctx, hull, padding, lineWidth, color) {
   ctx.strokeStyle = color + "66";   // ~40% opacity stroke
   ctx.lineWidth   = lineWidth;
   ctx.stroke();
+
+  ctx.restore();
 }
 
-// Custom d3 force: pulls each node toward its group's centroid
-export function makeGroupCentroidForce(strength) {
+// ── Group forces ─────────────────────────────────────────────────────────────
+
+/**
+ * Voronoi containment force for blob mode.
+ *
+ * Two effects per tick:
+ *   1. Gentle centroid attraction (keeps groups cohesive)
+ *   2. Boundary restoring force: when a node crosses the Voronoi boundary
+ *      into another group's territory, push it back proportionally.
+ *
+ * This replaces the old simple centroid-only force and ensures that nodes
+ * stay inside their correct blob even when cross-group link forces are strong.
+ */
+export function makeVoronoiContainmentForce(attractStrength = 0.08, boundaryStrength = 0.6) {
   let _nodes = [];
   function force(alpha) {
+    // Compute group centroids from current positions
     const centroids = new Map();
     for (const n of _nodes) {
       if (!n.group) continue;
@@ -84,17 +165,41 @@ export function makeGroupCentroidForce(strength) {
       c.x += n.x; c.y += n.y; c.count++;
     }
     for (const c of centroids.values()) { c.x /= c.count; c.y /= c.count; }
+    const centList = [...centroids.entries()];
+
     for (const n of _nodes) {
-      if (!n.group) continue;
-      const c = centroids.get(n.group);
-      if (!c) continue;
-      n.vx += (c.x - n.x) * strength * alpha;
-      n.vy += (c.y - n.y) * strength * alpha;
+      if (!n.group || n.x == null) continue;
+      const own = centroids.get(n.group);
+      if (!own) continue;
+
+      // 1. Gentle attraction toward own centroid
+      n.vx += (own.x - n.x) * attractStrength * alpha;
+      n.vy += (own.y - n.y) * attractStrength * alpha;
+
+      // 2. Voronoi boundary enforcement
+      const ownDist2 = (n.x - own.x) ** 2 + (n.y - own.y) ** 2;
+      for (const [g, c] of centList) {
+        if (g === n.group) continue;
+        const otherDist2 = (n.x - c.x) ** 2 + (n.y - c.y) ** 2;
+        if (otherDist2 < ownDist2) {
+          // Node is past the Voronoi boundary — push it back.
+          // Force scales with how far past the boundary it is.
+          const crossDist = (Math.sqrt(ownDist2) - Math.sqrt(otherDist2)) * 0.5;
+          const dist = Math.sqrt(ownDist2) || 1;
+          const k = boundaryStrength * alpha;
+          n.vx += (own.x - n.x) / dist * crossDist * k;
+          n.vy += (own.y - n.y) / dist * crossDist * k;
+        }
+      }
     }
   }
   force.initialize = nodes => { _nodes = nodes; };
   return force;
 }
+
+// Keep old name as alias so any external references still compile.
+export const makeGroupCentroidForce = (strength) =>
+  makeVoronoiContainmentForce(strength, strength * 6);
 
 /**
  * Single-select physics: pull BFS-reachable nodes to concentric rings around the
@@ -331,7 +436,7 @@ export default function GraphRenderer({ data, measures, onNodeClick,
     if (charge) charge.strength(-forceSpread).distanceMax(Math.round(400 * forceSpread / SPREAD_DEFAULT));
     const link = fg.d3Force("link");
     if (link) link.distance(linkDistBase);
-    fg.d3Force("groupCentroid", graphData.isBlobMode ? makeGroupCentroidForce(0.1) : null);
+    fg.d3Force("groupCentroid", graphData.isBlobMode ? makeVoronoiContainmentForce(0.08, 0.6) : null);
     fg.d3ReheatSimulation?.();
   }, [graphData, forceSpread]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -592,20 +697,51 @@ export default function GraphRenderer({ data, measures, onNodeClick,
               nodeVal={n => n.val}
               nodeColor={n => n.color}
               onRenderFramePre={graphData.isBlobMode ? (ctx, gs) => {
-                // Draw amorphous blobs behind nodes — one per outer-dim group
+                // Draw amorphous blobs behind nodes — one per outer-dim group.
+                // Each blob is clipped to its Voronoi cell so blobs can never
+                // visually overlap, even when groups are tightly coupled.
+
+                // 1. Collect node positions per group
                 const groupPos = new Map();
                 for (const node of graphData.nodes) {
                   if (node.x == null) continue;
                   if (!groupPos.has(node.group)) groupPos.set(node.group, []);
                   groupPos.get(node.group).push([node.x, node.y]);
                 }
+
+                // 2. Compute group centroids
+                const centroids = new Map(); // group → [cx, cy]
+                for (const [group, pts] of groupPos) {
+                  centroids.set(group, [
+                    pts.reduce((s,p)=>s+p[0],0)/pts.length,
+                    pts.reduce((s,p)=>s+p[1],0)/pts.length,
+                  ]);
+                }
+
+                // 3. Compute bounding box (large enough to cover all Voronoi cells)
+                const allPts = [...groupPos.values()].flat();
+                const margin = 400 / gs;
+                const bbox = [
+                  Math.min(...allPts.map(p=>p[0])) - margin,
+                  Math.min(...allPts.map(p=>p[1])) - margin,
+                  Math.max(...allPts.map(p=>p[0])) + margin,
+                  Math.max(...allPts.map(p=>p[1])) + margin,
+                ];
+
+                const centroidArr = [...centroids.values()]; // [[cx,cy], ...]
+                const SHRINK = 6 / gs; // gap between adjacent blobs (graph-units)
+
+                // 4. Draw each blob clipped to its Voronoi cell
                 for (const [group, pts] of groupPos) {
                   const color = groupColorMap.get(group) || "#888888";
                   const hull  = pts.length >= 3 ? convexHull(pts) : pts.map(p => [...p]);
-                  drawBlob(ctx, hull, 32/gs, 1.5/gs, color);
+                  const [cx, cy] = centroids.get(group);
+                  const cell  = centroids.size > 1
+                    ? voronoiCell(cx, cy, centroidArr, bbox, SHRINK)
+                    : null;   // single group — no clipping needed
+                  drawBlob(ctx, hull, 32/gs, 1.5/gs, color, cell);
+
                   // Group label at centroid
-                  const cx = pts.reduce((s,p)=>s+p[0],0)/pts.length;
-                  const cy = pts.reduce((s,p)=>s+p[1],0)/pts.length;
                   ctx.font         = `bold ${15/gs}px sans-serif`;
                   ctx.fillStyle    = (groupColorMap.get(group)||"#888888") + "99";
                   ctx.textAlign    = "center";
