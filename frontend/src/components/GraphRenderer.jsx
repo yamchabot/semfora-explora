@@ -4,6 +4,7 @@ import { measureKey, measureLabel } from "../utils/measureUtils.js";
 import { lerpColor, makeStepColors, makeStepWidths, makeStepArrows } from "../utils/colorUtils.js";
 import { bfsFromNode, buildAdjacencyMaps, convexHull, findChainEdges, collectChainNodeIds } from "../utils/graphAlgo.js";
 import { buildGraphData } from "../utils/graphData.js";
+import { Tooltip } from "./Tooltip.jsx";
 
 // ── Canvas helpers ──────────────────────────────────────────────────────────────
 
@@ -753,13 +754,15 @@ export default function GraphRenderer({ data, measures, onNodeClick,
             style={{ width:80, cursor:"pointer", accentColor:"var(--blue)" }}
           />
           {forceSpread !== SPREAD_DEFAULT && (
-            <button
-              onClick={() => setForceSpread(SPREAD_DEFAULT)}
-              title="Reset spread to default"
-              style={{ fontSize:10, padding:"1px 6px", background:"var(--bg3)",
-                border:"1px solid var(--border2)", borderRadius:3,
-                color:"var(--text3)", cursor:"pointer", lineHeight:"16px" }}
-            >↺</button>
+            <Tooltip tip="Reset spread to default">
+              <button
+                onClick={() => setForceSpread(SPREAD_DEFAULT)}
+                title="Reset spread to default"
+                style={{ fontSize:10, padding:"1px 6px", background:"var(--bg3)",
+                  border:"1px solid var(--border2)", borderRadius:3,
+                  color:"var(--text3)", cursor:"pointer", lineHeight:"16px" }}
+              >↺</button>
+            </Tooltip>
           )}
         </div>
         {selectedNodeIds.size >= 2 && (
@@ -777,53 +780,67 @@ export default function GraphRenderer({ data, measures, onNodeClick,
         )}
         {/* ── Icon-only quick toggles ─────────────────────────────────────── */}
         {/* Each button is a single icon; full description lives in the tooltip. */}
-        <button
-          onClick={() => setHideIsolated(v => !v)}
-          title={hideIsolated ? "Show isolated nodes (currently hidden)" : "Hide isolated nodes (no edges)"}
-          style={{ fontSize:13, padding:"3px 7px", cursor:"pointer", borderRadius:4,
-            border:"1px solid var(--border2)",
-            background: hideIsolated ? "var(--blue)" : "var(--bg3)",
-            color:       hideIsolated ? "#fff"       : "var(--text2)" }}
-        >⊘</button>
-        {/* Coupling + show-only — blob mode only */}
-        {graphData.isBlobMode && (<>
+        <Tooltip tip={hideIsolated ? "Show all nodes (isolated nodes hidden)" : "Hide isolated nodes — no edges in or out"}>
           <button
-            onClick={handleCouplingToggle}
-            title={couplingIds.size > 0
-              ? `Clear coupling (${couplingIds.size} source nodes, ${couplingEndpoints.size} total endpoints, ${crossEdgeSet.size} cross-boundary edges)`
-              : `Highlight cross-boundary callers (${crossEdgeSet.size} edges, ${couplingEndpoints.size} endpoints)`}
+            onClick={() => setHideIsolated(v => !v)}
+            title={hideIsolated ? "Show isolated nodes (currently hidden)" : "Hide isolated nodes (no edges)"}
             style={{ fontSize:13, padding:"3px 7px", cursor:"pointer", borderRadius:4,
               border:"1px solid var(--border2)",
-              background: couplingIds.size > 0 ? "#ff9f1c" : "var(--bg3)",
-              color:       couplingIds.size > 0 ? "#0d1117"  : "var(--text2)" }}
-          >🔀</button>
-          {couplingIds.size > 0 && (
+              background: hideIsolated ? "var(--blue)" : "var(--bg3)",
+              color:       hideIsolated ? "#fff"       : "var(--text2)" }}
+          >⊘</button>
+        </Tooltip>
+        {/* Coupling + show-only — blob mode only */}
+        {graphData.isBlobMode && (<>
+          <Tooltip tip={couplingIds.size > 0
+            ? `Clear coupling  (${crossEdgeSet.size} cross-boundary edges, ${couplingEndpoints.size} endpoints)`
+            : `Coupling: highlight calls that cross group boundaries`}>
             <button
-              onClick={() => setCouplingOnly(o => !o)}
-              title={couplingOnly
-                ? `Show full graph (filtering to ${couplingEndpoints.size} cross-boundary nodes)`
-                : `Filter to ${couplingEndpoints.size} cross-boundary nodes only`}
+              onClick={handleCouplingToggle}
+              title={couplingIds.size > 0
+                ? `Clear coupling (${couplingIds.size} source nodes, ${couplingEndpoints.size} total endpoints, ${crossEdgeSet.size} cross-boundary edges)`
+                : `Highlight cross-boundary callers (${crossEdgeSet.size} edges, ${couplingEndpoints.size} endpoints)`}
               style={{ fontSize:13, padding:"3px 7px", cursor:"pointer", borderRadius:4,
                 border:"1px solid var(--border2)",
-                background: couplingOnly ? "#ff9f1c" : "var(--bg3)",
-                color:       couplingOnly ? "#0d1117"  : "var(--text2)" }}
-            >⊂</button>
+                background: couplingIds.size > 0 ? "#ff9f1c" : "var(--bg3)",
+                color:       couplingIds.size > 0 ? "#0d1117"  : "var(--text2)" }}
+            >🔀</button>
+          </Tooltip>
+          {couplingIds.size > 0 && (
+            <Tooltip tip={couplingOnly
+              ? `Show full graph  (currently filtered to ${couplingEndpoints.size} nodes)`
+              : `Filter to ${couplingEndpoints.size} coupled nodes only`}>
+              <button
+                onClick={() => setCouplingOnly(o => !o)}
+                title={couplingOnly
+                  ? `Show full graph (filtering to ${couplingEndpoints.size} cross-boundary nodes)`
+                  : `Filter to ${couplingEndpoints.size} cross-boundary nodes only`}
+                style={{ fontSize:13, padding:"3px 7px", cursor:"pointer", borderRadius:4,
+                  border:"1px solid var(--border2)",
+                  background: couplingOnly ? "#ff9f1c" : "var(--bg3)",
+                  color:       couplingOnly ? "#0d1117"  : "var(--text2)" }}
+              >⊂</button>
+            </Tooltip>
           )}
         </>)}
-        <button
-          onClick={() => setShowSearch(true)}
-          title="Search and select nodes by name (/ or ⌘K)"
-          style={{ fontSize:13, padding:"3px 7px", cursor:"pointer", borderRadius:4,
-            border:"1px solid var(--border2)", background:"var(--bg3)", color:"var(--text2)" }}
-        >🔍</button>
-        <button
-          onClick={() => setNodeDot(d => !d)}
-          title={nodeDot ? "Switch back to labelled pill nodes" : "Switch to dot nodes (less visual noise for dense graphs)"}
-          style={{ fontSize:13, padding:"3px 7px", cursor:"pointer", borderRadius:4,
-            border:"1px solid var(--border2)",
-            background: nodeDot ? "var(--blue)" : "var(--bg3)",
-            color:       nodeDot ? "#fff"       : "var(--text2)" }}
-        >⬤</button>
+        <Tooltip tip="Search and select nodes by name  ( / or ⌘K )">
+          <button
+            onClick={() => setShowSearch(true)}
+            title="Search and select nodes by name (/ or ⌘K)"
+            style={{ fontSize:13, padding:"3px 7px", cursor:"pointer", borderRadius:4,
+              border:"1px solid var(--border2)", background:"var(--bg3)", color:"var(--text2)" }}
+          >🔍</button>
+        </Tooltip>
+        <Tooltip tip={nodeDot ? "Switch to labelled pill nodes" : "Dot mode — compact circles, no labels"}>
+          <button
+            onClick={() => setNodeDot(d => !d)}
+            title={nodeDot ? "Switch back to labelled pill nodes" : "Switch to dot nodes (less visual noise for dense graphs)"}
+            style={{ fontSize:13, padding:"3px 7px", cursor:"pointer", borderRadius:4,
+              border:"1px solid var(--border2)",
+              background: nodeDot ? "var(--blue)" : "var(--bg3)",
+              color:       nodeDot ? "#fff"       : "var(--text2)" }}
+          >⬤</button>
+        </Tooltip>
         <span style={{ fontSize:11, color:"var(--text3)", whiteSpace:"nowrap" }} title="Visible edges / total edges">{visibleEdges}/{totalEdges} edges</span>
       </div>{/* end inner controls flex */}
       </div>{/* end gradient overlay */}
