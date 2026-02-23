@@ -1093,19 +1093,26 @@ function GraphRenderer({ data, measures, onNodeClick,
     }
 
     if (isBlobMode) {
-      // Nodes = leaf children; each carries .group = outer dim value
+      // Nodes = leaf children; each carries .group = outer dim value.
+      // Node IDs are composite "outer::inner" because the same inner dim value
+      // (e.g. a community label) can appear in multiple outer groups (modules),
+      // and d3-force requires globally unique IDs.
       const leafRows = data.rows.flatMap(pr =>
         (pr.children || []).map(c => ({ ...c, _group: pr.key[dim0] }))
       );
       const maxSize = Math.max(1, ...leafRows.map(r => r.values[sizeKey] || 0));
       const nodes = leafRows.map(r => {
-        const id   = r.key[dim1];
+        const outerVal = r._group;
+        const innerVal = r.key[dim1];
+        const id   = `${outerVal}::${innerVal}`;  // unique across all blobs
         const vals = r.values;
         const sz   = Math.sqrt((vals[sizeKey]||1)/maxSize)*18+4;
-        // Spread into a fresh object so d3 mutations don't pollute our data
-        return { id, name:id, values:vals, group:r._group, val:sz, color:makeColor(vals) };
+        return { id, name:innerVal, values:vals, group:outerVal, val:sz, color:makeColor(vals) };
       });
       const validIds = new Set(nodes.map(n => n.id));
+      // leaf_graph_edges use bare inner-dim IDs — they won't match composite IDs,
+      // so inter-leaf edges are intentionally absent in 2-dim blob mode.
+      // (A community→community edge without its module context is ambiguous.)
       const links = filterEdges(data.leaf_graph_edges, validIds);
       if (hideIsolated) {
         const connected = new Set();
