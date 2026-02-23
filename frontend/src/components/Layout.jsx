@@ -17,6 +17,7 @@ const NAV = [
   { to: "/load-bearing", icon: "🏛️",  label: "Load-Bearing",        section: "Structure" },
   { to: "/building",     icon: "🏗️",  label: "Building View",       section: null },
   { to: "/diff",         icon: "🔀",  label: "Graph Diff",          section: "Compare" },
+  { to: "/explore",      icon: "📐",  label: "Explore",             section: "Explore" },
 ];
 
 export default function Layout() {
@@ -53,7 +54,7 @@ export default function Layout() {
               <optgroup key={proj} label={proj}>
                 {versions.map((r) => (
                   <option key={r.id} value={r.id}>
-                    {proj} @ {r.commit} — {r.node_count.toLocaleString()} nodes
+                    {proj} @ {r.commit} — {r.node_count.toLocaleString()} nodes{r.enriched ? " ✦" : ""}
                   </option>
                 ))}
               </optgroup>

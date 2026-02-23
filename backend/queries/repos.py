@@ -10,10 +10,17 @@ from db import row_to_dict
 
 
 def fetch_repo_list(data_dir: Path) -> list[dict]:
-    """Scan data_dir for .db files and return basic stats for each."""
+    """Scan data_dir for .db files and return basic stats for each.
+
+    Enriched DBs (*.enriched.db) are not shown as separate repos — get_db()
+    auto-upgrades to the enriched version when available.
+    """
     repos = []
     for db_file in sorted(data_dir.glob("*.db")):
+        if db_file.name.endswith(".enriched.db"):
+            continue  # internal enrichment artifact — not a user-visible repo
         repo_id = db_file.stem
+        enriched = (data_dir / f"{repo_id}.enriched.db").exists()
         try:
             conn = sqlite3.connect(db_file)
             conn.row_factory = sqlite3.Row
@@ -32,6 +39,7 @@ def fetch_repo_list(data_dir: Path) -> list[dict]:
             "node_count":   node_count,
             "edge_count":   edge_count,
             "module_count": module_count,
+            "enriched":     enriched,
             "db_path":      str(db_file),
         })
     return repos

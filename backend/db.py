@@ -18,7 +18,10 @@ def row_to_dict(row) -> dict:
 
 
 def get_db(repo_id: str) -> sqlite3.Connection:
-    db_path = DATA_DIR / f"{repo_id}.db"
+    base_path     = DATA_DIR / f"{repo_id}.db"
+    enriched_path = DATA_DIR / f"{repo_id}.enriched.db"
+    # Prefer enriched DB when available — it is a strict superset of the base schema
+    db_path = enriched_path if enriched_path.exists() else base_path
     if not db_path.exists():
         raise HTTPException(
             status_code=404,

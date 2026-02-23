@@ -14,6 +14,7 @@ import Building from "./pages/Building";
 import Cycles from "./pages/Cycles";
 import ModuleGraph from "./pages/ModuleGraph";
 import Communities from "./pages/Communities";
+import Explore from "./pages/Explore";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -45,6 +46,7 @@ export default function App() {
               <Route path="building" element={<Building />} />
               <Route path="module-graph" element={<ModuleGraph />} />
               <Route path="communities" element={<Communities />} />
+              <Route path="explore"     element={<Explore />} />
             </Route>
           </Routes>
         </BrowserRouter>
