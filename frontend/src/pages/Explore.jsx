@@ -1323,39 +1323,35 @@ function GraphRenderer({ data, measures, onNodeClick,
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedNodeIds, bfsDistances, chainNodeIds, chainEdgeMap]);
 
-  // ── Trackpad pan support ────────────────────────────────────────────────────
-  // d3-zoom captures ALL wheel events for zoom. We intercept only trackpad
-  // two-finger scroll (deltaMode===0, no ctrlKey) for panning.
-  // Mouse wheel (deltaMode===1) and pinch-to-zoom (ctrlKey) pass through to d3.
+  // ── Scroll pan / pinch zoom ──────────────────────────────────────────────────
+  // onZoom reports {k, x, y} where x/y are graph-space center (NOT d3 translation).
+  // Pan formula: new_center = old_center + delta_screen / k
+  // ctrlKey = macOS pinch-to-zoom → pass through to d3.
+  // All other wheel events → translate the camera.
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const onWheel = (e) => {
-      // pinch-to-zoom (macOS reports ctrlKey+wheel) — let d3 handle
-      if (e.ctrlKey) return;
-      // Mouse wheel (line/page deltaMode) — let d3 handle for zooming
-      if (e.deltaMode !== 0) return;
-      // Trackpad two-finger scroll (pixel deltaMode, no ctrlKey) → pan
+      if (e.ctrlKey) return; // pinch-to-zoom — let d3 handle
       e.preventDefault();
       e.stopPropagation();
       const fg = fgRef.current;
       if (!fg) return;
       const { k, x, y } = zoomTransformRef.current;
       if (!k) return;
-      // Cap individual delta to avoid momentum-scroll explosions
+      // Cap per-event delta to prevent momentum-scroll explosions
       const MAX_DELTA = 80;
       const dx = Math.max(-MAX_DELTA, Math.min(MAX_DELTA, e.deltaX));
       const dy = Math.max(-MAX_DELTA, Math.min(MAX_DELTA, e.deltaY));
-      // Optimistic update so rapid successive events have the right baseline
-      const newX = x - dx;
-      const newY = y - dy;
+      // x/y are graph-space center — move by (delta / k) to stay proportional to zoom
+      const newX = x + dx / k;
+      const newY = y + dy / k;
       zoomTransformRef.current = { k, x: newX, y: newY };
-      // Convert screen-space offset to graph-space center and pan
-      fg.centerAt((size.w / 2 - newX) / k, (size.h / 2 - newY) / k, 0);
+      fg.centerAt(newX, newY, 0);
     };
     el.addEventListener("wheel", onWheel, { passive: false, capture: true });
     return () => el.removeEventListener("wheel", onWheel, { capture: true });
-  }, [size.w, size.h]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Node search modal (/  or  Cmd+K / Ctrl+K) ───────────────────────────
   useEffect(() => {
