@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import ForceGraph2D from "react-force-graph-2d";
-import { filterEdgesToNodes } from "../utils/filterUtils.js";
 import { measureKey, measureLabel } from "../utils/measureUtils.js";
 import { lerpColor, makeStepColors, makeStepWidths, makeStepArrows } from "../utils/colorUtils.js";
 import { bfsFromNode, buildAdjacencyMaps, convexHull, findChainEdges, collectChainNodeIds } from "../utils/graphAlgo.js";
+import { buildGraphData } from "../utils/graphData.js";
 
 // ── Canvas helpers ──────────────────────────────────────────────────────────────
 
@@ -73,7 +73,7 @@ function drawBlob(ctx, hull, padding, lineWidth, color) {
 }
 
 // Custom d3 force: pulls each node toward its group's centroid
-function makeGroupCentroidForce(strength) {
+export function makeGroupCentroidForce(strength) {
   let _nodes = [];
   function force(alpha) {
     const centroids = new Map();
@@ -100,7 +100,7 @@ function makeGroupCentroidForce(strength) {
  * Single-select physics: pull BFS-reachable nodes to concentric rings around the
  * pinned selected node (depth 1 → radius radiusPer, depth 2 → 2×radiusPer, …).
  */
-function makeSelectionRadialForce(selectedId, bfsDists, radiusPer) {
+export function makeSelectionRadialForce(selectedId, bfsDists, radiusPer) {
   let simNodes = [];
   function force(alpha) {
     const sel = simNodes.find(n => n.id === selectedId);
@@ -125,7 +125,7 @@ function makeSelectionRadialForce(selectedId, bfsDists, radiusPer) {
  * Multi-select physics: pull chain nodes toward the centroid of all selected nodes,
  * with strength proportional to alpha.
  */
-function makeChainCentroidForce(selectedIds, chainIds) {
+export function makeChainCentroidForce(selectedIds, chainIds) {
   let simNodes = [];
   function force(alpha) {
     const sels = simNodes.filter(n => selectedIds.has(n.id) && n.x != null);
@@ -206,96 +206,10 @@ export default function GraphRenderer({ data, measures, onNodeClick,
     return new Map(data.rows.map((r, i) => [r.key[dim0], BLOB_PALETTE[i % BLOB_PALETTE.length]]));
   }, [isBlobMode, data, dim0]);
 
-  const graphData = useMemo(() => {
-    if (!data?.rows) return { nodes:[], links:[], isBlobMode:false };
-
-    /**
-     * Apply weight/topK limits to raw edge list, then drop any edge where
-     * source or target is not in `validIds`.
-     *
-     * Passing validIds prevents the d3 "node not found" crash that occurs
-     * when a filter removes nodes but leaves stale edges referencing them.
-     */
-    function filterEdges(raw, validIds) {
-      let edges = [...(raw || [])];
-      if (minWeight > 1) edges = edges.filter(e => e.weight >= minWeight);
-      if (topK > 0) {
-        const bySource = new Map();
-        for (const e of edges) {
-          if (!bySource.has(e.source)) bySource.set(e.source, []);
-          bySource.get(e.source).push(e);
-        }
-        edges = [];
-        for (const arr of bySource.values()) {
-          arr.sort((a,b) => b.weight - a.weight);
-          edges.push(...arr.slice(0, topK));
-        }
-      }
-      const mapped = edges.map(e => ({ source:e.source, target:e.target, value:e.weight }));
-      // Remove edges that reference nodes outside the current visible set.
-      // filterEdgesToNodes also handles d3-mutated source/target objects.
-      return filterEdgesToNodes(mapped, validIds);
-    }
-
-    function makeColor(vals) {
-      const t = colorKey
-        ? Math.max(0, Math.min(1, (vals[colorKey] - colorStats.min) / (colorStats.max - colorStats.min)))
-        : 0.5;
-      return lerpColor("#3fb950","#f85149", t);
-    }
-
-    if (isBlobMode) {
-      // Nodes = one per unique inner-dim value. The same community can appear
-      // as a child under multiple module rows (cross-tab), so deduplicate here:
-      // keep the row whose sizeKey measure is highest → that module "wins" and
-      // the node belongs to its blob. Edges use bare inner-dim IDs and work
-      // correctly with this deduplication.
-      const leafRows = data.rows.flatMap(pr =>
-        (pr.children || []).map(c => ({ ...c, _group: pr.key[dim0] }))
-      );
-      const maxSize = Math.max(1, ...leafRows.map(r => r.values[sizeKey] || 0));
-
-      const byInner = new Map(); // innerVal → best row
-      for (const r of leafRows) {
-        const innerVal = r.key[dim1];
-        const existing = byInner.get(innerVal);
-        if (!existing || (r.values[sizeKey] || 0) > (existing.values[sizeKey] || 0))
-          byInner.set(innerVal, r);
-      }
-
-      const nodes = [...byInner.values()].map(r => {
-        const id   = r.key[dim1];
-        const vals = r.values;
-        const sz   = Math.sqrt((vals[sizeKey]||1)/maxSize)*18+4;
-        return { id, name:id, values:vals, group:r._group, val:sz, color:makeColor(vals) };
-      });
-      const validIds = new Set(nodes.map(n => n.id));
-      const links = filterEdges(data.leaf_graph_edges, validIds);
-      if (hideIsolated) {
-        const connected = new Set();
-        links.forEach(l => { connected.add(l.source); connected.add(l.target); });
-        return { nodes: nodes.filter(n => connected.has(n.id)), links, isBlobMode:true };
-      }
-      return { nodes, links, isBlobMode:true };
-    }
-
-    // Single-dim: top-level rows are nodes
-    const maxSize = Math.max(1, ...data.rows.map(r => r.values[sizeKey] || 0));
-    const nodes = data.rows.map(r => {
-      const id   = r.key[dim0];
-      const vals = r.values;
-      const sz   = Math.sqrt((vals[sizeKey]||1)/maxSize)*18+4;
-      return { id, name:id, values:vals, val:sz, color:makeColor(vals) };
-    });
-    const validIds = new Set(nodes.map(n => n.id));
-    const links = filterEdges(data.graph_edges, validIds);
-    if (hideIsolated) {
-      const connected = new Set();
-      links.forEach(l => { connected.add(l.source); connected.add(l.target); });
-      return { nodes: nodes.filter(n => connected.has(n.id)), links, isBlobMode:false };
-    }
-    return { nodes, links, isBlobMode:false };
-  }, [data, minWeight, topK, colorKey, colorStats, sizeKey, dim0, dim1, isBlobMode, hideIsolated]);
+  const graphData = useMemo(
+    () => buildGraphData(data, { minWeight, topK, colorKey, colorStats, sizeKey, hideIsolated }),
+    [data, minWeight, topK, colorKey, colorStats, sizeKey, hideIsolated],
+  );
 
   // Build forward + reverse adjacency maps from current graph links
   const { fwdAdj, bwdAdj } = useMemo(
