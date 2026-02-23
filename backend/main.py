@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from routers import (
     repos, dead_code, cycles, coupling, building,
     triage, centrality, communities, module_graph,
-    load_bearing, graph, search,
+    load_bearing, graph, search, explore,
 )
 
 app = FastAPI(title="Semfora Explorer API", version="0.2.0")
@@ -41,6 +41,7 @@ app.include_router(module_graph.router)
 app.include_router(load_bearing.router)
 app.include_router(graph.router)
 app.include_router(search.router)
+app.include_router(explore.router)
 
 # ── Serve React frontend (must be last) ──────────────────────────────────────
 FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"

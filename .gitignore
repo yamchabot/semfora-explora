@@ -2,9 +2,11 @@ node_modules/
 frontend/dist/
 frontend/.vite/
 venv/
+venv2/
 __pycache__/
 *.pyc
 data/*.enriched.db
+data/analysis_report.json
 *.db-shm
 *.db-wal
 .env
