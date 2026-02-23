@@ -1000,15 +1000,15 @@ function makeChainCentroidForce(selectedIds, chainIds) {
   return force;
 }
 
-function GraphRenderer({ data, measures, onNodeClick }) {
+function GraphRenderer({ data, measures, onNodeClick,
+  minWeight, setMinWeight, topK, setTopK,
+  colorKeyOverride, setColorKeyOverride, fanOutDepth, setFanOutDepth,
+  selectedNodeIds, setSelectedNodeIds, hideIsolated, setHideIsolated }) {
   const containerRef  = useRef(null);
   const fgRef         = useRef(null);
-  const [size, setSize]           = useState({ w:800, h:640 });
-  const [minWeight, setMinWeight] = useState(1);
-  const [topK, setTopK]           = useState(0);
-  const [colorKeyOverride, setColorKeyOverride] = useState(null);
-  const [selectedNodeIds, setSelectedNodeIds]   = useState(() => new Set());
-  const [fanOutDepth, setFanOutDepth]           = useState(5);
+  const [size, setSize]     = useState({ w:800, h:640 });
+  const [showSearch, setShowSearch]   = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   // Tracks the live d3-zoom transform so the wheel-pan handler has a consistent baseline
   const zoomTransformRef = useRef({ k: 1, x: 0, y: 0 });
 
@@ -1106,7 +1106,13 @@ function GraphRenderer({ data, measures, onNodeClick }) {
         return { id, name:id, values:vals, group:r._group, val:sz, color:makeColor(vals) };
       });
       const validIds = new Set(nodes.map(n => n.id));
-      return { nodes, links: filterEdges(data.leaf_graph_edges, validIds), isBlobMode:true };
+      const links = filterEdges(data.leaf_graph_edges, validIds);
+      if (hideIsolated) {
+        const connected = new Set();
+        links.forEach(l => { connected.add(l.source); connected.add(l.target); });
+        return { nodes: nodes.filter(n => connected.has(n.id)), links, isBlobMode:true };
+      }
+      return { nodes, links, isBlobMode:true };
     }
 
     // Single-dim: top-level rows are nodes
@@ -1118,8 +1124,14 @@ function GraphRenderer({ data, measures, onNodeClick }) {
       return { id, name:id, values:vals, val:sz, color:makeColor(vals) };
     });
     const validIds = new Set(nodes.map(n => n.id));
-    return { nodes, links: filterEdges(data.graph_edges, validIds), isBlobMode:false };
-  }, [data, minWeight, topK, colorKey, colorStats, sizeKey, dim0, dim1, isBlobMode]);
+    const links = filterEdges(data.graph_edges, validIds);
+    if (hideIsolated) {
+      const connected = new Set();
+      links.forEach(l => { connected.add(l.source); connected.add(l.target); });
+      return { nodes: nodes.filter(n => connected.has(n.id)), links, isBlobMode:false };
+    }
+    return { nodes, links, isBlobMode:false };
+  }, [data, minWeight, topK, colorKey, colorStats, sizeKey, dim0, dim1, isBlobMode, hideIsolated]);
 
   // Build forward + reverse adjacency maps from current graph links
   const { fwdAdj, bwdAdj } = useMemo(() => {
@@ -1345,6 +1357,33 @@ function GraphRenderer({ data, measures, onNodeClick }) {
     return () => el.removeEventListener("wheel", onWheel, { capture: true });
   }, [size.w, size.h]);
 
+  // ── Node search modal (/  or  Cmd+K / Ctrl+K) ───────────────────────────
+  useEffect(() => {
+    const onKey = (e) => {
+      // Ignore keystrokes when focus is inside an input/textarea/select
+      const tag = document.activeElement?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (e.key === "/" ) { e.preventDefault(); setShowSearch(true); }
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") { e.preventDefault(); setShowSearch(true); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const searchTerms = searchQuery.split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+  const searchMatches = useMemo(() => {
+    if (!searchTerms.length) return [];
+    return graphData.nodes.filter(n =>
+      searchTerms.some(t => n.id.toLowerCase().includes(t))
+    );
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery, graphData.nodes]);
+
+  function applySearch() {
+    if (searchMatches.length > 0)
+      setSelectedNodeIds(new Set(searchMatches.map(n => n.id)));
+  }
+
   const totalEdges   = data?.graph_edges?.length || 0;
   const visibleEdges = graphData.links.length;
 
@@ -1413,11 +1452,27 @@ function GraphRenderer({ data, measures, onNodeClick }) {
             >clear</button>
           </span>
         )}
+        {/* Hide isolated toggle */}
+        <button
+          onClick={() => setHideIsolated(v => !v)}
+          title="Toggle visibility of nodes with no edges"
+          style={{ fontSize:11, padding:"3px 9px", cursor:"pointer", borderRadius:4,
+            border:"1px solid var(--border2)",
+            background: hideIsolated ? "var(--blue)" : "var(--bg3)",
+            color:       hideIsolated ? "#fff"       : "var(--text2)" }}
+        >{hideIsolated ? "✕ isolated hidden" : "show isolated"}</button>
+        {/* Search shortcut hint */}
+        <button
+          onClick={() => setShowSearch(true)}
+          title="Search and select nodes by name (/ or ⌘K)"
+          style={{ fontSize:11, padding:"3px 9px", cursor:"pointer", borderRadius:4,
+            border:"1px solid var(--border2)", background:"var(--bg3)", color:"var(--text2)" }}
+        >🔍 search <kbd style={{ opacity:0.6, fontSize:10 }}>/</kbd></button>
         <span style={{ fontSize:11, color:"var(--text3)" }}>{visibleEdges} / {totalEdges} edges shown</span>
       </div>
 
       {/* Graph — full width */}
-      <div ref={containerRef} style={{ borderRadius:8, overflow:"hidden", background:"var(--bg2)", border:"1px solid var(--border)" }}>
+      <div ref={containerRef} style={{ position:"relative", borderRadius:8, overflow:"hidden", background:"var(--bg2)", border:"1px solid var(--border)" }}>
           {graphData.nodes.length > 0 ? (
             <ForceGraph2D
               ref={fgRef}
@@ -1557,23 +1612,13 @@ function GraphRenderer({ data, measures, onNodeClick }) {
               }}
               linkDirectionalParticleSpeed={0.004}
               linkDirectionalParticleWidth={link => {
-                if (selectedNodeIds.size === 0) return 2;
+                if (selectedNodeIds.size === 0) return 3;
                 const u = typeof link.source === "object" ? link.source.id : link.source;
                 const v = typeof link.target === "object" ? link.target.id : link.target;
-                if (selectedNodeIds.size === 1) return bfsDistances.has(u) ? 2.5 : 0;
-                return chainEdgeMap.has(`${u}|${v}`) ? 3 : 0;
+                if (selectedNodeIds.size === 1) return bfsDistances.has(u) ? 5 : 0;
+                return chainEdgeMap.has(`${u}|${v}`) ? 5 : 0;
               }}
-              linkDirectionalParticleColor={link => {
-                const u = typeof link.source === "object" ? link.source.id : link.source;
-                const v = typeof link.target === "object" ? link.target.id : link.target;
-                if (selectedNodeIds.size === 1) {
-                  const d = bfsDistances.get(u);
-                  return d != null && d < stepColors.length ? stepColors[d] : "#ffffff";
-                }
-                const cl = chainEdgeMap.get(`${u}|${v}`);
-                if (cl != null) return stepColors[Math.min(cl - 1, stepColors.length - 1)];
-                return "#ffffff";
-              }}
+              linkDirectionalParticleColor={() => "#ffffff"}
               onZoom={t => { zoomTransformRef.current = t; }}
               onNodeClick={(node, event) => {
                 const id = node?.id ?? null;
@@ -1597,6 +1642,49 @@ function GraphRenderer({ data, measures, onNodeClick }) {
               No nodes to display.
             </div>
           )}
+
+        {/* ── Node search modal ───────────────────────────────────────── */}
+        {showSearch && (
+          <div
+            style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.55)",
+              display:"flex", alignItems:"flex-start", justifyContent:"center",
+              paddingTop:60, zIndex:50 }}
+            onClick={e => { if (e.target === e.currentTarget) { setShowSearch(false); setSearchQuery(""); } }}
+          >
+            <div style={{ background:"var(--bg2)", border:"1px solid var(--border2)",
+              borderRadius:8, padding:16, width:440, maxWidth:"90%",
+              boxShadow:"0 8px 32px rgba(0,0,0,0.5)" }}>
+              <div style={{ marginBottom:8, fontSize:11, color:"var(--text3)" }}>
+                Partial name match · separate multiple with <strong style={{ color:"var(--text2)" }}>,</strong> · <kbd style={{ opacity:0.7 }}>Enter</kbd> selects · <kbd style={{ opacity:0.7 }}>Esc</kbd> closes
+              </div>
+              <input
+                autoFocus
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === "Escape") { setShowSearch(false); setSearchQuery(""); }
+                  if (e.key === "Enter")  { applySearch(); setShowSearch(false); setSearchQuery(""); }
+                }}
+                placeholder="e.g. parser, resolve_type"
+                style={{ width:"100%", padding:"8px 12px", fontSize:13,
+                  boxSizing:"border-box", background:"var(--bg3)",
+                  border:"1px solid var(--border2)", borderRadius:4,
+                  color:"var(--text)", outline:"none" }}
+              />
+              <div style={{ marginTop:8, fontSize:11, color: searchMatches.length > 0 ? "var(--text2)" : "var(--text3)", minHeight:16 }}>
+                {searchTerms.length === 0 ? `${graphData.nodes.length} nodes total`
+                  : searchMatches.length === 0 ? "No matches"
+                  : <>
+                      <span style={{ color:"var(--blue)", fontWeight:600 }}>{searchMatches.length}</span>
+                      {" match"}{searchMatches.length !== 1 ? "es" : ""}: {" "}
+                      {searchMatches.slice(0,6).map(n => <code key={n.id} style={{ marginRight:4, opacity:0.8 }}>{n.id}</code>)}
+                      {searchMatches.length > 6 && <span style={{ opacity:0.5 }}>+{searchMatches.length - 6} more</span>}
+                    </>
+                }
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Slim legend bar below graph */}
@@ -1792,6 +1880,17 @@ export default function Explore() {
   const [filters,          setFilters]          = useState(() =>
     parseFiltersParam(searchParams.get("f"))
   );
+  // ── Graph renderer config (lifted here so URL can persist them) ─────────────
+  const [minWeight,        setMinWeight]        = useState(() => parseFloat(searchParams.get("mw")) || 1);
+  const [topK,             setTopK]             = useState(() => parseInt(searchParams.get("tk"))   || 0);
+  const [colorKeyOverride, setColorKeyOverride] = useState(() => searchParams.get("c") || null);
+  const [fanOutDepth,      setFanOutDepth]      = useState(() => parseInt(searchParams.get("hops")) || 5);
+  const [selectedNodeIds,  setSelectedNodeIds]  = useState(() => {
+    const s = searchParams.get("sel");
+    return s ? new Set(s.split(",").filter(Boolean)) : new Set();
+  });
+  const [hideIsolated, setHideIsolated] = useState(() => searchParams.get("hi") === "1");
+
   const [selectedNode, setSelectedNode] = useState(null);
   const [sidebarOpen, setSidebarOpen]   = useState(true);
   const configCardRef                   = useRef(null);
@@ -1845,12 +1944,20 @@ export default function Explore() {
     const p = new URLSearchParams();
     p.set("r", repoId);
     p.set("v", renderer);
-    if (dims.length)     p.set("d", dims.join(","));
+    if (dims.length)                p.set("d", dims.join(","));
     p.set("m", measures.map(measureStr).join(","));
-    if (kinds.length)    p.set("k", kinds.join(","));
-    if (filters.length)  p.set("f", JSON.stringify(filters));
+    if (kinds.length)               p.set("k", kinds.join(","));
+    if (filters.length)             p.set("f", JSON.stringify(filters));
+    // Graph renderer config — only write non-default values to keep URLs clean
+    if (minWeight > 1)              p.set("mw",   minWeight);
+    if (topK > 0)                   p.set("tk",   topK);
+    if (colorKeyOverride)           p.set("c",    colorKeyOverride);
+    if (fanOutDepth !== 5)          p.set("hops", fanOutDepth);
+    if (selectedNodeIds.size > 0)   p.set("sel",  [...selectedNodeIds].join(","));
+    if (hideIsolated)               p.set("hi",   "1");
     setSearchParams(p, { replace: true });
-  }, [repoId, renderer, dims, measures, kinds, filters]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [repoId, renderer, dims, measures, kinds, filters, // eslint-disable-line react-hooks/exhaustive-deps
+      minWeight, topK, colorKeyOverride, fanOutDepth, selectedNodeIds, hideIsolated]);
 
   // Always load available kinds for the selected repo
   const kindsQuery = useQuery({
@@ -2074,7 +2181,15 @@ export default function Explore() {
                 </>
               )}
               {renderer==="graph" && stableFilteredData && (
-                <GraphRenderer data={stableFilteredData} measures={measures} onNodeClick={setSelectedNode}/>
+                <GraphRenderer
+                  data={stableFilteredData} measures={measures} onNodeClick={setSelectedNode}
+                  minWeight={minWeight}               setMinWeight={setMinWeight}
+                  topK={topK}                         setTopK={setTopK}
+                  colorKeyOverride={colorKeyOverride} setColorKeyOverride={setColorKeyOverride}
+                  fanOutDepth={fanOutDepth}           setFanOutDepth={setFanOutDepth}
+                  selectedNodeIds={selectedNodeIds}   setSelectedNodeIds={setSelectedNodeIds}
+                  hideIsolated={hideIsolated}         setHideIsolated={setHideIsolated}
+                />
               )}
             </>
           )}
