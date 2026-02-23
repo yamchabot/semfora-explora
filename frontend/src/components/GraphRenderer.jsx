@@ -267,6 +267,9 @@ export default function GraphRenderer({ data, measures, onNodeClick,
   // Coupling mode: set of node ids that have ≥1 cross-boundary outgoing edge.
   // Active only in blob mode. Independent of selectedNodeIds.
   const [couplingIds, setCouplingIds] = useState(new Set());
+  // Dot mode: render nodes as plain circles instead of labelled pills.
+  // Useful when the graph is too dense to read individual labels.
+  const [nodeDot, setNodeDot] = useState(false);
   // Spread: scales charge repulsion and link distance together.
   // 350 = default; higher = more spread; lower = tighter.
   const SPREAD_DEFAULT = 350;
@@ -768,6 +771,14 @@ export default function GraphRenderer({ data, measures, onNodeClick,
           style={{ fontSize:11, padding:"3px 9px", cursor:"pointer", borderRadius:4,
             border:"1px solid var(--border2)", background:"var(--bg3)", color:"var(--text2)" }}
         >🔍 search <kbd style={{ opacity:0.6, fontSize:10 }}>/</kbd></button>
+        <button
+          onClick={() => setNodeDot(d => !d)}
+          title={nodeDot ? "Switch to labelled pill nodes" : "Switch to dot nodes (less visual noise for dense graphs)"}
+          style={{ fontSize:11, padding:"3px 9px", cursor:"pointer", borderRadius:4,
+            border:"1px solid var(--border2)",
+            background: nodeDot ? "var(--blue)" : "var(--bg3)",
+            color:       nodeDot ? "#fff"       : "var(--text2)" }}
+        >{nodeDot ? "⬤ dots" : "⬤ dots"}</button>
         <span style={{ fontSize:11, color:"var(--text3)" }}>{visibleEdges} / {totalEdges} edges shown</span>
       </div>{/* end inner controls flex */}
       </div>{/* end gradient overlay */}
@@ -844,7 +855,53 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                 const isCoupling  = couplingIds.has(node.id);
                 const hasCoupling = couplingIds.size > 0;
 
-                // For symbol mode the id is "module::name" — show only the name part
+                // Dimming priority:
+                //  coupling mode  → coupling nodes full, others 18% (selection can rescue)
+                //  selection mode → reachable nodes full, others 18%
+                //  neither        → all full
+                const isVisible = hasCoupling
+                  ? (isCoupling || (anySelected && isReachable))
+                  : anySelected ? isReachable : true;
+                ctx.globalAlpha = isVisible ? 1.0 : 0.18;
+
+                const baseColor = nodeColorOverrides?.get(node.id) ?? node.color;
+                const isDiffHighlight = nodeColorOverrides?.has(node.id) || highlightSet?.has(node.id);
+
+                // ── Dot mode ─────────────────────────────────────────────────
+                if (nodeDot) {
+                  const r = node.val ?? 6;
+
+                  // Diff glow
+                  if (isDiffHighlight) {
+                    ctx.beginPath(); ctx.arc(node.x, node.y, r + 9, 0, Math.PI * 2);
+                    ctx.fillStyle = baseColor + "1a"; ctx.fill();
+                    ctx.beginPath(); ctx.arc(node.x, node.y, r + 5, 0, Math.PI * 2);
+                    ctx.strokeStyle = baseColor; ctx.lineWidth = 1.8; ctx.stroke();
+                  }
+                  // Coupling halo
+                  if (isCoupling) {
+                    ctx.beginPath(); ctx.arc(node.x, node.y, r + 6, 0, Math.PI * 2);
+                    ctx.strokeStyle = "rgba(255,159,28,0.85)"; ctx.lineWidth = 2.5; ctx.stroke();
+                  }
+                  // Selection halo
+                  if (isSelected) {
+                    ctx.beginPath(); ctx.arc(node.x, node.y, r + 4, 0, Math.PI * 2);
+                    ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = 2.5; ctx.stroke();
+                  }
+                  // Filled circle
+                  ctx.beginPath(); ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
+                  ctx.fillStyle   = isSelected ? lerpColor(baseColor, "#ffffff", 0.25) : baseColor;
+                  ctx.fill();
+                  ctx.strokeStyle = isSelected ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.12)";
+                  ctx.lineWidth   = isSelected ? 1.5 : 0.8;
+                  ctx.stroke();
+
+                  ctx.globalAlpha = 1.0;
+                  node.__bckgDimensions = [r * 2, r * 2]; // for pointer area
+                  return;
+                }
+
+                // ── Pill mode (default) ───────────────────────────────────────
                 const full  = node.name || "";
                 const short = full.includes("::") ? full.split("::").slice(1).join("::") : full;
                 const label = short.length > MAX_LABEL ? short.slice(0, MAX_LABEL - 1) + "…" : short;
@@ -855,72 +912,48 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                 const w     = Math.max(tw + padX * 2, 30);
                 const h     = fs + padY * 2;
 
-                // Dimming priority:
-                //  coupling mode  → coupling nodes full, others 18% (selection can rescue)
-                //  selection mode → reachable nodes full, others 18%
-                //  neither        → all full
-                const isVisible = hasCoupling
-                  ? (isCoupling || (anySelected && isReachable))
-                  : anySelected ? isReachable : true;
-                ctx.globalAlpha = isVisible ? 1.0 : 0.18;
-
-                // Resolve base color early (needed for diff ring below)
-                const baseColor = nodeColorOverrides?.get(node.id) ?? node.color;
-
-                // Diff glow ring — drawn when node is diff-highlighted.
-                // Fires for nodeColorOverrides (Diff page) OR highlightSet (Explore overlay).
-                // Uses baseColor so the glow matches the node's diff-colored fill.
-                if (nodeColorOverrides?.has(node.id) || highlightSet?.has(node.id)) {
-                  // Soft bloom behind the ring
+                // Diff glow ring
+                if (isDiffHighlight) {
                   drawPill(ctx, node.x, node.y, w + 18, h + 18);
-                  ctx.fillStyle = baseColor + "1a";  // ~10% opacity bloom
-                  ctx.fill();
-                  // Crisp highlight ring
+                  ctx.fillStyle = baseColor + "1a"; ctx.fill();
                   drawPill(ctx, node.x, node.y, w + 10, h + 10);
-                  ctx.strokeStyle = baseColor;
-                  ctx.lineWidth   = 1.8;
-                  ctx.stroke();
+                  ctx.strokeStyle = baseColor; ctx.lineWidth = 1.8; ctx.stroke();
                 }
-
-                // Coupling halo — outermost, orange, drawn before selection ring
+                // Coupling halo
                 if (isCoupling) {
                   drawPill(ctx, node.x, node.y, w + 12, h + 12);
-                  ctx.strokeStyle = "rgba(255,159,28,0.85)";
-                  ctx.lineWidth   = 2.5;
-                  ctx.stroke();
+                  ctx.strokeStyle = "rgba(255,159,28,0.85)"; ctx.lineWidth = 2.5; ctx.stroke();
                 }
-
-                // Selection halo — drawn slightly larger, behind the pill
+                // Selection halo
                 if (isSelected) {
                   drawPill(ctx, node.x, node.y, w + 7, h + 7);
-                  ctx.strokeStyle = "rgba(255,255,255,0.85)";
-                  ctx.lineWidth   = 2.5;
-                  ctx.stroke();
+                  ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = 2.5; ctx.stroke();
                 }
-
-                // Pill background
+                // Pill background + label
                 drawPill(ctx, node.x, node.y, w, h);
                 ctx.fillStyle   = isSelected ? lerpColor(baseColor, "#ffffff", 0.25) : baseColor;
                 ctx.fill();
                 ctx.strokeStyle = isSelected ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.12)";
                 ctx.lineWidth   = isSelected ? 1.5 : 0.8;
                 ctx.stroke();
-
-                // Label
                 ctx.fillStyle    = "#0d1117";
                 ctx.textAlign    = "center";
                 ctx.textBaseline = "middle";
                 ctx.fillText(label, node.x, node.y);
 
                 ctx.globalAlpha = 1.0;
-                // Cache dims for pointer detection
                 node.__bckgDimensions = [w, h];
               }}
               nodePointerAreaPaint={(node, color, ctx) => {
                 const [w = 40, h = 20] = node.__bckgDimensions || [];
-                drawPill(ctx, node.x, node.y, w, h);
-                ctx.fillStyle = color;
-                ctx.fill();
+                if (nodeDot) {
+                  const r = (w / 2) || 6;
+                  ctx.beginPath(); ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
+                  ctx.fillStyle = color; ctx.fill();
+                } else {
+                  drawPill(ctx, node.x, node.y, w, h);
+                  ctx.fillStyle = color; ctx.fill();
+                }
               }}
               linkWidth={link => {
                 const src = typeof link.source === "object" ? link.source.id : link.source;
