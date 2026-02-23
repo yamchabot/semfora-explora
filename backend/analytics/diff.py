@@ -9,6 +9,27 @@ from __future__ import annotations
 from collections import defaultdict
 
 
+def compute_diff_status_map(nodes_a: list[dict], nodes_b: list[dict]) -> dict:
+    """
+    Returns {module::name: status} for all *changed* nodes only.
+
+    Uses "module::name" key format (matches the explore page's node ID format).
+    Only includes nodes with status != "unchanged" to keep the response lean.
+    """
+    def vid(n): return f"{n['module']}::{n['name']}"
+    bv_a = {vid(n): n for n in nodes_a}
+    bv_b = {vid(n): n for n in nodes_b}
+    result: dict[str, str] = {}
+    for v in set(bv_b) - set(bv_a):
+        result[v] = "added"
+    for v in set(bv_a) - set(bv_b):
+        result[v] = "removed"
+    for v in set(bv_a) & set(bv_b):
+        if bv_a[v]["hash"] != bv_b[v]["hash"]:
+            result[v] = "modified"
+    return result
+
+
 def compute_diff(
     nodes_a: list[dict],
     nodes_b: list[dict],

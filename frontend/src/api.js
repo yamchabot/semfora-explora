@@ -54,4 +54,7 @@ export const api = {
     post(`/diff-graph?max_context=${maxContext}`, { repo_a: repoA, repo_b: repoB }),
   diffBuilding: (repoA, repoB) =>
     post("/diff-building", { repo_a: repoA, repo_b: repoB }),
+  // Lightweight: just {status_map: {"module::name": "added"|"removed"|"modified"}}
+  diffStatus: (repoId, compareTo) =>
+    get(`/repos/${encodeURIComponent(repoId)}/diff-status?compare_to=${encodeURIComponent(compareTo)}`),
 };

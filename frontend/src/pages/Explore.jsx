@@ -63,10 +63,8 @@ export default function Explore() {
   });
   const [hideIsolated, setHideIsolated] = useState(() => searchParams.get("hi") === "1");
 
-  // ── Compare / diff mode ───────────────────────────────────────────────────
-  const [compareRepo,  setCompareRepo]  = useState(() => searchParams.get("cmp") || "");
-  const [graphContext, setGraphContext] = useState(() => parseInt(searchParams.get("ctx")) || 4);
-  const [graphMode,    setGraphMode]    = useState(() => searchParams.get("gm") || "neighborhood");
+  // ── Compare / diff overlay ───────────────────────────────────────────────
+  const [compareRepo, setCompareRepo] = useState(() => searchParams.get("cmp") || "");
 
   const [selectedNode,  setSelectedNode]  = useState(null);
   const [sidebarOpen,   setSidebarOpen]   = useState(true);
@@ -138,12 +136,10 @@ export default function Explore() {
     if (selectedNodeIds.size > 0)   p.set("sel",  [...selectedNodeIds].join(","));
     if (hideIsolated)               p.set("hi",   "1");
     if (compareRepo)                p.set("cmp",  compareRepo);
-    if (graphContext !== 4)         p.set("ctx",  String(graphContext));
-    if (graphMode !== "neighborhood") p.set("gm", graphMode);
     setSearchParams(p, { replace: true });
   }, [repoId, renderer, dims, measures, kinds, filters, // eslint-disable-line react-hooks/exhaustive-deps
       minWeight, topK, colorKeyOverride, fanOutDepth, selectedNodeIds, hideIsolated,
-      compareRepo, graphContext, graphMode]);
+      compareRepo]);
 
   // Always load available kinds for the selected repo
   const kindsQuery = useQuery({
@@ -190,56 +186,58 @@ export default function Explore() {
     return g;
   }, [allRepos]);
 
-  // ── Diff / compare mode ───────────────────────────────────────────────────
-  const diffMode = !!compareRepo && renderer === "graph";
+  // ── Diff overlay — lightweight per-node status map ────────────────────────
+  // Fetches only changed nodes' statuses, overlaid on top of normal explore data.
+  // The explore graph (dims/measures/filters) is unchanged; only node colors differ.
+  const DIFF_NODE_COLORS = { added:"#3fb950", removed:"#f85149", modified:"#e3b341" };
 
-  const diffGraphQuery = useQuery({
-    queryKey: ["diff-graph-explore", compareRepo, repoId, graphContext],
-    queryFn:  () => api.diffGraph(compareRepo, repoId, graphContext),
-    enabled:  diffMode,
+  const diffStatusQuery = useQuery({
+    queryKey: ["diff-status", repoId, compareRepo],
+    queryFn:  () => api.diffStatus(repoId, compareRepo),
+    enabled:  !!compareRepo,
     staleTime: Infinity,
   });
 
-  const DIFF_NODE_COLORS = { added:"#3fb950", removed:"#f85149", modified:"#e3b341", context:"#3d4450" };
-  const DIFF_EDGE_COLORS = { added:"#3fb950", removed:"#f85149", unchanged:"#30363d" };
+  // Build nodeColorOverrides from the diff status map.
+  // Symbol-level nodes ("module::name") → direct lookup.
+  // Group-level nodes (module names without "::") → dominant status of their symbols.
+  const diffNodeColors = useMemo(() => {
+    const sm = diffStatusQuery.data?.status_map;
+    if (!sm || !compareRepo) return null;
+    const overrides = new Map();
+    // 1. Direct symbol-level coloring
+    for (const [nodeId, status] of Object.entries(sm)) {
+      const color = DIFF_NODE_COLORS[status];
+      if (color) overrides.set(nodeId, color);
+    }
+    // 2. Module-level aggregation (for group-by-module nodes without "::")
+    //    Priority: modified > added > removed
+    const modulePriority = new Map(); // module → highest priority status
+    const priority = { modified: 3, added: 2, removed: 1 };
+    for (const [nodeId, status] of Object.entries(sm)) {
+      const sep = nodeId.indexOf("::");
+      if (sep === -1) continue;
+      const module = nodeId.slice(0, sep);
+      const cur = modulePriority.get(module);
+      if (!cur || priority[status] > priority[cur]) modulePriority.set(module, status);
+    }
+    for (const [module, status] of modulePriority) {
+      if (!overrides.has(module)) {
+        const color = DIFF_NODE_COLORS[status];
+        if (color) overrides.set(module, color);
+      }
+    }
+    return overrides.size > 0 ? overrides : null;
+  }, [diffStatusQuery.data, compareRepo]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const diffRenderData = useMemo(() => {
-    if (!compareRepo || !diffGraphQuery.data?.nodes?.length) return null;
-    const visibleNodes = graphMode === "changed-only"
-      ? diffGraphQuery.data.nodes.filter(n => n.status !== "context")
-      : diffGraphQuery.data.nodes;
-    const nodeSet      = new Set(visibleNodes.map(n => n.id));
-    const visibleEdges = (diffGraphQuery.data.edges || []).filter(
-      e => nodeSet.has(e.source) && nodeSet.has(e.target)
-    );
-    const nodeId = n => `${n.module}::${n.name}`;
-    const idMap  = new Map(visibleNodes.map(n => [n.id, nodeId(n)]));
-    return {
-      data: {
-        dimensions: ["symbol"],
-        rows: visibleNodes.map(n => ({
-          key:    { symbol: nodeId(n) },
-          values: { "caller_count__avg": Math.max(n.caller_count || 1, 1) },
-        })),
-        graph_edges: visibleEdges.map(e => ({
-          source: idMap.get(e.source) || e.source,
-          target: idMap.get(e.target) || e.target,
-          weight: e.status === "added" ? 3 : e.status === "removed" ? 2 : 1,
-        })),
-        measure_types: { "caller_count__avg": "integer" },
-      },
-      nodeColorOverrides: new Map(
-        visibleNodes.map(n => [nodeId(n), DIFF_NODE_COLORS[n.status] || DIFF_NODE_COLORS.context])
-      ),
-      edgeColorOverrides: new Map(
-        visibleEdges.map(e => [
-          `${idMap.get(e.source)||e.source}|${idMap.get(e.target)||e.target}`,
-          DIFF_EDGE_COLORS[e.status] || DIFF_EDGE_COLORS.unchanged,
-        ])
-      ),
-      stats: diffGraphQuery.data.stats,
-    };
-  }, [diffGraphQuery.data, graphMode, compareRepo]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Summary counts for the legend
+  const diffStats = useMemo(() => {
+    const sm = diffStatusQuery.data?.status_map;
+    if (!sm) return null;
+    const counts = { added: 0, removed: 0, modified: 0 };
+    for (const status of Object.values(sm)) if (counts[status] !== undefined) counts[status]++;
+    return counts;
+  }, [diffStatusQuery.data]);
 
   const allDims       = ["module", "risk", "kind", "symbol", "dead", "high_risk", "in_cycle", "community"];
   const availableDims = allDims.filter(d => !dims.includes(d));
@@ -309,17 +307,16 @@ export default function Explore() {
         <span style={{ fontSize:11, fontFamily:"monospace", color:"var(--text2)" }}>
           {compareRepo.split("@")[1]?.slice(0,7) ?? compareRepo} → current
         </span>
-        {[2,4,6].map(n => (
-          <button key={n} className={`btn btn-sm ${graphContext===n?"":"btn-ghost"}`}
-            style={{ minWidth:28, fontSize:11 }} onClick={() => setGraphContext(n)}>{n}</button>
-        ))}
-        <button className={`btn btn-sm ${graphMode==="changed-only"?"":"btn-ghost"}`}
-          style={{ fontSize:11 }}
-          onClick={() => setGraphMode(m => m==="changed-only" ? "neighborhood" : "changed-only")}>
-          Changed only
-        </button>
+        {diffStatusQuery.isLoading && <span style={{ fontSize:11, color:"var(--text3)" }}>loading diff…</span>}
+        {diffStats && (
+          <span style={{ fontSize:11, color:"var(--text3)" }}>
+            <span style={{ color:"#3fb950" }}>+{diffStats.added}</span>
+            {" "}<span style={{ color:"#f85149" }}>-{diffStats.removed}</span>
+            {" "}<span style={{ color:"#e3b341" }}>~{diffStats.modified}</span>
+          </span>
+        )}
         <button className="btn btn-ghost btn-sm" style={{ fontSize:11 }}
-          onClick={() => { setCompareRepo(""); setGraphMode("neighborhood"); }}>✕ off</button>
+          onClick={() => setCompareRepo("")}>✕ off</button>
       </>) : (
         <select style={{ fontSize:11, padding:"3px 6px", background:"var(--bg3)", color:"var(--text)", border:"1px solid var(--border)", borderRadius:4 }}
           value="" onChange={e => { if (e.target.value) { setCompareRepo(e.target.value); setRenderer("graph"); } }}>
@@ -397,58 +394,49 @@ export default function Explore() {
     <div style={{ position:"relative", height:"100vh", margin:"-28px -32px", overflow:"hidden" }}>
       {/* Graph fills the entire background */}
       {/* Loading + error states */}
-      {diffMode && diffGraphQuery.isLoading && (
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"center", height:"100%", color:"var(--text3)", fontSize:13 }}>Computing diff…</div>
-      )}
-      {diffMode && !diffGraphQuery.isLoading && diffGraphQuery.data && !diffRenderData && (
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"center", height:"100%", color:"var(--text3)", fontSize:13 }}>No changed nodes found between these snapshots.</div>
-      )}
-      {!diffMode && measures.length === 0 && (
+      {measures.length === 0 && (
         <div style={{ display:"flex", alignItems:"center", justifyContent:"center", height:"100%", color:"var(--text3)", fontSize:13 }}>Select at least one measure.</div>
       )}
-      {!diffMode && pivotQuery.isLoading && (
+      {measures.length > 0 && pivotQuery.isLoading && (
         <div style={{ display:"flex", alignItems:"center", justifyContent:"center", height:"100%", color:"var(--text3)", fontSize:13 }}>Computing…</div>
       )}
-      {!diffMode && pivotQuery.error && (
+      {pivotQuery.error && (
         <div className="error" style={{ margin:40 }}>{pivotQuery.error.message}</div>
       )}
-      {/* Graph renderer — diff or normal */}
-      {(diffMode ? (diffRenderData != null) : (stableFilteredData != null)) && (
+      {/* Graph renderer — always uses explore data; diff status overlaid as node colors */}
+      {stableFilteredData && (
         <GraphRenderer
-          key={diffMode ? "diff" : "explore"}
-          data={diffMode ? diffRenderData.data : stableFilteredData}
-          measures={diffMode ? [{field:"caller_count",agg:"avg"}] : measures}
-          onNodeClick={setSelectedNode}
+          data={stableFilteredData} measures={measures} onNodeClick={setSelectedNode}
           minWeight={minWeight}               setMinWeight={setMinWeight}
           topK={topK}                         setTopK={setTopK}
-          colorKeyOverride={diffMode ? null : colorKeyOverride}
-          setColorKeyOverride={diffMode ? () => {} : setColorKeyOverride}
+          colorKeyOverride={diffNodeColors ? null : colorKeyOverride}
+          setColorKeyOverride={diffNodeColors ? () => {} : setColorKeyOverride}
           fanOutDepth={fanOutDepth}           setFanOutDepth={setFanOutDepth}
           selectedNodeIds={selectedNodeIds}   setSelectedNodeIds={setSelectedNodeIds}
           hideIsolated={hideIsolated}         setHideIsolated={setHideIsolated}
-          nodeColorOverrides={diffMode ? diffRenderData.nodeColorOverrides : null}
-          edgeColorOverrides={diffMode ? diffRenderData.edgeColorOverrides : null}
+          nodeColorOverrides={diffNodeColors}
           controlsH={0} fillViewport={true}
         />
       )}
-      {/* Diff legend — bottom-right overlay */}
-      {diffMode && diffRenderData && (
+      {/* Diff legend — bottom-right, only shown when compare is active */}
+      {compareRepo && diffStats && (
         <div style={{ position:"absolute", bottom:16, right:16, zIndex:10,
-          display:"flex", gap:10, alignItems:"center", flexWrap:"wrap",
+          display:"flex", gap:12, alignItems:"center", flexWrap:"wrap",
           background:"var(--bg2)", borderRadius:6, padding:"8px 14px",
           border:"1px solid var(--border2)", boxShadow:"0 2px 12px rgba(0,0,0,0.5)", fontSize:12 }}>
           {[
-            { color: DIFF_NODE_COLORS.added,    label: `Added (${diffRenderData.stats.added ?? 0})` },
-            { color: DIFF_NODE_COLORS.removed,  label: `Removed (${diffRenderData.stats.removed ?? 0})` },
-            { color: DIFF_NODE_COLORS.modified, label: `Modified (${diffRenderData.stats.modified ?? 0})` },
-            { color: DIFF_NODE_COLORS.context,  label: `Context (${diffRenderData.stats.context ?? 0})` },
-          ].filter(item => { const m = item.label.match(/\((\d+)\)/); return m && parseInt(m[1]) > 0; })
-           .map(({ color, label }) => (
+            { color:"#3fb950", label:"added",    count: diffStats.added },
+            { color:"#f85149", label:"removed",  count: diffStats.removed },
+            { color:"#e3b341", label:"modified", count: diffStats.modified },
+          ].filter(item => item.count > 0).map(({ color, label, count }) => (
             <span key={label} style={{ display:"flex", alignItems:"center", gap:5 }}>
               <span style={{ width:10, height:10, borderRadius:3, background:color, flexShrink:0 }}/>
-              <span style={{ color }}>{label}</span>
+              <span style={{ color }}>{count} {label}</span>
             </span>
           ))}
+          <span style={{ color:"var(--text3)", fontSize:11 }}>
+            · unchanged nodes keep metric colors
+          </span>
         </div>
       )}
 
