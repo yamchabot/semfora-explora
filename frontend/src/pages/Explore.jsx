@@ -1004,33 +1004,31 @@ function GraphRenderer({ data, measures, onNodeClick,
   minWeight, setMinWeight, topK, setTopK,
   colorKeyOverride, setColorKeyOverride, fanOutDepth, setFanOutDepth,
   selectedNodeIds, setSelectedNodeIds, hideIsolated, setHideIsolated,
-  controlsH = 0 }) {
+  controlsH = 0, fillViewport = false }) {
   const containerRef  = useRef(null);
   const fgRef         = useRef(null);
-  const [size, setSize]     = useState({ w:800, h:640 });
+  const [size, setSize] = useState({
+    w: 800,
+    h: fillViewport ? (window.innerHeight || 800) : 640,
+  });
   const [showSearch, setShowSearch]   = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  // Tracks the live d3-zoom transform so the wheel-pan handler has a consistent baseline
   const zoomTransformRef  = useRef({ k: 1, x: 0, y: 0 });
-  // One-shot flag: offset graph center down so nodes are centered in visible
-  // area below the floating config card. Resets on each ForceGraph2D remount
-  // (which happens when the node set changes via the `key` prop).
   const didOffsetRef = useRef(false);
 
   useEffect(() => {
     if (!containerRef.current) return;
     const obs = new ResizeObserver(([e]) => {
       const w = e.contentRect.width;
-      // Use actual container height when the container is sized by CSS (overlay
-      // mode); fall back to aspect-ratio formula for the normal-flow layout.
-      const h = e.contentRect.height > 100
-        ? e.contentRect.height
+      const h = e.contentRect.height > 100 ? e.contentRect.height
+        : fillViewport ? (window.innerHeight || 800)
         : Math.max(600, Math.round(w * 0.68));
       setSize({ w, h });
     });
     obs.observe(containerRef.current);
     return () => obs.disconnect();
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fillViewport]);
 
   const types     = data?.measure_types || {};
   const isBlobMode = (data?.dimensions?.length ?? 0) >= 2;
@@ -1416,9 +1414,12 @@ function GraphRenderer({ data, measures, onNodeClick,
   }
 
   return (
-    <div>
-      {/* Controls row */}
-      <div style={{ display:"flex", gap:20, alignItems:"center", marginBottom:12, flexWrap:"wrap" }}>
+    <div ref={containerRef} style={{ position:"relative", borderRadius:8, overflow:"hidden", background:"var(--bg2)", border:"1px solid var(--border)" }}>
+      {/* Controls row — overlaid at top of canvas with gradient background */}
+      <div style={{ position:"absolute", top:0, left:0, right:0, zIndex:5,
+        padding:"10px 14px 20px", pointerEvents:"none",
+        background:"linear-gradient(to bottom, rgba(13,17,23,0.92) 0%, rgba(13,17,23,0.0) 100%)" }}>
+      <div style={{ display:"flex", gap:14, alignItems:"center", flexWrap:"wrap", pointerEvents:"auto" }}>
         {/* Color by */}
         <div style={{ display:"flex", alignItems:"center", gap:8, fontSize:12 }}>
           <span style={{ color:"var(--text2)" }}>Color by:</span>
@@ -1487,10 +1488,11 @@ function GraphRenderer({ data, measures, onNodeClick,
             border:"1px solid var(--border2)", background:"var(--bg3)", color:"var(--text2)" }}
         >🔍 search <kbd style={{ opacity:0.6, fontSize:10 }}>/</kbd></button>
         <span style={{ fontSize:11, color:"var(--text3)" }}>{visibleEdges} / {totalEdges} edges shown</span>
-      </div>
+      </div>{/* end inner controls flex */}
+      </div>{/* end gradient overlay */}
 
-      {/* Graph — full width */}
-      <div ref={containerRef} style={{ position:"relative", borderRadius:8, overflow:"hidden", background:"var(--bg2)", border:"1px solid var(--border)" }}>
+      {/* ForceGraph canvas fills the container */}
+      <div style={{ position:"relative" }}>
           {graphData.nodes.length > 0 ? (
             <ForceGraph2D
               ref={fgRef}
@@ -1713,18 +1715,22 @@ function GraphRenderer({ data, measures, onNodeClick,
             </div>
           </div>
         )}
-      </div>
+      </div>{/* end canvas wrapper */}
 
-      {/* Slim legend bar below graph */}
+      {/* Legend — overlaid at bottom of canvas */}
       {colorMeasure && (
-        <div style={{ display:"flex", alignItems:"center", gap:12, marginTop:8, fontSize:11, color:"var(--text3)" }}>
-          <span>Color = {measureLabel(colorMeasure)}{!colorMeasure.special && ` (${colorMeasure.agg})`}</span>
-          <div style={{ display:"flex", alignItems:"center", gap:4 }}>
-            <span>{fmtLegend(colorStats.min)}</span>
-            <div style={{ width:80, height:6, borderRadius:3, background:"linear-gradient(to right,#3fb950,#f85149)" }} />
-            <span>{fmtLegend(colorStats.max)}</span>
+        <div style={{ position:"absolute", bottom:0, left:0, right:0, zIndex:5, pointerEvents:"none",
+          padding:"20px 16px 10px",
+          background:"linear-gradient(to top, rgba(13,17,23,0.85) 0%, rgba(13,17,23,0.0) 100%)" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:12, fontSize:11, color:"var(--text3)" }}>
+            <span>Color = {measureLabel(colorMeasure)}{!colorMeasure.special && ` (${colorMeasure.agg})`}</span>
+            <div style={{ display:"flex", alignItems:"center", gap:4 }}>
+              <span>{fmtLegend(colorStats.min)}</span>
+              <div style={{ width:80, height:6, borderRadius:3, background:"linear-gradient(to right,#3fb950,#f85149)" }} />
+              <span>{fmtLegend(colorStats.max)}</span>
+            </div>
+            {sizeKey && sizeKey !== colorKey && <span>· Size ∝ {measureLabel(measures.find(m=>measureKey(m)===sizeKey))}</span>}
           </div>
-          {sizeKey && sizeKey !== colorKey && <span>· Size ∝ {measureLabel(measures.find(m=>measureKey(m)===sizeKey))}</span>}
         </div>
       )}
     </div>
@@ -1919,8 +1925,13 @@ export default function Explore() {
   });
   const [hideIsolated, setHideIsolated] = useState(() => searchParams.get("hi") === "1");
 
-  const [selectedNode, setSelectedNode] = useState(null);
-  const [sidebarOpen, setSidebarOpen]   = useState(true);
+  const [selectedNode,  setSelectedNode]  = useState(null);
+  const [sidebarOpen,   setSidebarOpen]   = useState(true);
+  const [configOpen,    setConfigOpen]    = useState(true);
+  const closeTimerRef = useRef(null);
+
+  function startCloseTimer()  { closeTimerRef.current = setTimeout(() => setConfigOpen(false), 30000); }
+  function cancelCloseTimer() { clearTimeout(closeTimerRef.current); }
   const configCardRef                   = useRef(null);
   const [controlsRect, setControlsRect] = useState({ width: 0, height: 0 });
 
@@ -2156,21 +2167,42 @@ export default function Explore() {
             fanOutDepth={fanOutDepth}           setFanOutDepth={setFanOutDepth}
             selectedNodeIds={selectedNodeIds}   setSelectedNodeIds={setSelectedNodeIds}
             hideIsolated={hideIsolated}         setHideIsolated={setHideIsolated}
-            controlsH={controlsRect.height}
+            controlsH={0} fillViewport={true}
           />
         : null}
-      {/* Floating config card */}
-      <div ref={configCardRef} className="card" style={{
-        position:"absolute", top:12, left:12, zIndex:10,
-        width:340, maxHeight:"calc(100% - 24px)", overflowY:"auto",
-        padding:"16px 20px", boxShadow:"0 4px 24px rgba(0,0,0,0.5)",
-      }}>
-        {configContent}
-        {selectedNode && <>
-          <div style={{ borderTop:"1px solid var(--border)", margin:"12px 0 8px" }}/>
-          <GraphNodeDetails node={selectedNode} measures={measures}
-            types={stableFilteredData?.measure_types || {}}/>
-        </>}
+
+      {/* Collapsible config dropdown — top-left, auto-closes after 30s idle */}
+      <div
+        style={{ position:"absolute", top:12, left:12, zIndex:20 }}
+        onMouseEnter={cancelCloseTimer}
+        onMouseLeave={startCloseTimer}
+      >
+        {/* Toggle button */}
+        <button
+          onClick={() => { setConfigOpen(v => !v); cancelCloseTimer(); }}
+          style={{ fontSize:12, padding:"5px 12px", cursor:"pointer", borderRadius:6,
+            border:"1px solid var(--border2)", background:"var(--bg2)",
+            color:"var(--text)", boxShadow:"0 2px 8px rgba(0,0,0,0.4)",
+            display:"flex", alignItems:"center", gap:6 }}
+        >
+          ⚙ Config <span style={{ opacity:0.6, fontSize:10 }}>{configOpen ? "▴" : "▾"}</span>
+        </button>
+
+        {/* Dropdown panel */}
+        {configOpen && (
+          <div ref={configCardRef} className="card" style={{
+            position:"absolute", top:"calc(100% + 6px)", left:0, zIndex:20,
+            width:360, maxHeight:"calc(100vh - 100px)", overflowY:"auto",
+            padding:"16px 20px", boxShadow:"0 4px 24px rgba(0,0,0,0.6)",
+          }}>
+            {configContent}
+            {selectedNode && <>
+              <div style={{ borderTop:"1px solid var(--border)", margin:"12px 0 8px" }}/>
+              <GraphNodeDetails node={selectedNode} measures={measures}
+                types={stableFilteredData?.measure_types || {}}/>
+            </>}
+          </div>
+        )}
       </div>
     </div>
   );
