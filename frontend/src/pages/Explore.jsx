@@ -304,8 +304,9 @@ export default function Explore() {
     <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:14, flexWrap:"wrap" }}>
       <span style={{ fontSize:11, fontWeight:600, color:"var(--text3)", textTransform:"uppercase", letterSpacing:"0.08em", width:80 }}>Compare</span>
       {compareRepo ? (<>
-        <span style={{ fontSize:11, fontFamily:"monospace", color:"var(--text2)" }}>
-          {compareRepo.split("@")[1]?.slice(0,7) ?? compareRepo} → current
+        <span style={{ fontSize:11, fontFamily:"monospace", color:"var(--text2)" }}
+          title={`base: ${compareRepo} → head: ${repoId}`}>
+          base {compareRepo.split("@")[1]?.slice(0,7) ?? compareRepo}
         </span>
         {diffStatusQuery.isLoading && <span style={{ fontSize:11, color:"var(--text3)" }}>loading diff…</span>}
         {diffStats && (
@@ -421,22 +422,33 @@ export default function Explore() {
       {/* Diff legend — bottom-right, only shown when compare is active */}
       {compareRepo && diffStats && (
         <div style={{ position:"absolute", bottom:16, right:16, zIndex:10,
-          display:"flex", gap:12, alignItems:"center", flexWrap:"wrap",
-          background:"var(--bg2)", borderRadius:6, padding:"8px 14px",
+          display:"flex", flexDirection:"column", gap:6,
+          background:"var(--bg2)", borderRadius:6, padding:"10px 14px",
           border:"1px solid var(--border2)", boxShadow:"0 2px 12px rgba(0,0,0,0.5)", fontSize:12 }}>
-          {[
-            { color:"#3fb950", label:"added",    count: diffStats.added },
-            { color:"#f85149", label:"removed",  count: diffStats.removed },
-            { color:"#e3b341", label:"modified", count: diffStats.modified },
-          ].filter(item => item.count > 0).map(({ color, label, count }) => (
-            <span key={label} style={{ display:"flex", alignItems:"center", gap:5 }}>
-              <span style={{ width:10, height:10, borderRadius:3, background:color, flexShrink:0 }}/>
-              <span style={{ color }}>{count} {label}</span>
-            </span>
-          ))}
-          <span style={{ color:"var(--text3)", fontSize:11 }}>
-            · unchanged nodes keep metric colors
-          </span>
+          <div style={{ display:"flex", gap:12, alignItems:"center", flexWrap:"wrap" }}>
+            {diffStats.added > 0 && (
+              <span style={{ display:"flex", alignItems:"center", gap:5 }}>
+                <span style={{ width:10, height:10, borderRadius:3, background:"#3fb950", flexShrink:0 }}/>
+                <span style={{ color:"#3fb950" }}>{diffStats.added} added</span>
+              </span>
+            )}
+            {diffStats.modified > 0 && (
+              <span style={{ display:"flex", alignItems:"center", gap:5 }}>
+                <span style={{ width:10, height:10, borderRadius:3, background:"#e3b341", flexShrink:0 }}/>
+                <span style={{ color:"#e3b341" }}>{diffStats.modified} modified</span>
+              </span>
+            )}
+            {diffStats.removed > 0 && (
+              <span style={{ display:"flex", alignItems:"center", gap:5 }}>
+                <span style={{ width:10, height:10, borderRadius:3, background:"#f85149", flexShrink:0 }}/>
+                <span style={{ color:"#f85149" }}>{diffStats.removed} removed</span>
+              </span>
+            )}
+          </div>
+          <div style={{ color:"var(--text3)", fontSize:10, lineHeight:1.4 }}>
+            {diffStats.removed > 0 && <div>⚠ Removed nodes not shown — they don&apos;t exist in this snapshot</div>}
+            <div>Unchanged nodes keep their normal metric color</div>
+          </div>
         </div>
       )}
 

@@ -9,12 +9,31 @@ from __future__ import annotations
 from collections import defaultdict
 
 
+def _content_hash(node: dict) -> str:
+    """
+    Extract the content portion of a node's hash.
+
+    Node hashes have the format "module_hash:content_hash".
+    The module_hash changes when a file is moved/renamed even if the
+    function implementation is identical.  Comparing only the content_hash
+    correctly detects actual implementation changes.
+    """
+    h = node.get("hash", "")
+    if h.startswith("ext:"):
+        return h          # external symbol — compare whole string
+    parts = h.split(":", 1)
+    return parts[-1]      # content hash (right of first ":")
+
+
 def compute_diff_status_map(nodes_a: list[dict], nodes_b: list[dict]) -> dict:
     """
     Returns {module::name: status} for all *changed* nodes only.
 
     Uses "module::name" key format (matches the explore page's node ID format).
     Only includes nodes with status != "unchanged" to keep the response lean.
+
+    Modification is detected by content hash only (not module hash) so that
+    file renames / module moves don't produce spurious "modified" entries.
     """
     def vid(n): return f"{n['module']}::{n['name']}"
     bv_a = {vid(n): n for n in nodes_a}
@@ -25,7 +44,7 @@ def compute_diff_status_map(nodes_a: list[dict], nodes_b: list[dict]) -> dict:
     for v in set(bv_a) - set(bv_b):
         result[v] = "removed"
     for v in set(bv_a) & set(bv_b):
-        if bv_a[v]["hash"] != bv_b[v]["hash"]:
+        if _content_hash(bv_a[v]) != _content_hash(bv_b[v]):
             result[v] = "modified"
     return result
 
@@ -103,7 +122,7 @@ def compute_diff_graph(
     added_vids    = set(bv_b) - set(bv_a)
     removed_vids  = set(bv_a) - set(bv_b)
     common_vids   = set(bv_a) & set(bv_b)
-    modified_vids = {v for v in common_vids if bv_a[v]["hash"] != bv_b[v]["hash"]}
+    modified_vids = {v for v in common_vids if _content_hash(bv_a[v]) != _content_hash(bv_b[v])}
     changed_vids  = added_vids | removed_vids | modified_vids
 
     # Unified node lookup (prefer B for added/modified, A for removed)

@@ -624,6 +624,22 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                   : anySelected ? isReachable : true;
                 ctx.globalAlpha = isVisible ? 1.0 : 0.18;
 
+                // Resolve base color early (needed for diff ring below)
+                const baseColor = nodeColorOverrides?.get(node.id) ?? node.color;
+
+                // Diff glow ring — drawn outermost when diff overlay is active
+                if (nodeColorOverrides?.has(node.id)) {
+                  // Soft bloom behind the ring
+                  drawPill(ctx, node.x, node.y, w + 18, h + 18);
+                  ctx.fillStyle = baseColor + "1a";  // ~10% opacity bloom
+                  ctx.fill();
+                  // Crisp highlight ring
+                  drawPill(ctx, node.x, node.y, w + 10, h + 10);
+                  ctx.strokeStyle = baseColor;
+                  ctx.lineWidth   = 1.8;
+                  ctx.stroke();
+                }
+
                 // Coupling halo — outermost, orange, drawn before selection ring
                 if (isCoupling) {
                   drawPill(ctx, node.x, node.y, w + 12, h + 12);
@@ -641,7 +657,6 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                 }
 
                 // Pill background
-                const baseColor = nodeColorOverrides?.get(node.id) ?? node.color;
                 drawPill(ctx, node.x, node.y, w, h);
                 ctx.fillStyle   = isSelected ? lerpColor(baseColor, "#ffffff", 0.25) : baseColor;
                 ctx.fill();
