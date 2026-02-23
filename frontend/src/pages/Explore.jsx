@@ -1137,43 +1137,93 @@ function GraphRenderer({ data, measures, onNodeClick }) {
     return bfsFromNode([...selectedNodeIds][0], fwdAdj, fanOutDepth);
   }, [selectedNodeIds, fwdAdj, fanOutDepth]);
 
-  // Multi-select chain mode: for each edge (u→v), find the minimum path length
-  // across all ordered pairs (S, T) of selected nodes such that S→…→u→v→…→T.
-  // chain length = fwdDist[S][u] + 1 + bwdDist[T][v]   (i.e. reverse BFS from T)
+  // Multi-select chain mode — proper graph traversal, not array filtering.
+  //
+  // For each ordered pair (S, T) of selected nodes:
+  //   1. Build the "progress subgraph": edges (u→v) where both monotone guards hold
+  //      AND the total path length ≤ maxHops. This subgraph only contains edges
+  //      that could plausibly be on a valid S→T path.
+  //   2. BFS forward from S within that subgraph → forwardReachable
+  //   3. BFS backward from T within that subgraph → backwardReachable
+  //   4. Keep only edges where source ∈ forwardReachable AND target ∈ backwardReachable.
+  //
+  // Because we start from S and only follow edges, the result is always connected —
+  // a traversal cannot reach a node it has no path to.
   const chainEdgeMap = useMemo(() => {
     if (selectedNodeIds.size < 2) return new Map(); // Map<"u|v", minChainLen>
     const sel = [...selectedNodeIds];
-    const fwd = sel.map(s => bfsFromNode(s, fwdAdj, fanOutDepth)); // forward from each S
-    const bwd = sel.map(t => bfsFromNode(t, bwdAdj, fanOutDepth)); // backward from each T (reverse graph)
+    const fwd = sel.map(s => bfsFromNode(s, fwdAdj, fanOutDepth));
+    const bwd = sel.map(t => bfsFromNode(t, bwdAdj, fanOutDepth));
 
     const result = new Map();
-    for (const link of graphData.links) {
-      const u = typeof link.source === "object" ? link.source.id : link.source;
-      const v = typeof link.target === "object" ? link.target.id : link.target;
-      let minLen = Infinity;
-      for (let i = 0; i < sel.length; i++) {
-        const du  = fwd[i].get(u);  // hops from sel[i] → u
-        if (du == null) continue;
-        const dvu = fwd[i].get(v);  // hops from sel[i] → v
-        // Monotone-forward guard: v must be strictly farther from S than u.
-        // Edges that loop back (e.g. D→B where dist(S,B) < dist(S,D)) are rejected.
-        if (dvu == null || dvu <= du) continue;
 
-        for (let j = 0; j < sel.length; j++) {
-          if (i === j) continue;
-          const dv  = bwd[j].get(v);  // hops from v → sel[j] (via reverse graph)
-          if (dv == null) continue;
-          const duT = bwd[j].get(u);  // hops from u → sel[j]
-          // Monotone-backward guard: u must be strictly farther from T than v.
-          // Ensures the edge is making progress toward T, not diverging.
-          if (duT == null || duT <= dv) continue;
+    for (let i = 0; i < sel.length; i++) {
+      for (let j = 0; j < sel.length; j++) {
+        if (i === j) continue;
+        const S = sel[i], T = sel[j];
 
-          const len = du + 1 + dv;
-          if (len <= fanOutDepth) minLen = Math.min(minLen, len);
+        // ── Step 1: build the progress subgraph for this (S, T) pair ──────────
+        // progressOut[u] = list of v nodes reachable from u via progress edges
+        // progressIn[v]  = list of u nodes that lead to v via progress edges
+        const progressOut  = new Map();
+        const progressIn   = new Map();
+        const pairEdgeLens = new Map(); // "u|v" → chain length for this pair
+
+        for (const link of graphData.links) {
+          const u = typeof link.source === "object" ? link.source.id : link.source;
+          const v = typeof link.target === "object" ? link.target.id : link.target;
+
+          const du  = fwd[i].get(u);  if (du  == null) continue;
+          const dvu = fwd[i].get(v);  if (dvu == null || dvu <= du) continue; // fwd guard
+          const dv  = bwd[j].get(v);  if (dv  == null) continue;
+          const duT = bwd[j].get(u);  if (duT == null || duT <= dv) continue; // bwd guard
+          const len = du + 1 + dv;    if (len  > fanOutDepth)       continue;
+
+          pairEdgeLens.set(`${u}|${v}`, len);
+          if (!progressOut.has(u)) progressOut.set(u, []);
+          progressOut.get(u).push(v);
+          if (!progressIn.has(v)) progressIn.set(v, []);
+          progressIn.get(v).push(u);
+        }
+
+        if (!pairEdgeLens.size) continue;
+
+        // ── Step 2: BFS forward from S in the progress subgraph ───────────────
+        const forwardReachable = new Set([S]);
+        const fq = [S];
+        while (fq.length) {
+          const u = fq.shift();
+          for (const v of (progressOut.get(u) || [])) {
+            if (!forwardReachable.has(v)) { forwardReachable.add(v); fq.push(v); }
+          }
+        }
+        if (!forwardReachable.has(T)) continue; // T unreachable from S → skip pair
+
+        // ── Step 3: BFS backward from T in the progress subgraph ─────────────
+        const backwardReachable = new Set([T]);
+        const bq = [T];
+        while (bq.length) {
+          const v = bq.shift();
+          for (const u of (progressIn.get(v) || [])) {
+            if (!backwardReachable.has(u)) { backwardReachable.add(u); bq.push(u); }
+          }
+        }
+
+        // ── Step 4: keep only edges in the forward ∩ backward intersection ───
+        // An edge (u→v) is on a valid S→T path iff u is forward-reachable from S
+        // AND v can reach T backward. This is the only set of edges that cannot
+        // produce disconnected subgraphs.
+        for (const [key, len] of pairEdgeLens) {
+          const bar = key.indexOf("|");
+          const u = key.slice(0, bar), v = key.slice(bar + 1);
+          if (forwardReachable.has(u) && backwardReachable.has(v)) {
+            const prev = result.get(key);
+            if (prev == null || len < prev) result.set(key, len);
+          }
         }
       }
-      if (minLen < Infinity) result.set(`${u}|${v}`, minLen);
     }
+
     return result;
   }, [selectedNodeIds, fwdAdj, bwdAdj, graphData.links, fanOutDepth]);
 
