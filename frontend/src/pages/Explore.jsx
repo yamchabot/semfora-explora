@@ -359,7 +359,7 @@ export default function Explore() {
             ))}
           </SortableContext>
         </DndContext>
-        <AddDimMenu available={availableDims} onAdd={d=>setDims(p=>[...p,d])}/>
+        <AddDimMenu available={availableDims} currentDims={dims} onAdd={d=>setDims(p=>[...p,d])}/>
         {symbolMode && <span style={{ fontSize:11, color:"var(--text3)", fontStyle:"italic", marginLeft:4 }}>No grouping → showing individual symbols</span>}
       </div>
     )}

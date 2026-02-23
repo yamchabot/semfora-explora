@@ -102,7 +102,7 @@ export function SortableDimChip({ id, label, index, onRemove, onChangeMode }) {
 
 // ── AddDimMenu ─────────────────────────────────────────────────────────────────
 
-export function AddDimMenu({ available, onAdd }) {
+export function AddDimMenu({ available, currentDims = [], onAdd }) {
   const [open, setOpen] = useState(false);
   const ref             = useRef(null);
   useEffect(() => {
@@ -124,7 +124,13 @@ export function AddDimMenu({ available, onAdd }) {
     );
   }
 
+  // Bucketed fields whose field is not already in the active dims list
+  const availableBucketed = Object.entries(BUCKET_FIELDS_META).filter(
+    ([field]) => !currentDims.some(d => d === field || d.startsWith(`${field}:`))
+  );
+
   const hasDims = available.length > 0;
+  const hasBucketed = availableBucketed.length > 0;
   return (
     <div ref={ref} style={{ position:"relative" }}>
       <button className="btn btn-sm btn-ghost" style={{ fontSize:12 }} onClick={() => setOpen(v => !v)}>+ Add dimension ▾</button>
@@ -134,18 +140,18 @@ export function AddDimMenu({ available, onAdd }) {
           {available.map(d => (
             <Item key={d} label={dimDisplayLabel(d)} onClick={() => { onAdd(d); setOpen(false); }} />
           ))}
-          <div style={{ borderTop:"1px solid var(--border)", marginTop:4 }}>
-            <SectionHeader>Bucketed measures</SectionHeader>
-          </div>
-          {Object.entries(BUCKET_FIELDS_META).map(([field, label]) =>
-            ["median","quartile","decile"].map(mode => (
-              <Item
-                key={`${field}:${mode}`}
-                label={`${label} (${mode})`}
-                onClick={() => { onAdd(`${field}:${mode}`); setOpen(false); }}
-              />
-            ))
+          {hasBucketed && (
+            <div style={{ borderTop: hasDims ? "1px solid var(--border)" : undefined, marginTop: hasDims ? 4 : 0 }}>
+              <SectionHeader>Bucketed measures</SectionHeader>
+            </div>
           )}
+          {availableBucketed.map(([field, label]) => (
+            <Item
+              key={field}
+              label={label}
+              onClick={() => { onAdd(`${field}:quartile`); setOpen(false); }}
+            />
+          ))}
         </div>
       )}
     </div>
