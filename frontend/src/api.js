@@ -45,8 +45,8 @@ export const api = {
     get(`/repos/${id}/module-edges-detail?from_module=${encodeURIComponent(fromModule)}&to_module=${encodeURIComponent(toModule)}`),
   exploreKinds: (id) => get(`/repos/${id}/explore/kinds`),
   exploreDimValues: (id, kinds = "") => get(`/repos/${id}/explore/dim-values?kinds=${kinds}`),
-  explorePivot: (id, dimensions = ["module"], measures = "symbol_count,dead_ratio,caller_count:avg", kinds = "") =>
-    get(`/repos/${id}/explore?dimensions=${Array.isArray(dimensions)?dimensions.join(","):dimensions}&measures=${measures}&kinds=${kinds}`),
+  explorePivot: (id, dimensions = ["module"], measures = "symbol_count,dead_ratio,caller_count:avg", kinds = "", compareTo = "") =>
+    get(`/repos/${id}/explore?dimensions=${Array.isArray(dimensions)?dimensions.join(","):dimensions}&measures=${measures}&kinds=${kinds}&compare_to=${encodeURIComponent(compareTo)}`),
   exploreNodes: (id, sortBy = "caller_count", sortDir = "desc", limit = 200, kinds = "") =>
     get(`/repos/${id}/explore/nodes?sort_by=${sortBy}&sort_dir=${sortDir}&limit=${limit}&kinds=${kinds}`),
   diff: (repoA, repoB) => post("/diff", { repo_a: repoA, repo_b: repoB }),
@@ -54,4 +54,7 @@ export const api = {
     post(`/diff-graph?max_context=${maxContext}`, { repo_a: repoA, repo_b: repoB }),
   diffBuilding: (repoA, repoB) =>
     post("/diff-building", { repo_a: repoA, repo_b: repoB }),
+  // Lightweight: just {status_map: {"module::name": "added"|"removed"|"modified"}}
+  diffStatus: (repoId, compareTo) =>
+    get(`/repos/${encodeURIComponent(repoId)}/diff-status?compare_to=${encodeURIComponent(compareTo)}`),
 };

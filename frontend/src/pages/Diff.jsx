@@ -1,8 +1,20 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
-import DiffGraph from "../components/DiffGraph";
+import GraphRenderer from "../components/GraphRenderer";
 import { BuildingCanvas, LAYER_COLORS } from "./Building";
+
+const DIFF_NODE_COLORS = {
+  added:    "#3fb950",
+  removed:  "#f85149",
+  modified: "#e3b341",
+  context:  "#3d4450",
+};
+const DIFF_EDGE_COLORS = {
+  added:     "#3fb950",
+  removed:   "#f85149",
+  unchanged: "#30363d",
+};
 
 function groupRepos(repos) {
   const groups = {};
@@ -64,6 +76,61 @@ export default function Diff() {
   });
 
   const [selectedBuildingNode, setSelectedBuildingNode] = useState(null);
+
+  // GraphRenderer state for diff graph view
+  const [diffSel,      setDiffSel]      = useState(new Set());
+  const [diffMinW,     setDiffMinW]     = useState(1);
+  const [diffTopK,     setDiffTopK]     = useState(0);
+  const [diffFanOut,   setDiffFanOut]   = useState(4);
+  const [diffHideIsol, setDiffHideIsol] = useState(false);
+
+  // Reset selection when diff changes (new commits selected)
+  useEffect(() => { setDiffSel(new Set()); }, [graphData]);
+
+  // Transform diff graph data → GraphRenderer-compatible format + color override Maps
+  const diffRenderData = useMemo(() => {
+    if (!graphData?.nodes?.length) return null;
+
+    const visibleNodes = graphMode === "changed-only"
+      ? graphData.nodes.filter(n => n.status !== "context")
+      : graphData.nodes;
+
+    const nodeSet     = new Set(visibleNodes.map(n => n.id));
+    const visibleEdges = (graphData.edges || []).filter(
+      e => nodeSet.has(e.source) && nodeSet.has(e.target)
+    );
+
+    // Remap IDs from "name::module" → "module::name" so label shows func name
+    const nodeId = n => `${n.module}::${n.name}`;
+    const idMap  = new Map(visibleNodes.map(n => [n.id, nodeId(n)]));
+
+    const data = {
+      dimensions: ["symbol"],
+      rows: visibleNodes.map(n => ({
+        key:    { symbol: nodeId(n) },
+        values: { "caller_count__avg": Math.max(n.caller_count || 1, 1) },
+      })),
+      graph_edges: visibleEdges.map(e => ({
+        source: idMap.get(e.source) || e.source,
+        target: idMap.get(e.target) || e.target,
+        // heavier weight = thicker line in GraphRenderer
+        weight: e.status === "added" ? 3 : e.status === "removed" ? 2 : 1,
+      })),
+      measure_types: { "caller_count__avg": "integer" },
+    };
+
+    const nodeColorOverrides = new Map(
+      visibleNodes.map(n => [nodeId(n), DIFF_NODE_COLORS[n.status] || DIFF_NODE_COLORS.context])
+    );
+    const edgeColorOverrides = new Map(
+      visibleEdges.map(e => [
+        `${idMap.get(e.source) || e.source}|${idMap.get(e.target) || e.target}`,
+        DIFF_EDGE_COLORS[e.status] || DIFF_EDGE_COLORS.unchanged,
+      ])
+    );
+
+    return { data, nodeColorOverrides, edgeColorOverrides, stats: graphData.stats };
+  }, [graphData, graphMode]);
 
   function handleCompare() {
     setSubmitted(true);
@@ -279,8 +346,46 @@ export default function Diff() {
                     No changed nodes with graph connections found.
                   </div>
                 )}
-                {graphData && !graphLoading && graphData.nodes.length > 0 && (
-                  <DiffGraph nodes={graphData.nodes} edges={graphData.edges} mode={graphMode} />
+                {graphData && !graphLoading && graphData.nodes.length > 0 && diffRenderData && (
+                  <>
+                    {/* Legend */}
+                    <div style={{ display: "flex", gap: 14, alignItems: "center", marginBottom: 8, flexWrap: "wrap", fontSize: 12 }}>
+                      {[
+                        { color: DIFF_NODE_COLORS.added,    key: "added",    label: `Added (${diffRenderData.stats.added ?? 0})` },
+                        { color: DIFF_NODE_COLORS.removed,  key: "removed",  label: `Removed (${diffRenderData.stats.removed ?? 0})` },
+                        { color: DIFF_NODE_COLORS.modified, key: "modified", label: `Modified (${diffRenderData.stats.modified ?? 0})` },
+                        { color: DIFF_NODE_COLORS.context,  key: "context",  label: `Context (${diffRenderData.stats.context ?? 0})` },
+                      ].filter(item => {
+                        const m = item.label.match(/\((\d+)\)/);
+                        return m && parseInt(m[1]) > 0;
+                      }).map(({ color, label }) => (
+                        <span key={label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                          <span style={{ width: 10, height: 10, borderRadius: 3, background: color, flexShrink: 0 }} />
+                          <span style={{ color }}>{label}</span>
+                        </span>
+                      ))}
+                      <span style={{ color: "var(--text3)", fontSize: 11, marginLeft: 4 }}>
+                        · Click nodes to explore · Shift+click chain · / to search
+                      </span>
+                    </div>
+
+                    {/* Graph — fixed height container */}
+                    <div style={{ height: 560, borderRadius: 8, overflow: "hidden" }}>
+                      <GraphRenderer
+                        data={diffRenderData.data}
+                        measures={[{ field: "caller_count", agg: "avg" }]}
+                        onNodeClick={null}
+                        minWeight={diffMinW}        setMinWeight={setDiffMinW}
+                        topK={diffTopK}             setTopK={setDiffTopK}
+                        colorKeyOverride={null}     setColorKeyOverride={() => {}}
+                        fanOutDepth={diffFanOut}    setFanOutDepth={setDiffFanOut}
+                        selectedNodeIds={diffSel}   setSelectedNodeIds={setDiffSel}
+                        hideIsolated={diffHideIsol} setHideIsolated={setDiffHideIsol}
+                        nodeColorOverrides={diffRenderData.nodeColorOverrides}
+                        edgeColorOverrides={diffRenderData.edgeColorOverrides}
+                      />
+                    </div>
+                  </>
                 )}
               </>
             )}

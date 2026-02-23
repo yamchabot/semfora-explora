@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { RepoContext } from "../App";
 import { api } from "../api";
+import HackerNewsWidget from "../components/HackerNewsWidget";
 
 const SEVERITY_COLOR = { high: "var(--red)", medium: "var(--yellow)", low: "var(--text3)" };
 const SEVERITY_BG    = { high: "var(--red-bg)", medium: "var(--yellow-bg)", low: "var(--bg3)" };
@@ -135,7 +136,7 @@ export default function Dashboard() {
       </div>
 
       {/* Module breakdown */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 28 }}>
         <div className="card" style={{ padding: 16 }}>
           <div style={{ fontWeight: 600, marginBottom: 12 }}>Top Modules by Symbol Count</div>
           {o.top_modules.map((m) => (
@@ -170,6 +171,9 @@ export default function Dashboard() {
           ))}
         </div>
       </div>
+
+      {/* Hacker News feed */}
+      <HackerNewsWidget />
     </div>
   );
 }

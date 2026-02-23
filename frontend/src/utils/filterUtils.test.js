@@ -192,6 +192,29 @@ describe("applyFilters — dim regex filter", () => {
     // Desired behaviour: rows with no data for the filtered dim should PASS (we can't filter what we don't have).
     expect(result).toHaveLength(3);   // <-- this is the fix target
   });
+
+  it("! prefix negates — excludes matching rows", () => {
+    const f2 = { ...f, pattern: "!core" };
+    const result = applyFilters(ROWS, [f2]);
+    expect(result.map(r => r.key.module).sort()).toEqual(["service", "utils"]);
+  });
+
+  it("! prefix is case-insensitive", () => {
+    const f2 = { ...f, pattern: "!CORE" };
+    const result = applyFilters(ROWS, [f2]);
+    expect(result.map(r => r.key.module).sort()).toEqual(["service", "utils"]);
+  });
+
+  it("! prefix with pipe — excludes any matching", () => {
+    const f2 = { ...f, pattern: "!core|service" };
+    const result = applyFilters(ROWS, [f2]);
+    expect(result.map(r => r.key.module)).toEqual(["utils"]);
+  });
+
+  it("! prefix empty pattern → all pass", () => {
+    const f2 = { ...f, pattern: "!" };
+    expect(applyFilters(ROWS, [f2])).toHaveLength(3);
+  });
 });
 
 describe("applyFilters — measure filter", () => {

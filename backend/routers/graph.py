@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from db import get_db, DATA_DIR
 from queries.graph import fetch_graph, fetch_diff_snapshot
-from analytics.diff import compute_diff, compute_diff_graph
+from analytics.diff import compute_diff, compute_diff_graph, compute_diff_status_map
 
 router = APIRouter()
 
@@ -112,3 +112,31 @@ def diff_graph(
 
     result["github_compare_url"] = github_url
     return result
+
+
+@router.get("/api/repos/{repo_id}/diff-status")
+def get_diff_status(
+    repo_id:    str,
+    compare_to: str = Query(..., description="Repo ID to compare against (the base/older snapshot)"),
+):
+    """
+    Returns per-node diff status for all *changed* nodes when comparing
+    compare_to (base) → repo_id (head).
+
+    Response: { status_map: { "module::name": "added"|"removed"|"modified" } }
+
+    Uses module::name key format to match explore page node IDs.
+    Only changed nodes are included (unchanged nodes are absent).
+    """
+    conn_a = get_db(compare_to)   # base / older
+    conn_b = get_db(repo_id)      # head / newer
+    snap_a = fetch_diff_snapshot(conn_a)
+    snap_b = fetch_diff_snapshot(conn_b)
+    conn_a.close()
+    conn_b.close()
+
+    status_map = compute_diff_status_map(
+        list(snap_a["nodes_by_key"].values()),
+        list(snap_b["nodes_by_key"].values()),
+    )
+    return {"status_map": status_map}
