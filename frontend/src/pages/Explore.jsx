@@ -63,6 +63,11 @@ export default function Explore() {
   });
   const [hideIsolated, setHideIsolated] = useState(() => searchParams.get("hi") === "1");
 
+  // ── Compare / diff mode ───────────────────────────────────────────────────
+  const [compareRepo,  setCompareRepo]  = useState(() => searchParams.get("cmp") || "");
+  const [graphContext, setGraphContext] = useState(() => parseInt(searchParams.get("ctx")) || 4);
+  const [graphMode,    setGraphMode]    = useState(() => searchParams.get("gm") || "neighborhood");
+
   const [selectedNode,  setSelectedNode]  = useState(null);
   const [sidebarOpen,   setSidebarOpen]   = useState(true);
   const [configOpen,    setConfigOpen]    = useState(true);
@@ -132,9 +137,13 @@ export default function Explore() {
     if (fanOutDepth !== 5)          p.set("hops", fanOutDepth);
     if (selectedNodeIds.size > 0)   p.set("sel",  [...selectedNodeIds].join(","));
     if (hideIsolated)               p.set("hi",   "1");
+    if (compareRepo)                p.set("cmp",  compareRepo);
+    if (graphContext !== 4)         p.set("ctx",  String(graphContext));
+    if (graphMode !== "neighborhood") p.set("gm", graphMode);
     setSearchParams(p, { replace: true });
   }, [repoId, renderer, dims, measures, kinds, filters, // eslint-disable-line react-hooks/exhaustive-deps
-      minWeight, topK, colorKeyOverride, fanOutDepth, selectedNodeIds, hideIsolated]);
+      minWeight, topK, colorKeyOverride, fanOutDepth, selectedNodeIds, hideIsolated,
+      compareRepo, graphContext, graphMode]);
 
   // Always load available kinds for the selected repo
   const kindsQuery = useQuery({
@@ -166,6 +175,71 @@ export default function Explore() {
   });
 
   const hasEnriched = pivotQuery.data?.has_enriched ?? false;
+
+  // ── Repos list for the compare selector ──────────────────────────────────
+  const { data: reposData } = useQuery({ queryKey: ["repos"], queryFn: api.repos });
+  const allRepos = reposData?.repos || [];
+  const repoGroups = useMemo(() => {
+    const g = {};
+    for (const r of allRepos) {
+      const at   = r.id.indexOf("@");
+      const proj = at === -1 ? r.id : r.id.slice(0, at);
+      if (!g[proj]) g[proj] = [];
+      g[proj].push({ ...r, commit: at === -1 ? "HEAD" : r.id.slice(at + 1) });
+    }
+    return g;
+  }, [allRepos]);
+
+  // ── Diff / compare mode ───────────────────────────────────────────────────
+  const diffMode = !!compareRepo && renderer === "graph";
+
+  const diffGraphQuery = useQuery({
+    queryKey: ["diff-graph-explore", compareRepo, repoId, graphContext],
+    queryFn:  () => api.diffGraph(compareRepo, repoId, graphContext),
+    enabled:  diffMode,
+    staleTime: Infinity,
+  });
+
+  const DIFF_NODE_COLORS = { added:"#3fb950", removed:"#f85149", modified:"#e3b341", context:"#3d4450" };
+  const DIFF_EDGE_COLORS = { added:"#3fb950", removed:"#f85149", unchanged:"#30363d" };
+
+  const diffRenderData = useMemo(() => {
+    if (!compareRepo || !diffGraphQuery.data?.nodes?.length) return null;
+    const visibleNodes = graphMode === "changed-only"
+      ? diffGraphQuery.data.nodes.filter(n => n.status !== "context")
+      : diffGraphQuery.data.nodes;
+    const nodeSet      = new Set(visibleNodes.map(n => n.id));
+    const visibleEdges = (diffGraphQuery.data.edges || []).filter(
+      e => nodeSet.has(e.source) && nodeSet.has(e.target)
+    );
+    const nodeId = n => `${n.module}::${n.name}`;
+    const idMap  = new Map(visibleNodes.map(n => [n.id, nodeId(n)]));
+    return {
+      data: {
+        dimensions: ["symbol"],
+        rows: visibleNodes.map(n => ({
+          key:    { symbol: nodeId(n) },
+          values: { "caller_count__avg": Math.max(n.caller_count || 1, 1) },
+        })),
+        graph_edges: visibleEdges.map(e => ({
+          source: idMap.get(e.source) || e.source,
+          target: idMap.get(e.target) || e.target,
+          weight: e.status === "added" ? 3 : e.status === "removed" ? 2 : 1,
+        })),
+        measure_types: { "caller_count__avg": "integer" },
+      },
+      nodeColorOverrides: new Map(
+        visibleNodes.map(n => [nodeId(n), DIFF_NODE_COLORS[n.status] || DIFF_NODE_COLORS.context])
+      ),
+      edgeColorOverrides: new Map(
+        visibleEdges.map(e => [
+          `${idMap.get(e.source)||e.source}|${idMap.get(e.target)||e.target}`,
+          DIFF_EDGE_COLORS[e.status] || DIFF_EDGE_COLORS.unchanged,
+        ])
+      ),
+      stats: diffGraphQuery.data.stats,
+    };
+  }, [diffGraphQuery.data, graphMode, compareRepo]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const allDims       = ["module", "risk", "kind", "symbol", "dead", "high_risk", "in_cycle", "community"];
   const availableDims = allDims.filter(d => !dims.includes(d));
@@ -227,6 +301,38 @@ export default function Explore() {
       {[{key:"pivot",label:"📊 Pivot"},{key:"graph",label:"🕸 Graph"},{key:"nodes",label:"🔬 Nodes"}].map(({key,label})=>(
         <button key={key} className={`btn btn-sm ${renderer===key?"":"btn-ghost"}`} onClick={()=>setRenderer(key)}>{label}</button>
       ))}
+    </div>
+    {/* Compare / diff row */}
+    <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:14, flexWrap:"wrap" }}>
+      <span style={{ fontSize:11, fontWeight:600, color:"var(--text3)", textTransform:"uppercase", letterSpacing:"0.08em", width:80 }}>Compare</span>
+      {compareRepo ? (<>
+        <span style={{ fontSize:11, fontFamily:"monospace", color:"var(--text2)" }}>
+          {compareRepo.split("@")[1]?.slice(0,7) ?? compareRepo} → current
+        </span>
+        {[2,4,6].map(n => (
+          <button key={n} className={`btn btn-sm ${graphContext===n?"":"btn-ghost"}`}
+            style={{ minWidth:28, fontSize:11 }} onClick={() => setGraphContext(n)}>{n}</button>
+        ))}
+        <button className={`btn btn-sm ${graphMode==="changed-only"?"":"btn-ghost"}`}
+          style={{ fontSize:11 }}
+          onClick={() => setGraphMode(m => m==="changed-only" ? "neighborhood" : "changed-only")}>
+          Changed only
+        </button>
+        <button className="btn btn-ghost btn-sm" style={{ fontSize:11 }}
+          onClick={() => { setCompareRepo(""); setGraphMode("neighborhood"); }}>✕ off</button>
+      </>) : (
+        <select style={{ fontSize:11, padding:"3px 6px", background:"var(--bg3)", color:"var(--text)", border:"1px solid var(--border)", borderRadius:4 }}
+          value="" onChange={e => { if (e.target.value) { setCompareRepo(e.target.value); setRenderer("graph"); } }}>
+          <option value="">Compare to…</option>
+          {Object.entries(repoGroups).sort(([a],[b])=>a.localeCompare(b)).map(([proj, commits]) => (
+            <optgroup key={proj} label={proj}>
+              {commits.filter(c => c.id !== repoId).map(c => (
+                <option key={c.id} value={c.id}>{c.commit.slice(0,7)} — {c.node_count.toLocaleString()} nodes</option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      )}
     </div>
     {renderer!=="nodes" && (
       <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12, flexWrap:"wrap" }}>
@@ -290,24 +396,61 @@ export default function Explore() {
     // Negative margin bleeds out of Layout's 28px/32px padding → graph fills viewport
     <div style={{ position:"relative", height:"100vh", margin:"-28px -32px", overflow:"hidden" }}>
       {/* Graph fills the entire background */}
-      {measures.length === 0
-        ? <div style={{ display:"flex", alignItems:"center", justifyContent:"center", height:"100%", color:"var(--text3)", fontSize:13 }}>Select at least one measure.</div>
-        : pivotQuery.isLoading
-        ? <div style={{ display:"flex", alignItems:"center", justifyContent:"center", height:"100%", color:"var(--text3)", fontSize:13 }}>Computing…</div>
-        : pivotQuery.error
-        ? <div className="error" style={{ margin:40 }}>{pivotQuery.error.message}</div>
-        : stableFilteredData
-        ? <GraphRenderer
-            data={stableFilteredData} measures={measures} onNodeClick={setSelectedNode}
-            minWeight={minWeight}               setMinWeight={setMinWeight}
-            topK={topK}                         setTopK={setTopK}
-            colorKeyOverride={colorKeyOverride} setColorKeyOverride={setColorKeyOverride}
-            fanOutDepth={fanOutDepth}           setFanOutDepth={setFanOutDepth}
-            selectedNodeIds={selectedNodeIds}   setSelectedNodeIds={setSelectedNodeIds}
-            hideIsolated={hideIsolated}         setHideIsolated={setHideIsolated}
-            controlsH={0} fillViewport={true}
-          />
-        : null}
+      {/* Loading + error states */}
+      {diffMode && diffGraphQuery.isLoading && (
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"center", height:"100%", color:"var(--text3)", fontSize:13 }}>Computing diff…</div>
+      )}
+      {diffMode && !diffGraphQuery.isLoading && diffGraphQuery.data && !diffRenderData && (
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"center", height:"100%", color:"var(--text3)", fontSize:13 }}>No changed nodes found between these snapshots.</div>
+      )}
+      {!diffMode && measures.length === 0 && (
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"center", height:"100%", color:"var(--text3)", fontSize:13 }}>Select at least one measure.</div>
+      )}
+      {!diffMode && pivotQuery.isLoading && (
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"center", height:"100%", color:"var(--text3)", fontSize:13 }}>Computing…</div>
+      )}
+      {!diffMode && pivotQuery.error && (
+        <div className="error" style={{ margin:40 }}>{pivotQuery.error.message}</div>
+      )}
+      {/* Graph renderer — diff or normal */}
+      {(diffMode ? (diffRenderData != null) : (stableFilteredData != null)) && (
+        <GraphRenderer
+          key={diffMode ? "diff" : "explore"}
+          data={diffMode ? diffRenderData.data : stableFilteredData}
+          measures={diffMode ? [{field:"caller_count",agg:"avg"}] : measures}
+          onNodeClick={setSelectedNode}
+          minWeight={minWeight}               setMinWeight={setMinWeight}
+          topK={topK}                         setTopK={setTopK}
+          colorKeyOverride={diffMode ? null : colorKeyOverride}
+          setColorKeyOverride={diffMode ? () => {} : setColorKeyOverride}
+          fanOutDepth={fanOutDepth}           setFanOutDepth={setFanOutDepth}
+          selectedNodeIds={selectedNodeIds}   setSelectedNodeIds={setSelectedNodeIds}
+          hideIsolated={hideIsolated}         setHideIsolated={setHideIsolated}
+          nodeColorOverrides={diffMode ? diffRenderData.nodeColorOverrides : null}
+          edgeColorOverrides={diffMode ? diffRenderData.edgeColorOverrides : null}
+          controlsH={0} fillViewport={true}
+        />
+      )}
+      {/* Diff legend — bottom-right overlay */}
+      {diffMode && diffRenderData && (
+        <div style={{ position:"absolute", bottom:16, right:16, zIndex:10,
+          display:"flex", gap:10, alignItems:"center", flexWrap:"wrap",
+          background:"var(--bg2)", borderRadius:6, padding:"8px 14px",
+          border:"1px solid var(--border2)", boxShadow:"0 2px 12px rgba(0,0,0,0.5)", fontSize:12 }}>
+          {[
+            { color: DIFF_NODE_COLORS.added,    label: `Added (${diffRenderData.stats.added ?? 0})` },
+            { color: DIFF_NODE_COLORS.removed,  label: `Removed (${diffRenderData.stats.removed ?? 0})` },
+            { color: DIFF_NODE_COLORS.modified, label: `Modified (${diffRenderData.stats.modified ?? 0})` },
+            { color: DIFF_NODE_COLORS.context,  label: `Context (${diffRenderData.stats.context ?? 0})` },
+          ].filter(item => { const m = item.label.match(/\((\d+)\)/); return m && parseInt(m[1]) > 0; })
+           .map(({ color, label }) => (
+            <span key={label} style={{ display:"flex", alignItems:"center", gap:5 }}>
+              <span style={{ width:10, height:10, borderRadius:3, background:color, flexShrink:0 }}/>
+              <span style={{ color }}>{label}</span>
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* Collapsible config dropdown — top-left, auto-closes after 30s idle */}
       <div
