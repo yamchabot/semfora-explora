@@ -13,8 +13,24 @@ import sqlite3
 
 # ── Simple dimensions ─────────────────────────────────────────────────────────
 
+# "class" dimension: derive a node's containing class from line-range containment.
+# A node n is a member of class C when they share the same file and n's line range
+# sits entirely within C's line range.  Nodes outside any class fall back to
+# '(top-level)' so every node always has a non-NULL class value.
+# The {a} placeholder is replaced with the SQL alias (n, n1, n2).
+_CLASS_DIM = (
+    "COALESCE("
+    "(SELECT cls.name FROM nodes cls "
+    " WHERE cls.file_path = {a}.file_path"
+    "   AND cls.kind = 'class'"
+    "   AND {a}.line_start >= cls.line_start"
+    "   AND {a}.line_end   <= cls.line_end"
+    " LIMIT 1), '(top-level)')"
+)
+
 AVAILABLE_DIMENSIONS: dict[str, str] = {
     "module":     "n.module",
+    "class":      _CLASS_DIM.format(a="n"),   # containing class (line containment)
     "risk":       "n.risk",
     "kind":       "n.kind",
     "symbol":     "n.module || '::' || n.name",
@@ -31,15 +47,17 @@ _ENRICHED_DIMS = {"in_cycle", "community"}
 
 # For graph edge queries we need the n1/n2-prefixed versions
 _DIM_SRC = {
-    "module":                "n1.module",
-    "risk":                  "n1.risk",
-    "kind":                  "n1.kind",
-    "symbol":                "n1.module || '::' || n1.name",
+    "module":    "n1.module",
+    "class":     _CLASS_DIM.format(a="n1"),
+    "risk":      "n1.risk",
+    "kind":      "n1.kind",
+    "symbol":    "n1.module || '::' || n1.name",
     # Enriched dims — require LEFT JOIN node_features nf1 ON n1.hash = nf1.hash
     "community": "nf1.community_dominant_mod",
 }
 _DIM_TGT = {
     "module":    "n2.module",
+    "class":     _CLASS_DIM.format(a="n2"),
     "risk":      "n2.risk",
     "kind":      "n2.kind",
     "symbol":    "n2.module || '::' || n2.name",

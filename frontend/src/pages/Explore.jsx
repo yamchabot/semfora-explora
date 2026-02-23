@@ -261,7 +261,7 @@ export default function Explore() {
     return counts;
   }, [filteredData, compareRepo]);
 
-  const allDims       = ["module", "risk", "kind", "symbol", "dead", "high_risk", "in_cycle", "community"];
+  const allDims       = ["module", "class", "risk", "kind", "symbol", "dead", "high_risk", "in_cycle", "community"];
   const availableDims = allDims.filter(d => !dims.includes(d));
 
   // Distinct dimension values for filter chips.

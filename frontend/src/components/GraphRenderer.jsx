@@ -570,6 +570,15 @@ export default function GraphRenderer({ data, measures, onNodeClick,
     // Unpin every node first
     for (const n of graphData.nodes) { delete n.fx; delete n.fy; }
 
+    // In blob mode the group-centroid force already keeps nodes inside their blobs.
+    // Adding radial/chain forces would fight that force and push nodes out of bounds.
+    // Skip the extra physics — visual highlighting/dimming still works fine.
+    if (graphData.isBlobMode) {
+      fg.d3Force("selRadial",     null);
+      fg.d3Force("chainCentroid", null);
+      return;
+    }
+
     const linkForce = fg.d3Force("link");
 
     if (selectedNodeIds.size === 1) {
