@@ -214,9 +214,11 @@ export default function GraphRenderer({ data, measures, onNodeClick,
     [data, minWeight, topK, colorKey, colorStats, sizeKey, hideIsolated],
   );
 
-  // Reset coupling view when the graph data changes (new repo, new dims, etc.)
-  // Must be after graphData is declared to avoid TDZ in the dependency array.
-  useEffect(() => { setCouplingIds(new Set()); }, [graphData]);
+  // Reset coupling view when the underlying API data changes (new repo, dims, etc.).
+  // Depends on `data` (the prop) rather than `graphData` (derived useMemo) so that
+  // Vite's optimiser cannot hoist this effect above the graphData declaration and
+  // trigger a TDZ on the minified variable name in production builds.
+  useEffect(() => { setCouplingIds(new Set()); }, [data]);
 
   // Build forward + reverse adjacency maps from current graph links
   const { fwdAdj, bwdAdj } = useMemo(
