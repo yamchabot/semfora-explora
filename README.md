@@ -44,14 +44,20 @@ chmod +x start.sh && ./start.sh
 | Tool | Description |
 |---|---|
 | **Dashboard** | Repo overview — node/edge counts, module breakdown, risk distribution |
-| **Call Graph** | Interactive force-directed graph, filterable by module. Click nodes to inspect. |
+| **Explore** ✦ | OLAP pivot / force-graph / node table — dimensional analysis with filters, multi-select chains, blob clustering |
+| **Call Graph** | Interactive force-directed graph, filterable by module |
 | **Blast Radius** | Search any symbol — see all transitive callers by depth |
 | **Module Coupling** | Ca/Ce/instability scores per module + cross-module dependency heatmap |
+| **Module Graph** | Module-level dependency graph |
 | **Dead Code** | Symbols with zero callers, grouped by file |
 | **Load-Bearing Nodes** | Detects intentional vs unexpected high-centrality nodes |
 | **Centrality** | Ranked list of highest-centrality symbols — your riskiest refactoring targets |
 | **Cycles** | Strongly connected components (circular dependencies) |
+| **Communities** ✦ | Louvain community detection — algorithmic clusters vs declared modules |
+| **Building** ✦ | Layered architecture view (Foundation → Platform → Services → Features → Leaves) |
 | **Graph Diff** | Compare two indexed repos structurally — added/removed symbols and module edges |
+
+✦ = requires enriched DB (run `python enrich.py data/<repo>.db` once)
 
 ---
 
@@ -60,17 +66,24 @@ chmod +x start.sh && ./start.sh
 ```
 semfora-explorer/
 ├── backend/          FastAPI — serves graph analysis from SQLite DBs
-│   ├── main.py       All API endpoints
-│   └── requirements.txt
-├── frontend/         React + Vite
+│   ├── analytics/    Pure analysis functions (no DB, fully testable)
+│   ├── queries/      DB I/O — returns plain Python dicts/lists
+│   ├── routers/      Thin HTTP handlers (one file per feature)
+│   ├── db.py         Connection management + enriched-DB auto-promotion
+│   ├── enrich.py     ML enrichment pipeline (run once per DB)
+│   └── main.py       App entry point — registers routers + serves frontend
+├── frontend/         React 18 + Vite
 │   └── src/
-│       ├── pages/    One page per feature
-│       ├── components/Layout.jsx
+│       ├── pages/    One file per route
+│       ├── components/  Shared UI components
+│       ├── utils/    Pure functions — all unit-tested
+│       ├── App.jsx   Router, RepoContext, ConsoleToasts
 │       └── api.js    API client
-├── data/             *.db files (Semfora SQLite exports — gitignored)
-├── docs/             Design documents and use-case specs
-└── mockups/          Static HTML mockups (open directly in browser)
+├── data/             *.db / *.enriched.db files (gitignored)
+└── tests/            pytest test suite (138 tests)
 ```
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full developer reference — layer contracts, file descriptions, and a "where to make changes" quick-reference.
 
 ## Data Source
 
