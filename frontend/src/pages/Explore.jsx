@@ -449,8 +449,7 @@ const DIM_LABELS = {
   dead:                    "dead/alive",
   high_risk:               "high-risk",
   in_cycle:                "in-cycle ✦",
-  community_dominant_mod:  "community (inferred) ✦",
-  community_alignment:     "aligned/misaligned ✦",
+  community: "community ✦",
 };
 
 function dimDisplayLabel(d) {
@@ -1566,8 +1565,7 @@ export default function Explore() {
 
   const hasEnriched = pivotQuery.data?.has_enriched ?? false;
 
-  const allDims       = ["module", "risk", "kind", "symbol", "dead", "high_risk", "in_cycle",
-                         "community_dominant_mod", "community_alignment"];
+  const allDims       = ["module", "risk", "kind", "symbol", "dead", "high_risk", "in_cycle", "community"];
   const availableDims = allDims.filter(d => !dims.includes(d));
 
   // Distinct dimension values for filter chips.

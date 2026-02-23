@@ -23,12 +23,11 @@ AVAILABLE_DIMENSIONS: dict[str, str] = {
     "high_risk":  "CASE WHEN n.risk IN ('high','critical') THEN 'high-risk' ELSE 'normal' END",
     "in_cycle":   "CASE WHEN COALESCE(nf.scc_size, 1) > 1 THEN 'in-cycle' ELSE 'clean' END",
     # Community dims (Louvain — stored in node_features during enrichment)
-    "community_dominant_mod":  "nf.community_dominant_mod",
-    "community_alignment":     "CASE WHEN COALESCE(nf.community_alignment, 1) = 1 THEN 'aligned' ELSE 'misaligned' END",
+    "community": "nf.community_dominant_mod",
 }
 
 # Dims that require node_features JOIN
-_ENRICHED_DIMS = {"in_cycle", "community_dominant_mod", "community_alignment"}
+_ENRICHED_DIMS = {"in_cycle", "community"}
 
 # For graph edge queries we need the n1/n2-prefixed versions
 _DIM_SRC = {
@@ -37,15 +36,15 @@ _DIM_SRC = {
     "kind":                  "n1.kind",
     "symbol":                "n1.module || '::' || n1.name",
     # Enriched dims — require LEFT JOIN node_features nf1 ON n1.hash = nf1.hash
-    "community_dominant_mod": "nf1.community_dominant_mod",
+    "community": "nf1.community_dominant_mod",
 }
 _DIM_TGT = {
-    "module":                "n2.module",
-    "risk":                  "n2.risk",
-    "kind":                  "n2.kind",
-    "symbol":                "n2.module || '::' || n2.name",
+    "module":    "n2.module",
+    "risk":      "n2.risk",
+    "kind":      "n2.kind",
+    "symbol":    "n2.module || '::' || n2.name",
     # Enriched dims — require LEFT JOIN node_features nf2 ON n2.hash = nf2.hash
-    "community_dominant_mod": "nf2.community_dominant_mod",
+    "community": "nf2.community_dominant_mod",
 }
 
 # ── Bucketed dimensions (field:mode → CASE expression) ────────────────────────
@@ -587,8 +586,7 @@ _PICKER_DIMS = {
     "kind":                  "n.kind",
     "dead":                  "CASE WHEN n.caller_count = 0 THEN 'dead' ELSE 'alive' END",
     "high_risk":             "CASE WHEN n.risk IN ('high','critical') THEN 'high-risk' ELSE 'normal' END",
-    "community_dominant_mod":  "nf.community_dominant_mod",
-    "community_alignment":     "CASE WHEN COALESCE(nf.community_alignment, 1) = 1 THEN 'aligned' ELSE 'misaligned' END",
+    "community": "nf.community_dominant_mod",
 }
 
 
