@@ -24,6 +24,7 @@ export function buildGraphData(data, {
   colorStats  = { min: 0, max: 1 },
   sizeKey     = null,
   hideIsolated = false,
+  colorFn     = null,   // optional (vals) => cssColor override; bypasses gradient entirely
 } = {}) {
   if (!data?.rows) return { nodes: [], links: [], isBlobMode: false };
 
@@ -59,6 +60,7 @@ export function buildGraphData(data, {
 
   // ── Colour ────────────────────────────────────────────────────────────────
   function makeColor(vals) {
+    if (colorFn) return colorFn(vals);
     const t = colorKey
       ? Math.max(0, Math.min(1,
           (vals[colorKey] - colorStats.min) / (colorStats.max - colorStats.min)))

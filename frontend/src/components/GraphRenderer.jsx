@@ -217,9 +217,24 @@ export default function GraphRenderer({ data, measures, onNodeClick,
     return new Map(data.rows.map((r, i) => [r.key[dim0], BLOB_PALETTE[i % BLOB_PALETTE.length]]));
   }, [isBlobMode, data, dim0]);
 
+  // When coloring by diff_status_value, use an explicit 4-stop mapping instead
+  // of the green→red gradient (whose midpoint is an ugly olive, and whose
+  // min===max guard would otherwise produce NaN when all nodes are unchanged).
+  const diffColorFn = useMemo(() => {
+    if (colorKey !== "diff_status_value") return null;
+    return (vals) => {
+      const v = vals["diff_status_value"];
+      if (!isFinite(v)) return "#c8b89a"; // no data → dark cream fallback
+      if (v < 0.1)  return "#3fb950";     // added    → green
+      if (v < 0.4)  return "#e3b341";     // modified → amber
+      if (v > 0.9)  return "#f85149";     // removed  → red
+      return "#c8b89a";                   // unchanged → dark cream
+    };
+  }, [colorKey]);
+
   const graphData = useMemo(
-    () => buildGraphData(data, { minWeight, topK, colorKey, colorStats, sizeKey, hideIsolated }),
-    [data, minWeight, topK, colorKey, colorStats, sizeKey, hideIsolated],
+    () => buildGraphData(data, { minWeight, topK, colorKey, colorStats, sizeKey, hideIsolated, colorFn: diffColorFn }),
+    [data, minWeight, topK, colorKey, colorStats, sizeKey, hideIsolated, diffColorFn],
   );
 
   // Reset coupling view when the underlying API data changes (new repo, dims, etc.).

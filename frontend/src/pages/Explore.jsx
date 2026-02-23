@@ -321,7 +321,7 @@ export default function Explore() {
           title={`base: ${compareRepo} → head: ${repoId}`}>
           base {compareRepo.split("@")[1]?.slice(0,7) ?? compareRepo}
         </span>
-        {diffStatusQuery.isLoading && <span style={{ fontSize:11, color:"var(--text3)" }}>loading diff…</span>}
+        {compareRepo && pivotQuery.isFetching && <span style={{ fontSize:11, color:"var(--text3)" }}>loading diff…</span>}
         {diffStats && (
           <span style={{ fontSize:11, color:"var(--text3)" }}>
             <span style={{ color:"#3fb950" }}>+{diffStats.added}</span>

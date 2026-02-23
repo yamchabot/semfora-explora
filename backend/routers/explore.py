@@ -81,6 +81,16 @@ def _annotate_diff(result: dict, dims: list[str], conn, status_map: dict, snap_a
             for row in rows:
                 row["values"]["diff_status_value"] = 0.5
 
+    # For 2-dim pivot (blob mode), children are the actual graph nodes.
+    # Annotate them too so blob-mode coloring works via diff_status_value.
+    for row in rows:
+        for child in row.get("children", []):
+            if "diff_status_value" not in child.get("values", {}):
+                child_vid = child["key"].get("symbol", "")
+                child["values"]["diff_status_value"] = _STATUS_TO_VAL.get(
+                    status_map.get(child_vid), 0.5
+                )
+
     result["measure_types"]["diff_status_value"] = "float"
 
     # ── Edge diff_status ────────────────────────────────────────────────────
