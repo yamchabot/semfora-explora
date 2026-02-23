@@ -217,11 +217,35 @@ export default function GraphRenderer({ data, measures, onNodeClick,
     [graphData.links]
   );
 
-  // Single-select fan-out: BFS forward from the one selected node (depth ≤ fanOutDepth)
-  const bfsDistances = useMemo(() => {
+  // Single-select: BFS in both directions so we see callers AND callees.
+  // fwdDistances  — nodes the selected node reaches (calls)
+  // bwdDistances  — nodes that reach the selected node (callers)
+  // allDistances  — merged (min depth), used for dimming + radial-ring physics
+  const fwdDistances = useMemo(() => {
     if (selectedNodeIds.size !== 1) return new Map();
     return bfsFromNode([...selectedNodeIds][0], fwdAdj, fanOutDepth);
   }, [selectedNodeIds, fwdAdj, fanOutDepth]);
+
+  const bwdDistances = useMemo(() => {
+    if (selectedNodeIds.size !== 1) return new Map();
+    return bfsFromNode([...selectedNodeIds][0], bwdAdj, fanOutDepth);
+  }, [selectedNodeIds, bwdAdj, fanOutDepth]);
+
+  // Merged map: a node is "reachable" if it appears in either direction.
+  // Depth = min(fwd, bwd) so the radial force places nodes on the nearest ring.
+  const allDistances = useMemo(() => {
+    if (selectedNodeIds.size !== 1) return new Map();
+    const merged = new Map(fwdDistances);
+    for (const [id, d] of bwdDistances) {
+      const existing = merged.get(id);
+      if (existing == null || d < existing) merged.set(id, d);
+    }
+    return merged;
+  }, [fwdDistances, bwdDistances, selectedNodeIds]);
+
+  // Keep the old name as an alias so the rest of the file (chain mode etc.)
+  // that still references bfsDistances compiles without a rename sweep.
+  const bfsDistances = allDistances;
 
     // Multi-select chain mode — delegates to findChainEdges in graphAlgo.js
   // (see that module for full algorithm documentation)
@@ -415,7 +439,7 @@ export default function GraphRenderer({ data, measures, onNodeClick,
           />
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:8, fontSize:12 }}>
-          <span style={{ color:"var(--text2)" }} title="Max hops for fan-out (1 node selected) or chain search (2+ nodes, Shift+click)">Max hops:</span>
+          <span style={{ color:"var(--text2)" }} title="Max hops in both directions (1 node selected) or chain search (2+ nodes, Shift+click)">Max hops:</span>
           <input type="number" min={1} max={10} value={fanOutDepth}
             onChange={e => setFanOutDepth(Math.max(1, Math.min(10, +e.target.value || 1)))}
             style={{ width:55, padding:"3px 8px", fontSize:12 }}
@@ -550,7 +574,10 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                 const tgt = typeof link.target === "object" ? link.target.id : link.target;
                 if (selectedNodeIds.size === 0) return Math.log(1 + (link.value||1)) * 0.8 + 0.3;
                 if (selectedNodeIds.size === 1) {
-                  const d = bfsDistances.get(src);
+                  // Bidirectional: forward edge from src, OR backward edge into tgt
+                  const fD = fwdDistances.get(src);
+                  const bD = bwdDistances.get(tgt);
+                  const d  = fD != null && bD != null ? Math.min(fD, bD) : (fD ?? bD);
                   return d != null && d < stepWidths.length ? stepWidths[d] : 0.3;
                 }
                 // Chain mode: width by min chain length (1-indexed step)
@@ -563,7 +590,9 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                 const tgt = typeof link.target === "object" ? link.target.id : link.target;
                 if (selectedNodeIds.size === 0) return "#30363d";
                 if (selectedNodeIds.size === 1) {
-                  const d = bfsDistances.get(src);
+                  const fD = fwdDistances.get(src);
+                  const bD = bwdDistances.get(tgt);
+                  const d  = fD != null && bD != null ? Math.min(fD, bD) : (fD ?? bD);
                   return d != null && d < stepColors.length ? stepColors[d] : "rgba(48,54,61,0.15)";
                 }
                 // Chain mode: color by min chain length covering this edge
@@ -576,7 +605,9 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                 const tgt = typeof link.target === "object" ? link.target.id : link.target;
                 if (selectedNodeIds.size === 0) return 5;
                 if (selectedNodeIds.size === 1) {
-                  const d = bfsDistances.get(src);
+                  const fD = fwdDistances.get(src);
+                  const bD = bwdDistances.get(tgt);
+                  const d  = fD != null && bD != null ? Math.min(fD, bD) : (fD ?? bD);
                   return d != null && d < stepArrows.length ? stepArrows[d] : 2;
                 }
                 const cl = chainEdgeMap.get(`${src}|${tgt}`);
@@ -590,7 +621,8 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                 if (selectedNodeIds.size === 0) return 2;
                 const u = typeof link.source === "object" ? link.source.id : link.source;
                 const v = typeof link.target === "object" ? link.target.id : link.target;
-                if (selectedNodeIds.size === 1) return bfsDistances.has(u) ? 2 : 0;
+                // Bidirectional: lit if edge goes forward from u, or backward into v
+                if (selectedNodeIds.size === 1) return (fwdDistances.has(u) || bwdDistances.has(v)) ? 2 : 0;
                 return chainEdgeMap.has(`${u}|${v}`) ? 2 : 0;
               }}
               linkDirectionalParticleSpeed={0.004}
@@ -598,7 +630,7 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                 if (selectedNodeIds.size === 0) return 3;
                 const u = typeof link.source === "object" ? link.source.id : link.source;
                 const v = typeof link.target === "object" ? link.target.id : link.target;
-                if (selectedNodeIds.size === 1) return bfsDistances.has(u) ? 5 : 0;
+                if (selectedNodeIds.size === 1) return (fwdDistances.has(u) || bwdDistances.has(v)) ? 5 : 0;
                 return chainEdgeMap.has(`${u}|${v}`) ? 5 : 0;
               }}
               linkDirectionalParticleColor={() => "#ffffff"}
