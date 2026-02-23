@@ -1783,6 +1783,12 @@ export default function Explore() {
     return { ...pivotQuery.data, rows: applyFilters(pivotQuery.data.rows, filters) };
   }, [pivotQuery.data, filters]);
 
+  // Keep GraphRenderer mounted through loading cycles so local selection state
+  // (selectedNodeIds) survives measure/kind changes that temporarily null filteredData.
+  const lastFilteredDataRef = useRef(null);
+  if (filteredData) lastFilteredDataRef.current = filteredData;
+  const stableFilteredData = lastFilteredDataRef.current; // non-null after first successful fetch
+
   function addMeasure(m) {
     if (m.special && measures.find(x => x.special === m.special)) return; // no duplicate specials
     setMeasures(p => [...p, m]);
@@ -1901,7 +1907,7 @@ export default function Explore() {
         <GraphNodeDetails
           node={selectedNode}
           measures={measures}
-          types={filteredData?.measure_types || {}}
+          types={(renderer === "graph" ? stableFilteredData : filteredData)?.measure_types || {}}
         />
       )}
       </div>{/* end config row */}
@@ -1934,8 +1940,8 @@ export default function Explore() {
                   <PivotTable data={filteredData} measures={measures}/>
                 </>
               )}
-              {filteredData && renderer==="graph" && (
-                <GraphRenderer data={filteredData} measures={measures} onNodeClick={setSelectedNode}/>
+              {renderer==="graph" && stableFilteredData && (
+                <GraphRenderer data={stableFilteredData} measures={measures} onNodeClick={setSelectedNode}/>
               )}
             </>
           )}
