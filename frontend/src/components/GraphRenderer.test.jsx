@@ -120,20 +120,20 @@ describe("GraphRenderer – controls row", () => {
     expect(setFanOutDepth).toHaveBeenCalled();
   });
 
-  it("hide-isolated button shows 'show isolated' when hideIsolated=false", () => {
+  it("hide-isolated button has correct title when hideIsolated=false", () => {
     render(<GraphRenderer {...defaultProps({ hideIsolated: false })} />);
-    expect(screen.getByText("show isolated")).toBeTruthy();
+    expect(screen.getByTitle(/Hide isolated nodes/)).toBeTruthy();
   });
 
-  it("hide-isolated button shows '✕ isolated hidden' when hideIsolated=true", () => {
+  it("hide-isolated button has correct title when hideIsolated=true", () => {
     render(<GraphRenderer {...defaultProps({ hideIsolated: true })} />);
-    expect(screen.getByText("✕ isolated hidden")).toBeTruthy();
+    expect(screen.getByTitle(/Show isolated nodes/)).toBeTruthy();
   });
 
   it("clicking hide-isolated button calls setHideIsolated", async () => {
     const setHideIsolated = vi.fn();
     render(<GraphRenderer {...defaultProps({ setHideIsolated })} />);
-    await userEvent.click(screen.getByText("show isolated"));
+    await userEvent.click(screen.getByTitle(/Hide isolated nodes/));
     expect(setHideIsolated).toHaveBeenCalledOnce();
   });
 

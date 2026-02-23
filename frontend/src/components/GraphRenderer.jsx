@@ -767,63 +767,56 @@ export default function GraphRenderer({ data, measures, onNodeClick,
             >clear</button>
           </span>
         )}
-        {/* Hide isolated toggle */}
+        {/* ── Icon-only quick toggles ─────────────────────────────────────── */}
+        {/* Each button is a single icon; full description lives in the tooltip. */}
         <button
           onClick={() => setHideIsolated(v => !v)}
-          title="Toggle visibility of nodes with no edges"
-          style={{ fontSize:11, padding:"3px 9px", cursor:"pointer", borderRadius:4,
+          title={hideIsolated ? "Show isolated nodes (currently hidden)" : "Hide isolated nodes (no edges)"}
+          style={{ fontSize:13, padding:"3px 7px", cursor:"pointer", borderRadius:4,
             border:"1px solid var(--border2)",
             background: hideIsolated ? "var(--blue)" : "var(--bg3)",
             color:       hideIsolated ? "#fff"       : "var(--text2)" }}
-        >{hideIsolated ? "✕ isolated hidden" : "show isolated"}</button>
-        {/* Coupling mode — blob mode only */}
+        >⊘</button>
+        {/* Coupling + show-only — blob mode only */}
         {graphData.isBlobMode && (<>
           <button
             onClick={handleCouplingToggle}
             title={couplingIds.size > 0
-              ? "Clear coupling highlight"
-              : `Highlight nodes that call across group boundaries (${crossEdgeSet.size} cross-boundary edges, ${couplingEndpoints.size} endpoints)`}
-            style={{ fontSize:11, padding:"3px 9px", cursor:"pointer", borderRadius:4,
+              ? `Clear coupling (${couplingIds.size} source nodes, ${couplingEndpoints.size} total endpoints, ${crossEdgeSet.size} cross-boundary edges)`
+              : `Highlight cross-boundary callers (${crossEdgeSet.size} edges, ${couplingEndpoints.size} endpoints)`}
+            style={{ fontSize:13, padding:"3px 7px", cursor:"pointer", borderRadius:4,
               border:"1px solid var(--border2)",
               background: couplingIds.size > 0 ? "#ff9f1c" : "var(--bg3)",
               color:       couplingIds.size > 0 ? "#0d1117"  : "var(--text2)" }}
-          >
-            {couplingIds.size > 0
-              ? `✕ coupling (${couplingIds.size} nodes)`
-              : `🔀 coupling`}
-          </button>
-          {/* "Show only" sub-toggle — only visible when coupling is active */}
+          >🔀</button>
           {couplingIds.size > 0 && (
             <button
               onClick={() => setCouplingOnly(o => !o)}
               title={couplingOnly
-                ? `Show full graph (currently showing only ${couplingEndpoints.size} cross-boundary nodes)`
-                : `Show only the ${couplingEndpoints.size} nodes with cross-boundary connections`}
-              style={{ fontSize:11, padding:"3px 9px", cursor:"pointer", borderRadius:4,
+                ? `Show full graph (filtering to ${couplingEndpoints.size} cross-boundary nodes)`
+                : `Filter to ${couplingEndpoints.size} cross-boundary nodes only`}
+              style={{ fontSize:13, padding:"3px 7px", cursor:"pointer", borderRadius:4,
                 border:"1px solid var(--border2)",
                 background: couplingOnly ? "#ff9f1c" : "var(--bg3)",
                 color:       couplingOnly ? "#0d1117"  : "var(--text2)" }}
-            >
-              {couplingOnly ? "✕ show only" : "show only"}
-            </button>
+            >⊂</button>
           )}
         </>)}
-        {/* Search shortcut hint */}
         <button
           onClick={() => setShowSearch(true)}
           title="Search and select nodes by name (/ or ⌘K)"
-          style={{ fontSize:11, padding:"3px 9px", cursor:"pointer", borderRadius:4,
+          style={{ fontSize:13, padding:"3px 7px", cursor:"pointer", borderRadius:4,
             border:"1px solid var(--border2)", background:"var(--bg3)", color:"var(--text2)" }}
-        >🔍 search <kbd style={{ opacity:0.6, fontSize:10 }}>/</kbd></button>
+        >🔍</button>
         <button
           onClick={() => setNodeDot(d => !d)}
-          title={nodeDot ? "Switch to labelled pill nodes" : "Switch to dot nodes (less visual noise for dense graphs)"}
-          style={{ fontSize:11, padding:"3px 9px", cursor:"pointer", borderRadius:4,
+          title={nodeDot ? "Switch back to labelled pill nodes" : "Switch to dot nodes (less visual noise for dense graphs)"}
+          style={{ fontSize:13, padding:"3px 7px", cursor:"pointer", borderRadius:4,
             border:"1px solid var(--border2)",
             background: nodeDot ? "var(--blue)" : "var(--bg3)",
             color:       nodeDot ? "#fff"       : "var(--text2)" }}
-        >{nodeDot ? "⬤ dots" : "⬤ dots"}</button>
-        <span style={{ fontSize:11, color:"var(--text3)" }}>{visibleEdges} / {totalEdges} edges shown</span>
+        >⬤</button>
+        <span style={{ fontSize:11, color:"var(--text3)", whiteSpace:"nowrap" }} title="Visible edges / total edges">{visibleEdges}/{totalEdges} edges</span>
       </div>{/* end inner controls flex */}
       </div>{/* end gradient overlay */}
 
