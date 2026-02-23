@@ -916,13 +916,19 @@ function makeGroupCentroidForce(strength) {
   return force;
 }
 
-function GraphRenderer({ data, measures, onNodeHover }) {
+// Step colors for highlighted edges: 5 steps away from selected node (index = hop distance)
+const STEP_EDGE_COLORS  = ["#ff9500", "#ffb84d", "#ffd280", "#ffeba3", "#fff4cc"];
+const STEP_EDGE_WIDTHS  = [2.8, 2.1, 1.5, 1.0, 0.65];
+const STEP_ARROW_LEN    = [8,   7,   6,   5,   4  ];
+
+function GraphRenderer({ data, measures, onNodeClick }) {
   const containerRef  = useRef(null);
   const fgRef         = useRef(null);
   const [size, setSize]           = useState({ w:800, h:640 });
   const [minWeight, setMinWeight] = useState(1);
   const [topK, setTopK]           = useState(0);
   const [colorKeyOverride, setColorKeyOverride] = useState(null);
+  const [selectedNodeId, setSelectedNodeId]     = useState(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -1033,6 +1039,31 @@ function GraphRenderer({ data, measures, onNodeHover }) {
     return { nodes, links: filterEdges(data.graph_edges, validIds), isBlobMode:false };
   }, [data, minWeight, topK, colorKey, colorStats, sizeKey, dim0, dim1, isBlobMode]);
 
+  // BFS from selectedNodeId following directed edges forward (source → target).
+  // Returns Map<nodeId, hopDistance> for nodes reachable within 5 hops.
+  const bfsDistances = useMemo(() => {
+    if (!selectedNodeId || !graphData.links.length) return new Map();
+    // Build adjacency from directed edges (follow forward direction)
+    const adj = new Map();
+    for (const link of graphData.links) {
+      const src = typeof link.source === "object" ? link.source.id : link.source;
+      const tgt = typeof link.target === "object" ? link.target.id : link.target;
+      if (!adj.has(src)) adj.set(src, []);
+      adj.get(src).push(tgt);
+    }
+    const dist = new Map([[selectedNodeId, 0]]);
+    const queue = [selectedNodeId];
+    while (queue.length) {
+      const cur = queue.shift();
+      const d = dist.get(cur);
+      if (d >= 5) continue;
+      for (const nb of (adj.get(cur) || [])) {
+        if (!dist.has(nb)) { dist.set(nb, d + 1); queue.push(nb); }
+      }
+    }
+    return dist;
+  }, [selectedNodeId, graphData.links]);
+
   useEffect(() => {
     const fg = fgRef.current;
     if (!fg) return;
@@ -1134,29 +1165,46 @@ function GraphRenderer({ data, measures, onNodeHover }) {
               } : undefined}
               nodeCanvasObjectMode={() => "replace"}
               nodeCanvasObject={(node, ctx) => {
+                const isSelected  = node.id === selectedNodeId;
+                const isReachable = selectedNodeId ? bfsDistances.has(node.id) : true;
+
                 // For symbol mode the id is "module::name" — show only the name part
                 const full  = node.name || "";
                 const short = full.includes("::") ? full.split("::").slice(1).join("::") : full;
-                const raw   = short;
-                const label = raw.length > MAX_LABEL ? raw.slice(0, MAX_LABEL - 1) + "…" : raw;
+                const label = short.length > MAX_LABEL ? short.slice(0, MAX_LABEL - 1) + "…" : short;
                 const fs    = 11;
                 ctx.font    = `600 ${fs}px monospace`;
                 const tw    = ctx.measureText(label).width;
                 const padX  = 8, padY = 5;
                 const w     = Math.max(tw + padX * 2, 30);
                 const h     = fs + padY * 2;
+
+                // Dim nodes not reachable from selection
+                ctx.globalAlpha = selectedNodeId ? (isReachable ? 1.0 : 0.18) : 1.0;
+
+                // Selection halo — drawn slightly larger, behind the pill
+                if (isSelected) {
+                  drawPill(ctx, node.x, node.y, w + 7, h + 7);
+                  ctx.strokeStyle = "rgba(255,255,255,0.85)";
+                  ctx.lineWidth   = 2.5;
+                  ctx.stroke();
+                }
+
                 // Pill background
                 drawPill(ctx, node.x, node.y, w, h);
-                ctx.fillStyle = node.color;
+                ctx.fillStyle   = isSelected ? lerpColor(node.color, "#ffffff", 0.25) : node.color;
                 ctx.fill();
-                ctx.strokeStyle = "rgba(255,255,255,0.12)";
-                ctx.lineWidth   = 0.8;
+                ctx.strokeStyle = isSelected ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.12)";
+                ctx.lineWidth   = isSelected ? 1.5 : 0.8;
                 ctx.stroke();
+
                 // Label
                 ctx.fillStyle    = "#0d1117";
                 ctx.textAlign    = "center";
                 ctx.textBaseline = "middle";
                 ctx.fillText(label, node.x, node.y);
+
+                ctx.globalAlpha = 1.0;
                 // Cache dims for pointer detection
                 node.__bckgDimensions = [w, h];
               }}
@@ -1166,11 +1214,34 @@ function GraphRenderer({ data, measures, onNodeHover }) {
                 ctx.fillStyle = color;
                 ctx.fill();
               }}
-              linkWidth={l => Math.log(1+(l.value||1))*0.8+0.3}
-              linkColor={() => "#30363d"}
-              linkDirectionalArrowLength={5}
+              linkWidth={link => {
+                if (!selectedNodeId) return Math.log(1 + (link.value||1)) * 0.8 + 0.3;
+                const src = typeof link.source === "object" ? link.source.id : link.source;
+                const d   = bfsDistances.get(src);
+                if (d == null || d >= STEP_EDGE_WIDTHS.length) return 0.3;
+                return STEP_EDGE_WIDTHS[d];
+              }}
+              linkColor={link => {
+                if (!selectedNodeId) return "#30363d";
+                const src = typeof link.source === "object" ? link.source.id : link.source;
+                const d   = bfsDistances.get(src);
+                if (d == null || d >= STEP_EDGE_COLORS.length) return "rgba(48,54,61,0.15)";
+                return STEP_EDGE_COLORS[d];
+              }}
+              linkDirectionalArrowLength={link => {
+                if (!selectedNodeId) return 5;
+                const src = typeof link.source === "object" ? link.source.id : link.source;
+                const d   = bfsDistances.get(src);
+                if (d == null || d >= STEP_ARROW_LEN.length) return 2;
+                return STEP_ARROW_LEN[d];
+              }}
               linkDirectionalArrowRelPos={1}
-              onNodeHover={onNodeHover}
+              onNodeClick={node => {
+                // Toggle: click selected node again to deselect
+                const next = node?.id === selectedNodeId ? null : (node?.id ?? null);
+                setSelectedNodeId(next);
+                onNodeClick?.(next ? node : null);
+              }}
               backgroundColor="#0d1117"
             />
           ) : (
@@ -1241,7 +1312,7 @@ function GraphNodeDetails({ node, measures, types }) {
         </>
       ) : (
         <div style={{ color:"var(--text3)", fontSize:12, textAlign:"center", paddingTop:30 }}>
-          Hover a node<br/>to see details
+          Click a node<br/>to see details
         </div>
       )}
     </div>
@@ -1373,7 +1444,7 @@ export default function Explore() {
   const [filters,          setFilters]          = useState(() =>
     parseFiltersParam(searchParams.get("f"))
   );
-  const [hoveredGraphNode, setHoveredGraphNode] = useState(null);
+  const [selectedNode, setSelectedNode] = useState(null);
 
   // DnD sensors — require 5px of movement before activating so clicks still work
   const dndSensors = useSensors(
@@ -1596,7 +1667,7 @@ export default function Explore() {
       {/* Node details panel — visible in graph mode */}
       {renderer === "graph" && (
         <GraphNodeDetails
-          node={hoveredGraphNode}
+          node={selectedNode}
           measures={measures}
           types={filteredData?.measure_types || {}}
         />
@@ -1632,7 +1703,7 @@ export default function Explore() {
                 </>
               )}
               {filteredData && renderer==="graph" && (
-                <GraphRenderer data={filteredData} measures={measures} onNodeHover={setHoveredGraphNode}/>
+                <GraphRenderer data={filteredData} measures={measures} onNodeClick={setSelectedNode}/>
               )}
             </>
           )}
