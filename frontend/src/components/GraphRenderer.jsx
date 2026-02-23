@@ -148,7 +148,10 @@ export default function GraphRenderer({ data, measures, onNodeClick,
   minWeight, setMinWeight, topK, setTopK,
   colorKeyOverride, setColorKeyOverride, fanOutDepth, setFanOutDepth,
   selectedNodeIds, setSelectedNodeIds, hideIsolated, setHideIsolated,
-  controlsH = 0, fillViewport = false }) {
+  controlsH = 0, fillViewport = false,
+  nodeColorOverrides = null,   // Map<nodeId, cssColor> — bypasses metric gradient
+  edgeColorOverrides = null,   // Map<"src|tgt", cssColor> — bypasses step/chain colors
+}) {
   const containerRef  = useRef(null);
   const fgRef         = useRef(null);
   const [size, setSize] = useState({
@@ -638,8 +641,9 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                 }
 
                 // Pill background
+                const baseColor = nodeColorOverrides?.get(node.id) ?? node.color;
                 drawPill(ctx, node.x, node.y, w, h);
-                ctx.fillStyle   = isSelected ? lerpColor(node.color, "#ffffff", 0.25) : node.color;
+                ctx.fillStyle   = isSelected ? lerpColor(baseColor, "#ffffff", 0.25) : baseColor;
                 ctx.fill();
                 ctx.strokeStyle = isSelected ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.12)";
                 ctx.lineWidth   = isSelected ? 1.5 : 0.8;
@@ -686,6 +690,9 @@ export default function GraphRenderer({ data, measures, onNodeClick,
               linkColor={link => {
                 const src = typeof link.source === "object" ? link.source.id : link.source;
                 const tgt = typeof link.target === "object" ? link.target.id : link.target;
+                // Diff overlay: always use diff edge color when provided
+                const edgeOverride = edgeColorOverrides?.get(`${src}|${tgt}`);
+                if (edgeOverride) return edgeOverride;
                 if (selectedNodeIds.size === 0) {
                   if (couplingIds.size > 0) {
                     // Cyan for cross-boundary; nearly invisible for within-group
@@ -727,16 +734,18 @@ export default function GraphRenderer({ data, measures, onNodeClick,
               linkDirectionalParticles={link => {
                 // Control particle count per-link so the library doesn't freeze
                 // them when selection state changes. 0 = no particles at all.
-                if (selectedNodeIds.size === 0) {
-                  if (couplingIds.size > 0) {
-                    const u = typeof link.source === "object" ? link.source.id : link.source;
-                    const v = typeof link.target === "object" ? link.target.id : link.target;
-                    return crossEdgeSet.has(`${u}|${v}`) ? 3 : 0;
-                  }
-                  return 2;
-                }
                 const u = typeof link.source === "object" ? link.source.id : link.source;
                 const v = typeof link.target === "object" ? link.target.id : link.target;
+                // Diff overlay: show particles on added/removed edges (not unchanged/context)
+                if (edgeColorOverrides?.size > 0) {
+                  const ec = edgeColorOverrides.get(`${u}|${v}`);
+                  if (ec && ec !== "#30363d" && ec !== "#484f58") return 2;
+                  return 0;
+                }
+                if (selectedNodeIds.size === 0) {
+                  if (couplingIds.size > 0) return crossEdgeSet.has(`${u}|${v}`) ? 3 : 0;
+                  return 2;
+                }
                 // Bidirectional: lit if edge goes forward from u, or backward into v
                 if (selectedNodeIds.size === 1) return (fwdDistances.has(u) || bwdDistances.has(v)) ? 2 : 0;
                 return chainEdgeMap.has(`${u}|${v}`) ? 2 : 0;
@@ -757,9 +766,11 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                 return chainEdgeMap.has(`${u}|${v}`) ? 5 : 0;
               }}
               linkDirectionalParticleColor={link => {
+                const u = typeof link.source === "object" ? link.source.id : link.source;
+                const v = typeof link.target === "object" ? link.target.id : link.target;
+                const edgeOverride = edgeColorOverrides?.get(`${u}|${v}`);
+                if (edgeOverride) return edgeOverride;
                 if (selectedNodeIds.size === 0 && couplingIds.size > 0) {
-                  const u = typeof link.source === "object" ? link.source.id : link.source;
-                  const v = typeof link.target === "object" ? link.target.id : link.target;
                   return crossEdgeSet.has(`${u}|${v}`) ? "#39c5cf" : "#ffffff";
                 }
                 return "#ffffff";

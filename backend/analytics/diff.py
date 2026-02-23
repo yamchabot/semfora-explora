@@ -79,11 +79,13 @@ def compute_diff_graph(
     bv_a, bh_a = keyed_by_vid(nodes_a)
     bv_b, bh_b = keyed_by_vid(nodes_b)
 
-    added_vids   = set(bv_b) - set(bv_a)
-    removed_vids = set(bv_a) - set(bv_b)
-    changed_vids = added_vids | removed_vids
+    added_vids    = set(bv_b) - set(bv_a)
+    removed_vids  = set(bv_a) - set(bv_b)
+    common_vids   = set(bv_a) & set(bv_b)
+    modified_vids = {v for v in common_vids if bv_a[v]["hash"] != bv_b[v]["hash"]}
+    changed_vids  = added_vids | removed_vids | modified_vids
 
-    # Unified node lookup (prefer B for added, A for removed)
+    # Unified node lookup (prefer B for added/modified, A for removed)
     all_info = {**{v: n for v, n in bv_a.items()}, **{v: n for v, n in bv_b.items()}}
 
     def adjacency(edges, hash_map):
@@ -115,20 +117,23 @@ def compute_diff_graph(
         return nbrs
 
     context = set()
-    context |= top_neighbors(added_vids,   cal_b, max_context)
-    context |= top_neighbors(added_vids,   cee_b, max_context)
-    context |= top_neighbors(removed_vids, cal_a, max_context)
-    context |= top_neighbors(removed_vids, cee_a, max_context)
+    context |= top_neighbors(added_vids,    cal_b, max_context)
+    context |= top_neighbors(added_vids,    cee_b, max_context)
+    context |= top_neighbors(removed_vids,  cal_a, max_context)
+    context |= top_neighbors(removed_vids,  cee_a, max_context)
+    context |= top_neighbors(modified_vids, cal_b, max_context // 2 + 1)
+    context |= top_neighbors(modified_vids, cee_b, max_context // 2 + 1)
 
-    all_vids = added_vids | removed_vids | context
+    all_vids = added_vids | removed_vids | modified_vids | context
     if len(all_vids) > max_nodes:
         ctx_sorted = sorted(context, key=lambda v: -all_info.get(v, {}).get("caller_count", 0))
-        context = set(ctx_sorted[:max_nodes - len(changed_vids)])
-        all_vids = added_vids | removed_vids | context
+        context = set(ctx_sorted[:max(0, max_nodes - len(changed_vids))])
+        all_vids = added_vids | removed_vids | modified_vids | context
 
     def status(v):
-        if v in added_vids:   return "added"
-        if v in removed_vids: return "removed"
+        if v in added_vids:    return "added"
+        if v in removed_vids:  return "removed"
+        if v in modified_vids: return "modified"
         return "context"
 
     def edge_vids_set(edges, hash_map):
@@ -167,11 +172,12 @@ def compute_diff_graph(
         "nodes": nodes_out,
         "edges": edges_out,
         "stats": {
-            "added":         len(added_vids),
-            "removed":       len(removed_vids),
-            "context":       len(context),
-            "edge_added":    len(ev_b - ev_a),
-            "edge_removed":  len(ev_a - ev_b),
+            "added":          len(added_vids),
+            "removed":        len(removed_vids),
+            "modified":       len(modified_vids),
+            "context":        len(context),
+            "edge_added":     len(ev_b - ev_a),
+            "edge_removed":   len(ev_a - ev_b),
             "edge_unchanged": len(ev_a & ev_b),
         },
     }
