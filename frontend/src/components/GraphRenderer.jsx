@@ -1136,7 +1136,7 @@ export default function GraphRenderer({ data, measures, onNodeClick,
               backgroundColor="#0d1117"
             />
           ) : (
-            <div style={{ height:520, display:"flex", alignItems:"center", justifyContent:"center", color:"var(--text3)" }}>
+            <div style={{ height:size.h, display:"flex", alignItems:"center", justifyContent:"center", color:"var(--text3)" }}>
               No nodes to display.
             </div>
           )}

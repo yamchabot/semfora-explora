@@ -71,7 +71,7 @@ export default function Explore() {
   const [configOpen,    setConfigOpen]    = useState(true);
   const closeTimerRef = useRef(null);
 
-  function startCloseTimer()  { closeTimerRef.current = setTimeout(() => setConfigOpen(false), 30000); }
+  function startCloseTimer()  { closeTimerRef.current = setTimeout(() => setConfigOpen(false), 5000); }
   function cancelCloseTimer() { clearTimeout(closeTimerRef.current); }
   const configCardRef                   = useRef(null);
   const [controlsRect, setControlsRect] = useState({ width: 0, height: 0 });
@@ -465,14 +465,15 @@ export default function Explore() {
         </div>
       )}
 
-      {/* Collapsible config dropdown — top-left, auto-closes after 30s idle */}
+      {/* Collapsible config dropdown — top-left, opens on hover, auto-closes 5s after mouse leaves */}
       <div
         style={{ position:"absolute", top:12, left:12, zIndex:20 }}
         onMouseEnter={cancelCloseTimer}
         onMouseLeave={startCloseTimer}
       >
-        {/* Toggle button */}
+        {/* Toggle button — opens on hover; click still toggles for explicit pin/close */}
         <button
+          onMouseEnter={() => { setConfigOpen(true); cancelCloseTimer(); }}
           onClick={() => { setConfigOpen(v => !v); cancelCloseTimer(); }}
           style={{ fontSize:12, padding:"5px 12px", cursor:"pointer", borderRadius:6,
             border:"1px solid var(--border2)", background:"var(--bg2)",
