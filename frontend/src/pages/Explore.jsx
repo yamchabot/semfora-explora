@@ -954,6 +954,52 @@ function bfsFromNode(start, adj, maxD) {
   return dist;
 }
 
+/**
+ * Single-select physics: pull BFS-reachable nodes to concentric rings around the
+ * pinned selected node (depth 1 → radius radiusPer, depth 2 → 2×radiusPer, …).
+ */
+function makeSelectionRadialForce(selectedId, bfsDists, radiusPer) {
+  let simNodes = [];
+  function force(alpha) {
+    const sel = simNodes.find(n => n.id === selectedId);
+    if (!sel || sel.x == null) return;
+    for (const n of simNodes) {
+      if (n.id === selectedId || n.x == null) continue;
+      const depth = bfsDists.get(n.id);
+      if (depth == null) continue;
+      const dx = n.x - sel.x, dy = n.y - sel.y;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 0.001;
+      const target = depth * radiusPer;
+      const k = alpha * 0.18;
+      n.vx += (dx / dist) * (target - dist) * k;
+      n.vy += (dy / dist) * (target - dist) * k;
+    }
+  }
+  force.initialize = ns => { simNodes = ns; };
+  return force;
+}
+
+/**
+ * Multi-select physics: pull chain nodes toward the centroid of all selected nodes,
+ * with strength proportional to alpha.
+ */
+function makeChainCentroidForce(selectedIds, chainIds) {
+  let simNodes = [];
+  function force(alpha) {
+    const sels = simNodes.filter(n => selectedIds.has(n.id) && n.x != null);
+    if (!sels.length) return;
+    const cx = sels.reduce((s, n) => s + n.x, 0) / sels.length;
+    const cy = sels.reduce((s, n) => s + n.y, 0) / sels.length;
+    for (const n of simNodes) {
+      if (selectedIds.has(n.id) || !chainIds.has(n.id) || n.x == null) continue;
+      n.vx += (cx - n.x) * alpha * 0.1;
+      n.vy += (cy - n.y) * alpha * 0.1;
+    }
+  }
+  force.initialize = ns => { simNodes = ns; };
+  return force;
+}
+
 function GraphRenderer({ data, measures, onNodeClick }) {
   const containerRef  = useRef(null);
   const fgRef         = useRef(null);
@@ -1148,6 +1194,59 @@ function GraphRenderer({ data, measures, onNodeClick }) {
     fg.d3Force("groupCentroid", graphData.isBlobMode ? makeGroupCentroidForce(0.1) : null);
     fg.d3ReheatSimulation?.();
   }, [graphData]);
+
+  // ── Selection-driven physics ────────────────────────────────────────────────
+  useEffect(() => {
+    const fg = fgRef.current;
+    if (!fg) return;
+
+    // Unpin every node first
+    for (const n of graphData.nodes) { delete n.fx; delete n.fy; }
+
+    const linkForce = fg.d3Force("link");
+
+    if (selectedNodeIds.size === 1) {
+      const selId = [...selectedNodeIds][0];
+      const selNode = graphData.nodes.find(n => n.id === selId);
+      // Pin the selected node so reachable nodes fan out around it
+      if (selNode?.x != null) { selNode.fx = selNode.x; selNode.fy = selNode.y; }
+
+      fg.d3Force("selRadial",    makeSelectionRadialForce(selId, bfsDistances, 110));
+      fg.d3Force("chainCentroid", null);
+      // Restore uniform link distances (chain mode may have changed them)
+      if (linkForce) linkForce.distance(120).strength(0.5);
+
+    } else if (selectedNodeIds.size >= 2) {
+      // Pin each selected node so they act as stable poles
+      for (const selId of selectedNodeIds) {
+        const sn = graphData.nodes.find(n => n.id === selId);
+        if (sn?.x != null) { sn.fx = sn.x; sn.fy = sn.y; }
+      }
+      fg.d3Force("chainCentroid", makeChainCentroidForce(selectedNodeIds, chainNodeIds));
+      fg.d3Force("selRadial", null);
+      // Chain edges pull tight; non-chain edges get slack → bridge effect
+      if (linkForce) {
+        linkForce.distance(link => {
+          const u = link.source?.id ?? link.source;
+          const v = link.target?.id ?? link.target;
+          return chainEdgeMap.has(`${u}|${v}`) ? 45 : 200;
+        }).strength(link => {
+          const u = link.source?.id ?? link.source;
+          const v = link.target?.id ?? link.target;
+          return chainEdgeMap.has(`${u}|${v}`) ? 0.8 : 0.08;
+        });
+      }
+
+    } else {
+      // No selection — restore defaults
+      fg.d3Force("selRadial",    null);
+      fg.d3Force("chainCentroid", null);
+      if (linkForce) linkForce.distance(120).strength(0.5);
+    }
+
+    fg.d3ReheatSimulation?.();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedNodeIds, bfsDistances, chainNodeIds, chainEdgeMap]);
 
   const totalEdges   = data?.graph_edges?.length || 0;
   const visibleEdges = graphData.links.length;
