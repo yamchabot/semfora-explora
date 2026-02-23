@@ -22,23 +22,30 @@ AVAILABLE_DIMENSIONS: dict[str, str] = {
     "dead":       "CASE WHEN n.caller_count = 0 THEN 'dead' ELSE 'alive' END",
     "high_risk":  "CASE WHEN n.risk IN ('high','critical') THEN 'high-risk' ELSE 'normal' END",
     "in_cycle":   "CASE WHEN COALESCE(nf.scc_size, 1) > 1 THEN 'in-cycle' ELSE 'clean' END",
+    # Community dims (Louvain — stored in node_features during enrichment)
+    "community_dominant_mod":  "nf.community_dominant_mod",
+    "community_alignment":     "CASE WHEN COALESCE(nf.community_alignment, 1) = 1 THEN 'aligned' ELSE 'misaligned' END",
 }
 
 # Dims that require node_features JOIN
-_ENRICHED_DIMS = {"in_cycle"}
+_ENRICHED_DIMS = {"in_cycle", "community_dominant_mod", "community_alignment"}
 
 # For graph edge queries we need the n1/n2-prefixed versions
 _DIM_SRC = {
-    "module": "n1.module",
-    "risk":   "n1.risk",
-    "kind":   "n1.kind",
-    "symbol": "n1.module || '::' || n1.name",
+    "module":                "n1.module",
+    "risk":                  "n1.risk",
+    "kind":                  "n1.kind",
+    "symbol":                "n1.module || '::' || n1.name",
+    # Enriched dims — require LEFT JOIN node_features nf1 ON n1.hash = nf1.hash
+    "community_dominant_mod": "nf1.community_dominant_mod",
 }
 _DIM_TGT = {
-    "module": "n2.module",
-    "risk":   "n2.risk",
-    "kind":   "n2.kind",
-    "symbol": "n2.module || '::' || n2.name",
+    "module":                "n2.module",
+    "risk":                  "n2.risk",
+    "kind":                  "n2.kind",
+    "symbol":                "n2.module || '::' || n2.name",
+    # Enriched dims — require LEFT JOIN node_features nf2 ON n2.hash = nf2.hash
+    "community_dominant_mod": "nf2.community_dominant_mod",
 }
 
 # ── Bucketed dimensions (field:mode → CASE expression) ────────────────────────
@@ -543,6 +550,13 @@ def fetch_graph_edges(
     src = _DIM_SRC[dimension]
     tgt = _DIM_TGT[dimension]
 
+    # Auto-add node_features join when the dim expression references nf1/nf2
+    nf_join = (
+        "LEFT JOIN node_features nf1 ON n1.hash = nf1.hash "
+        "LEFT JOIN node_features nf2 ON n2.hash = nf2.hash"
+        if ("nf1." in src or "nf2." in tgt) else ""
+    )
+
     kc_src, kp_src = _kinds_clause(kinds, alias="n1")
     kc_tgt, kp_tgt = _kinds_clause(kinds, alias="n2")
 
@@ -551,6 +565,7 @@ def fetch_graph_edges(
         f"FROM edges e "
         f"JOIN nodes n1 ON e.caller_hash = n1.hash "
         f"JOIN nodes n2 ON e.callee_hash = n2.hash "
+        f"{nf_join} "
         f"WHERE n1.hash NOT LIKE 'ext:%' "
         f"  AND n2.hash NOT LIKE 'ext:%' "
         f"  AND {src} IS NOT NULL AND {tgt} IS NOT NULL "
@@ -567,11 +582,13 @@ def fetch_graph_edges(
 
 # Simple dims that have bounded cardinality and are useful for value-picker filters
 _PICKER_DIMS = {
-    "module":    "n.module",
-    "risk":      "n.risk",
-    "kind":      "n.kind",
-    "dead":      "CASE WHEN n.caller_count = 0 THEN 'dead' ELSE 'alive' END",
-    "high_risk": "CASE WHEN n.risk IN ('high','critical') THEN 'high-risk' ELSE 'normal' END",
+    "module":                "n.module",
+    "risk":                  "n.risk",
+    "kind":                  "n.kind",
+    "dead":                  "CASE WHEN n.caller_count = 0 THEN 'dead' ELSE 'alive' END",
+    "high_risk":             "CASE WHEN n.risk IN ('high','critical') THEN 'high-risk' ELSE 'normal' END",
+    "community_dominant_mod":  "nf.community_dominant_mod",
+    "community_alignment":     "CASE WHEN COALESCE(nf.community_alignment, 1) = 1 THEN 'aligned' ELSE 'misaligned' END",
 }
 
 
@@ -585,10 +602,15 @@ def fetch_dim_values(
     regardless of what Group By dims are currently active.
     """
     kc, kp = _kinds_clause(kinds)
+    has_nf = _has_node_features(conn)
     result: dict[str, list[str]] = {}
     for dim, expr in _PICKER_DIMS.items():
+        # Skip enriched picker dims when node_features isn't available
+        if "nf." in expr and not has_nf:
+            continue
+        nf_join = "LEFT JOIN node_features nf ON n.hash = nf.hash" if "nf." in expr else ""
         rows = conn.execute(
-            f"SELECT DISTINCT ({expr}) AS v FROM nodes n "
+            f"SELECT DISTINCT ({expr}) AS v FROM nodes n {nf_join} "
             f"WHERE n.hash NOT LIKE 'ext:%' AND ({expr}) IS NOT NULL {kc} "
             f"ORDER BY v",
             kp,

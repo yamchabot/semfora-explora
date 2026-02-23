@@ -442,13 +442,15 @@ function parseBucketedDim(d) {
 }
 
 const DIM_LABELS = {
-  module:    "module",
-  risk:      "risk",
-  kind:      "kind",
-  symbol:    "symbol",
-  dead:      "dead/alive",
-  high_risk: "high-risk",
-  in_cycle:  "in-cycle ✦",
+  module:                  "module",
+  risk:                    "risk",
+  kind:                    "kind",
+  symbol:                  "symbol",
+  dead:                    "dead/alive",
+  high_risk:               "high-risk",
+  in_cycle:                "in-cycle ✦",
+  community_dominant_mod:  "community (inferred) ✦",
+  community_alignment:     "aligned/misaligned ✦",
 };
 
 function dimDisplayLabel(d) {
@@ -1468,12 +1470,29 @@ export default function Explore() {
     return k ? k.split(",").filter(Boolean) : [];
   });
   const [renderer,         setRenderer]         = useState(() =>
-    searchParams.get("v") || "pivot"
+    searchParams.get("v") || "graph"
   );
   const [filters,          setFilters]          = useState(() =>
     parseFiltersParam(searchParams.get("f"))
   );
   const [selectedNode, setSelectedNode] = useState(null);
+  const [sidebarOpen, setSidebarOpen]   = useState(true);
+  const configCardRef                   = useRef(null);
+  const [controlsRect, setControlsRect] = useState({ width: 0, height: 0 });
+
+  // Measure the floating config card so GraphRenderer can offset its center
+  useEffect(() => {
+    if (!configCardRef.current) {
+      setControlsRect({ width: 0, height: 0 });
+      return;
+    }
+    const obs = new ResizeObserver(() => {
+      const r = configCardRef.current?.getBoundingClientRect();
+      if (r) setControlsRect({ width: r.width, height: r.height });
+    });
+    obs.observe(configCardRef.current);
+    return () => obs.disconnect();
+  }, [sidebarOpen]); // re-run when card appears/disappears
 
   // DnD sensors — require 5px of movement before activating so clicks still work
   const dndSensors = useSensors(
@@ -1547,7 +1566,8 @@ export default function Explore() {
 
   const hasEnriched = pivotQuery.data?.has_enriched ?? false;
 
-  const allDims       = ["module", "risk", "kind", "symbol", "dead", "high_risk", "in_cycle"];
+  const allDims       = ["module", "risk", "kind", "symbol", "dead", "high_risk", "in_cycle",
+                         "community_dominant_mod", "community_alignment"];
   const availableDims = allDims.filter(d => !dims.includes(d));
 
   // Distinct dimension values for filter chips.
