@@ -1312,23 +1312,31 @@ function GraphRenderer({ data, measures, onNodeClick }) {
   }, [selectedNodeIds, bfsDistances, chainNodeIds, chainEdgeMap]);
 
   // ── Trackpad pan support ────────────────────────────────────────────────────
-  // d3-zoom captures ALL wheel events for zoom. We intercept in the capture
-  // phase before d3 sees it: two-finger scroll (no ctrlKey) → pan;
-  // pinch gesture (macOS reports as ctrlKey+wheel) → let d3 handle for zoom.
+  // d3-zoom captures ALL wheel events for zoom. We intercept only trackpad
+  // two-finger scroll (deltaMode===0, no ctrlKey) for panning.
+  // Mouse wheel (deltaMode===1) and pinch-to-zoom (ctrlKey) pass through to d3.
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const onWheel = (e) => {
-      if (e.ctrlKey) return; // pinch-to-zoom — d3 handles this
+      // pinch-to-zoom (macOS reports ctrlKey+wheel) — let d3 handle
+      if (e.ctrlKey) return;
+      // Mouse wheel (line/page deltaMode) — let d3 handle for zooming
+      if (e.deltaMode !== 0) return;
+      // Trackpad two-finger scroll (pixel deltaMode, no ctrlKey) → pan
       e.preventDefault();
       e.stopPropagation();
       const fg = fgRef.current;
       if (!fg) return;
       const { k, x, y } = zoomTransformRef.current;
       if (!k) return;
+      // Cap individual delta to avoid momentum-scroll explosions
+      const MAX_DELTA = 80;
+      const dx = Math.max(-MAX_DELTA, Math.min(MAX_DELTA, e.deltaX));
+      const dy = Math.max(-MAX_DELTA, Math.min(MAX_DELTA, e.deltaY));
       // Optimistic update so rapid successive events have the right baseline
-      const newX = x - e.deltaX;
-      const newY = y - e.deltaY;
+      const newX = x - dx;
+      const newY = y - dy;
       zoomTransformRef.current = { k, x: newX, y: newY };
       // Convert screen-space offset to graph-space center and pan
       fg.centerAt((size.w / 2 - newX) / k, (size.h / 2 - newY) / k, 0);
@@ -1538,10 +1546,17 @@ function GraphRenderer({ data, measures, onNodeClick }) {
                 return stepArrows[Math.min(cl - 1, stepArrows.length - 1)];
               }}
               linkDirectionalArrowRelPos={1}
-              linkDirectionalParticles={2}
+              linkDirectionalParticles={link => {
+                // Control particle count per-link so the library doesn't freeze
+                // them when selection state changes. 0 = no particles at all.
+                if (selectedNodeIds.size === 0) return 2;
+                const u = typeof link.source === "object" ? link.source.id : link.source;
+                const v = typeof link.target === "object" ? link.target.id : link.target;
+                if (selectedNodeIds.size === 1) return bfsDistances.has(u) ? 2 : 0;
+                return chainEdgeMap.has(`${u}|${v}`) ? 2 : 0;
+              }}
               linkDirectionalParticleSpeed={0.004}
               linkDirectionalParticleWidth={link => {
-                // Show particles only on highlighted edges so they don't clutter the full graph
                 if (selectedNodeIds.size === 0) return 2;
                 const u = typeof link.source === "object" ? link.source.id : link.source;
                 const v = typeof link.target === "object" ? link.target.id : link.target;
