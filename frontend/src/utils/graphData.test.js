@@ -482,3 +482,427 @@ describe("Layer 2 – d3-force: makeSelectionRadialForce", () => {
     expect(dist2d(d2, sel)).toBeGreaterThan(dist2d(d1a, sel) * 0.7);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// N-dim nested blob tests
+// ─────────────────────────────────────────────────────────────────────────────
+import { flattenLeafRows, getGroupKey } from "./graphData.js";
+
+// ── Shared 3-dim fixture ──────────────────────────────────────────────────────
+// dims = [module, class, symbol]  →  3 levels: module > class > symbol
+
+function threeDimData(overrides = {}) {
+  return {
+    dimensions: ["module", "class", "symbol"],
+    rows: [
+      {
+        key: { module: "core" }, depth: 0,
+        values: { symbol_count: 4 },
+        children: [
+          {
+            key: { module: "core", class: "Parser" }, depth: 1,
+            values: { symbol_count: 2 },
+            children: [
+              { key: { module: "core", class: "Parser", symbol: "core::parse" },   depth: 2, values: { symbol_count: 1, dead_ratio: 0.0 }, children: [] },
+              { key: { module: "core", class: "Parser", symbol: "core::validate" },depth: 2, values: { symbol_count: 1, dead_ratio: 1.0 }, children: [] },
+            ],
+          },
+          {
+            key: { module: "core", class: "Builder" }, depth: 1,
+            values: { symbol_count: 2 },
+            children: [
+              { key: { module: "core", class: "Builder", symbol: "core::build" },  depth: 2, values: { symbol_count: 1, dead_ratio: 0.5 }, children: [] },
+              { key: { module: "core", class: "Builder", symbol: "core::emit" },   depth: 2, values: { symbol_count: 1, dead_ratio: 0.5 }, children: [] },
+            ],
+          },
+        ],
+      },
+      {
+        key: { module: "auth" }, depth: 0,
+        values: { symbol_count: 2 },
+        children: [
+          {
+            key: { module: "auth", class: "Session" }, depth: 1,
+            values: { symbol_count: 2 },
+            children: [
+              { key: { module: "auth", class: "Session", symbol: "auth::login" },  depth: 2, values: { symbol_count: 1, dead_ratio: 0.0 }, children: [] },
+              { key: { module: "auth", class: "Session", symbol: "auth::logout" }, depth: 2, values: { symbol_count: 1, dead_ratio: 0.0 }, children: [] },
+            ],
+          },
+        ],
+      },
+    ],
+    leaf_graph_edges: [
+      { source: "core::parse",   target: "core::validate", weight: 3 },
+      { source: "core::build",   target: "auth::login",    weight: 1 },
+    ],
+    ...overrides,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// flattenLeafRows
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("flattenLeafRows", () => {
+  it("returns empty for null/empty input", () => {
+    expect(flattenLeafRows(null, 2)).toEqual([]);
+    expect(flattenLeafRows([], 2)).toEqual([]);
+  });
+
+  it("2-dim: returns direct children (depth-1 rows)", () => {
+    const data = blobDimData();
+    const leaves = flattenLeafRows(data.rows, 2);
+    const ids = leaves.map(r => r.key.community).sort();
+    expect(ids).toEqual(["c1", "c2", "c2", "c3"]); // c2 appears in both modules
+  });
+
+  it("2-dim: leaf key has both dims", () => {
+    const data = blobDimData();
+    const leaves = flattenLeafRows(data.rows, 2);
+    for (const r of leaves) {
+      expect(Object.keys(r.key)).toContain("module");
+      expect(Object.keys(r.key)).toContain("community");
+    }
+  });
+
+  it("3-dim: returns depth-2 rows", () => {
+    const data = threeDimData();
+    const leaves = flattenLeafRows(data.rows, 3);
+    expect(leaves).toHaveLength(6); // core×2+core×2+auth×2
+    for (const r of leaves) {
+      expect(r.key).toHaveProperty("module");
+      expect(r.key).toHaveProperty("class");
+      expect(r.key).toHaveProperty("symbol");
+    }
+  });
+
+  it("3-dim: leaf symbol values match fixture", () => {
+    const data = threeDimData();
+    const leaves = flattenLeafRows(data.rows, 3);
+    const symbols = leaves.map(r => r.key.symbol).sort();
+    expect(symbols).toEqual([
+      "auth::login", "auth::logout",
+      "core::build", "core::emit",
+      "core::parse", "core::validate",
+    ]);
+  });
+
+  it("skips intermediate rows with no children", () => {
+    const data = blobDimData();
+    delete data.rows[0].children; // auth has no children
+    const leaves = flattenLeafRows(data.rows, 2);
+    // Only core's children survive
+    expect(leaves.map(r => r.key.community).sort()).toEqual(["c2", "c3"]);
+  });
+
+  it("handles deeply nested missing children gracefully", () => {
+    const data = threeDimData();
+    // Remove a class-level child's children
+    data.rows[0].children[0].children = [];
+    const leaves = flattenLeafRows(data.rows, 3);
+    // core::Parser missing → 2 + 2 = 4 leaves remain
+    expect(leaves).toHaveLength(4);
+  });
+
+  it("1-dim: returns top-level rows themselves", () => {
+    const data = singleDimData();
+    const leaves = flattenLeafRows(data.rows, 1);
+    expect(leaves).toHaveLength(3);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getGroupKey
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("getGroupKey", () => {
+  const node2 = { group: "core",   groupPath: ["core"] };
+  const node3 = { group: "core",   groupPath: ["core", "Parser"] };
+  const node4 = { group: "module", groupPath: ["module", "classA", "subA"] };
+
+  it("level 0 returns outermost group (same as node.group)", () => {
+    expect(getGroupKey(node2, 0)).toBe("core");
+    expect(getGroupKey(node3, 0)).toBe("core");
+  });
+
+  it("level 1 joins first two path entries with ::", () => {
+    expect(getGroupKey(node3, 1)).toBe("core::Parser");
+    expect(getGroupKey(node4, 1)).toBe("module::classA");
+  });
+
+  it("level 2 joins three path entries", () => {
+    expect(getGroupKey(node4, 2)).toBe("module::classA::subA");
+  });
+
+  it("falls back to node.group when groupPath absent", () => {
+    const nodeNoPath = { group: "fallback" };
+    expect(getGroupKey(nodeNoPath, 0)).toBe("fallback");
+    expect(getGroupKey(nodeNoPath, 1)).toBe("fallback");
+  });
+
+  it("falls back to node.group when level exceeds groupPath length", () => {
+    expect(getGroupKey(node2, 5)).toBe("core");
+  });
+
+  it("returns empty string when group is undefined and no groupPath", () => {
+    expect(getGroupKey({}, 0)).toBe("");
+  });
+
+  it("different classes in same module have distinct level-1 keys", () => {
+    const n1 = { group: "core", groupPath: ["core", "Parser"] };
+    const n2 = { group: "core", groupPath: ["core", "Builder"] };
+    expect(getGroupKey(n1, 0)).toBe(getGroupKey(n2, 0)); // same outer group
+    expect(getGroupKey(n1, 1)).not.toBe(getGroupKey(n2, 1)); // different inner
+  });
+
+  it("same key at level L for nodes in same sub-group", () => {
+    const n1 = { group: "core", groupPath: ["core", "Parser"] };
+    const n2 = { group: "core", groupPath: ["core", "Parser"] };
+    expect(getGroupKey(n1, 1)).toBe(getGroupKey(n2, 1));
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// buildGraphData – 3-dim nested blob mode
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("buildGraphData – 3-dim nested blob mode", () => {
+  const OPTS = { sizeKey: "symbol_count", colorKey: "dead_ratio", colorStats: { min: 0, max: 1 } };
+
+  it("isBlobMode is true for 3 dims", () => {
+    const g = buildGraphData(threeDimData(), OPTS);
+    expect(g.isBlobMode).toBe(true);
+  });
+
+  it("nodes are leaf-dim (symbol) values, not module or class", () => {
+    const g = buildGraphData(threeDimData(), OPTS);
+    const ids = g.nodes.map(n => n.id).sort();
+    expect(ids).toEqual([
+      "auth::login", "auth::logout",
+      "core::build", "core::emit",
+      "core::parse", "core::validate",
+    ]);
+  });
+
+  it("each node has groupPath of length N-1 = 2", () => {
+    const g = buildGraphData(threeDimData(), OPTS);
+    for (const n of g.nodes) {
+      expect(n.groupPath).toHaveLength(2);
+    }
+  });
+
+  it("groupPath[0] equals the module (outermost dim)", () => {
+    const g = buildGraphData(threeDimData(), OPTS);
+    const parse = g.nodes.find(n => n.id === "core::parse");
+    expect(parse.groupPath[0]).toBe("core");
+    const login = g.nodes.find(n => n.id === "auth::login");
+    expect(login.groupPath[0]).toBe("auth");
+  });
+
+  it("groupPath[1] equals the class (middle dim)", () => {
+    const g = buildGraphData(threeDimData(), OPTS);
+    const parse = g.nodes.find(n => n.id === "core::parse");
+    expect(parse.groupPath[1]).toBe("Parser");
+    const build = g.nodes.find(n => n.id === "core::build");
+    expect(build.groupPath[1]).toBe("Builder");
+  });
+
+  it("node.group === groupPath[0] for backward compat", () => {
+    const g = buildGraphData(threeDimData(), OPTS);
+    for (const n of g.nodes) {
+      expect(n.group).toBe(n.groupPath[0]);
+    }
+  });
+
+  it("nodes in same class share the same level-1 group key", () => {
+    const g = buildGraphData(threeDimData(), OPTS);
+    const parse   = g.nodes.find(n => n.id === "core::parse");
+    const validate = g.nodes.find(n => n.id === "core::validate");
+    expect(getGroupKey(parse, 1)).toBe(getGroupKey(validate, 1));
+    expect(getGroupKey(parse, 1)).toBe("core::Parser");
+  });
+
+  it("nodes in different classes have different level-1 group keys", () => {
+    const g = buildGraphData(threeDimData(), OPTS);
+    const parse = g.nodes.find(n => n.id === "core::parse");
+    const build = g.nodes.find(n => n.id === "core::build");
+    expect(getGroupKey(parse, 1)).not.toBe(getGroupKey(build, 1));
+  });
+
+  it("uses leaf_graph_edges for links (not graph_edges)", () => {
+    const data = threeDimData();
+    data.graph_edges = [{ source: "core", target: "auth", weight: 99 }];
+    const g = buildGraphData(data, OPTS);
+    // graph_edges have module-level sources; leaf_graph_edges have symbol-level
+    const sources = g.links.map(l =>
+      typeof l.source === "object" ? l.source.id : l.source
+    );
+    expect(sources).not.toContain("core"); // module names not in leaf edges
+  });
+
+  it("node val is positive for all nodes", () => {
+    const g = buildGraphData(threeDimData(), OPTS);
+    for (const n of g.nodes) expect(n.val).toBeGreaterThan(0);
+  });
+
+  it("color is a CSS hex string", () => {
+    const g = buildGraphData(threeDimData(), OPTS);
+    for (const n of g.nodes) expect(n.color).toMatch(/^#[0-9a-f]{6}$/i);
+  });
+
+  it("hideIsolated removes nodes with no links", () => {
+    const data = threeDimData();
+    // Only core::parse → core::validate edge; core::build connects to auth::login
+    // auth::logout has no edges in leaf_graph_edges
+    const g = buildGraphData(data, { ...OPTS, hideIsolated: true });
+    const ids = new Set(g.nodes.map(n => n.id));
+    expect(ids.has("auth::logout")).toBe(false); // isolated
+  });
+
+  it("all nodes have an id, name, values, groupPath, group, val, color", () => {
+    const g = buildGraphData(threeDimData(), OPTS);
+    for (const n of g.nodes) {
+      expect(n).toHaveProperty("id");
+      expect(n).toHaveProperty("name");
+      expect(n).toHaveProperty("values");
+      expect(n).toHaveProperty("groupPath");
+      expect(n).toHaveProperty("group");
+      expect(n).toHaveProperty("val");
+      expect(n).toHaveProperty("color");
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// buildGraphData – N-dim backward compat
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("buildGraphData – N-dim backward compat (1-dim and 2-dim unchanged)", () => {
+  const OPTS = BASE_OPTS;
+
+  it("1-dim: nodes have no groupPath", () => {
+    const g = buildGraphData(singleDimData(), OPTS);
+    for (const n of g.nodes) expect(n.groupPath).toBeUndefined();
+  });
+
+  it("1-dim: isBlobMode remains false", () => {
+    expect(buildGraphData(singleDimData(), OPTS).isBlobMode).toBe(false);
+  });
+
+  it("2-dim: nodes have groupPath of length 1", () => {
+    const g = buildGraphData(blobDimData(), OPTS);
+    for (const n of g.nodes) expect(n.groupPath).toHaveLength(1);
+  });
+
+  it("2-dim: groupPath[0] === node.group", () => {
+    const g = buildGraphData(blobDimData(), OPTS);
+    for (const n of g.nodes) expect(n.groupPath[0]).toBe(n.group);
+  });
+
+  it("2-dim: node ids are from dim1 (community), not dim0 (module)", () => {
+    const g = buildGraphData(blobDimData(), OPTS);
+    const ids = g.nodes.map(n => n.id);
+    expect(ids).not.toContain("auth");
+    expect(ids).not.toContain("core");
+    expect(ids.every(id => id.startsWith("c"))).toBe(true);
+  });
+
+  it("2-dim: isBlobMode is true", () => {
+    expect(buildGraphData(blobDimData(), OPTS).isBlobMode).toBe(true);
+  });
+
+  it("2-dim: dedup keeps highest sizeKey row when same inner value in multiple groups", () => {
+    // c2 appears in both auth and core; core/c2 has symbol_count=50 > auth/c2=30
+    const g = buildGraphData(blobDimData(), { ...OPTS, sizeKey: "symbol_count" });
+    const c2 = g.nodes.filter(n => n.id === "c2");
+    expect(c2).toHaveLength(1);
+    expect(c2[0].group).toBe("core"); // core wins (higher symbol_count)
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Statistical / invariant tests for N-dim graphs
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("buildGraphData – N-dim statistical invariants", () => {
+  const OPTS = { sizeKey: "symbol_count", colorKey: "dead_ratio", colorStats: { min: 0, max: 1 } };
+
+  it("3-dim: every groupPath entry is non-null", () => {
+    const g = buildGraphData(threeDimData(), OPTS);
+    for (const n of g.nodes) {
+      for (const entry of n.groupPath) {
+        expect(entry).not.toBeNull();
+        expect(entry).not.toBeUndefined();
+      }
+    }
+  });
+
+  it("3-dim: getGroupKey(node, 0) always equals node.group", () => {
+    const g = buildGraphData(threeDimData(), OPTS);
+    for (const n of g.nodes) {
+      expect(getGroupKey(n, 0)).toBe(n.group);
+    }
+  });
+
+  it("3-dim: level-1 group keys are proper sub-keys (contain level-0 as prefix)", () => {
+    const g = buildGraphData(threeDimData(), OPTS);
+    for (const n of g.nodes) {
+      const k0 = getGroupKey(n, 0);
+      const k1 = getGroupKey(n, 1);
+      expect(k1.startsWith(k0 + "::")).toBe(true);
+    }
+  });
+
+  it("3-dim: nodes with same class have identical level-1 group keys", () => {
+    const g = buildGraphData(threeDimData(), OPTS);
+    const byClass = new Map();
+    for (const n of g.nodes) {
+      const k1 = getGroupKey(n, 1);
+      if (!byClass.has(k1)) byClass.set(k1, []);
+      byClass.get(k1).push(n);
+    }
+    // All nodes in core::Parser should have the same groupPath
+    const parserNodes = byClass.get("core::Parser") ?? [];
+    const paths = parserNodes.map(n => n.groupPath.join("::"));
+    const unique = new Set(paths);
+    expect(unique.size).toBe(1);
+  });
+
+  it("2-dim: node count == unique inner-dim values (after dedup)", () => {
+    const g = buildGraphData(blobDimData(), OPTS);
+    // c1, c2, c3 — c2 is shared but deduped → 3 unique nodes
+    expect(g.nodes).toHaveLength(3);
+  });
+
+  it("3-dim: node count == unique leaf-dim values", () => {
+    const g = buildGraphData(threeDimData(), OPTS);
+    expect(g.nodes).toHaveLength(6);
+  });
+
+  it("links respect minWeight threshold for 3-dim", () => {
+    const g = buildGraphData(threeDimData(), { ...OPTS, minWeight: 3 });
+    // Only the weight=3 edge survives
+    expect(g.links).toHaveLength(1);
+  });
+
+  it("topK=1 keeps at most 1 edge per source node for 3-dim", () => {
+    const data = threeDimData();
+    // Add extra edges from core::parse
+    data.leaf_graph_edges.push(
+      { source: "core::parse", target: "core::build",  weight: 2 },
+      { source: "core::parse", target: "auth::logout", weight: 1 },
+    );
+    const g = buildGraphData(data, { ...OPTS, topK: 1 });
+    const fromParse = g.links.filter(l => {
+      const s = typeof l.source === "object" ? l.source.id : l.source;
+      return s === "core::parse";
+    });
+    expect(fromParse.length).toBeLessThanOrEqual(1);
+  });
+
+  it("colorFn override works in 3-dim mode", () => {
+    const g = buildGraphData(threeDimData(), { ...OPTS, colorFn: () => "#123456" });
+    for (const n of g.nodes) expect(n.color).toBe("#123456");
+  });
+});

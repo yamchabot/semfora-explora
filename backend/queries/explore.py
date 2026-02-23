@@ -443,6 +443,79 @@ def _pivot_sql(
     return sql, kp
 
 
+# ── N-level pivot tree builder ───────────────────────────────────────────────
+
+def _build_pivot_tree(
+    conn: sqlite3.Connection,
+    dim_triples: list[tuple[str, str, str]],
+    frags: list[str],
+    cols: list[str],
+    has_nf: bool,
+    kinds: list[str] | None,
+) -> list[dict]:
+    """
+    Build an N-level pivot tree, returning root rows at depth 0.
+
+    Each row:
+      {
+        "key":      { dim0: val, [dim1: val, ...] },  # all dims up to this depth
+        "depth":    int,                               # 0 = root, N-1 = leaf
+        "values":   { measure_col: value, ... },
+        "children": [ ... ]                           # empty at depth N-1
+      }
+
+    Algorithm:
+      1. One SQL query per level  k ∈ 0..N-1  (uses first k+1 dims).
+      2. Build a children index in O(total nodes) via dict.setdefault.
+      3. Recursively assemble the tree top-down.
+
+    Backward-compatible with the previous 1D/2D behavior:
+      N=1 → flat list, no children
+      N=2 → same structure as the old hardcoded 2-level builder
+    """
+    N = len(dim_triples)
+    if N == 0:
+        return []
+
+    # ── 1. Query each level (k dims → aggregate at depth k) ──────────────────
+    level_maps: list[dict[tuple, dict]] = []
+    for k in range(N):
+        sql, params = _pivot_sql(dim_triples[: k + 1], frags, has_nf, kinds)
+        raw = [dict(r) for r in conn.execute(sql, params).fetchall()]
+        level_map: dict[tuple, dict] = {
+            tuple(r[t[1]] for t in dim_triples[: k + 1]): {c: r[c] for c in cols}
+            for r in raw
+        }
+        level_maps.append(level_map)
+
+    # ── 2. Children index: parent key-tuple → list of child key-tuples ────────
+    children_index: list[dict[tuple, list[tuple]]] = [{} for _ in range(N)]
+    for k in range(1, N):
+        for key_tuple in level_maps[k]:
+            parent = key_tuple[:-1]
+            children_index[k].setdefault(parent, []).append(key_tuple)
+
+    # ── 3. Recursive tree assembly ────────────────────────────────────────────
+    def make_node(level: int, key_tuple: tuple) -> dict:
+        key    = {dim_triples[i][0]: key_tuple[i] for i in range(level + 1)}
+        values = level_maps[level][key_tuple]
+        if level < N - 1:
+            child_keys = children_index[level + 1].get(key_tuple, [])
+            children   = sorted(
+                [make_node(level + 1, ck) for ck in child_keys],
+                key=lambda r: -(r["values"].get("symbol_count") or 0),
+            )
+        else:
+            children = []
+        return {"key": key, "depth": level, "values": values, "children": children}
+
+    roots = sorted(
+        [make_node(0, kt) for kt in level_maps[0]],
+        key=lambda r: -(r["values"].get("symbol_count") or 0),
+    )
+    return roots
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def fetch_pivot(
@@ -480,65 +553,18 @@ def fetch_pivot(
     frags = [measure_sql(m, has_nf) for m in valid_measures]
     cols  = [measure_col(m) for m in valid_measures]
 
-    # Helpers to read dim values from result rows by safe alias
-    def row_key(r: dict, triples: list) -> dict:
-        return {t[0]: r[t[1]] for t in triples}
-
-    # ── Build pivot tree ──────────────────────────────────────────────────────
-
-    if len(dim_triples) == 1:
-        sql, params = _pivot_sql(dim_triples[:1], frags, has_nf, kinds)
-        leaf_rows   = [dict(r) for r in conn.execute(sql, params).fetchall()]
-        dim0_key    = dim_triples[0][0]
-        dim0_alias  = dim_triples[0][1]
-        rows = [
-            {
-                "key":      {dim0_key: r[dim0_alias]},
-                "depth":    0,
-                "values":   {c: r[c] for c in cols},
-                "children": [],
-            }
-            for r in leaf_rows
-        ]
-    else:
-        d0_key, d0_alias = dim_triples[0][0], dim_triples[0][1]
-        d1_key, d1_alias = dim_triples[1][0], dim_triples[1][1]
-
-        # Leaf level (top-2 dims)
-        leaf_sql, leaf_p = _pivot_sql(dim_triples[:2], frags, has_nf, kinds)
-        leaf_rows        = [dict(r) for r in conn.execute(leaf_sql, leaf_p).fetchall()]
-        # Parent level (first dim only)
-        par_sql, par_p   = _pivot_sql(dim_triples[:1], frags, has_nf, kinds)
-        parent_map       = {
-            r[d0_alias]: {c: r[c] for c in cols}
-            for r in (dict(x) for x in conn.execute(par_sql, par_p).fetchall())
-        }
-        children_map: dict = {}
-        for r in leaf_rows:
-            pk = r[d0_alias]
-            children_map.setdefault(pk, []).append({
-                "key":      {d0_key: r[d0_alias], d1_key: r[d1_alias]},
-                "depth":    1,
-                "values":   {c: r[c] for c in cols},
-                "children": [],
-            })
-        rows = [
-            {
-                "key":      {d0_key: pk},
-                "depth":    0,
-                "values":   pv,
-                "children": sorted(children_map.get(pk, []), key=lambda c: -(c["values"].get("symbol_count") or 0)),
-            }
-            for pk, pv in parent_map.items()
-        ]
-
-    rows.sort(key=lambda r: -(r["values"].get("symbol_count") or 0))
+    # ── Build N-level pivot tree ──────────────────────────────────────────────
+    rows = _build_pivot_tree(conn, dim_triples, frags, cols, has_nf, kinds)
 
     # ── Induced subgraph edges ────────────────────────────────────────────────
-    # Only simple (non-bucketed) dimensions have edge support
+    # graph_edges  → dim0 level (used by pivot table + 1-dim graph view)
+    # leaf_graph_edges → deepest dim level (used by N-dim graph/blob view)
     dim0_key_name = dim_triples[0][0]
     graph_edges   = fetch_graph_edges(conn, dim0_key_name, kinds)
-    leaf_edges    = fetch_graph_edges(conn, dim_triples[1][0], kinds) if len(dim_triples) >= 2 else []
+    leaf_edges    = (
+        fetch_graph_edges(conn, dim_triples[-1][0], kinds)
+        if len(dim_triples) >= 2 else []
+    )
 
     valid_dim_keys = [t[0] for t in dim_triples]
     return {

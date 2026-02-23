@@ -3,7 +3,7 @@ import ForceGraph2D from "react-force-graph-2d";
 import { measureKey, measureLabel } from "../utils/measureUtils.js";
 import { lerpColor, makeStepColors, makeStepWidths, makeStepArrows } from "../utils/colorUtils.js";
 import { bfsFromNode, buildAdjacencyMaps, convexHull, findChainEdges, collectChainNodeIds } from "../utils/graphAlgo.js";
-import { buildGraphData } from "../utils/graphData.js";
+import { buildGraphData, flattenLeafRows, getGroupKey } from "../utils/graphData.js";
 import { Tooltip } from "./Tooltip.jsx";
 
 // ── Canvas helpers ──────────────────────────────────────────────────────────────
@@ -100,27 +100,49 @@ function drawBlob(ctx, hull, padding, lineWidth, color) {
  * @param {number} separationStrength – group-push magnitude per overlap unit
  * @param {number} blobPadding       – minimum gap (graph units) between blob edges
  */
+/**
+ * Create a blob containment force for a given nesting level.
+ * Level 0 → node.group (outermost blobs).
+ * Level L → getGroupKey(node, L) which includes all dim values 0..L.
+ *
+ * Lower attraction/separation at outer levels (they don't need tight containment;
+ * inner forces handle the fine-grained clustering).
+ */
+export function makeNestedBlobForce(level, blobCount = 1) {
+  // Inner levels need stronger containment; outer levels are gentler.
+  const levelFactor = Math.max(0.4, 1 - level * 0.25);
+  return makeVoronoiContainmentForce(
+    0.10 * levelFactor,
+    0.35 * levelFactor,
+    Math.max(15, 60 - level * 15),  // tighter padding at inner levels
+    level,
+  );
+}
+
 export function makeVoronoiContainmentForce(
-  attractStrength   = 0.10,
+  attractStrength    = 0.10,
   separationStrength = 0.35,
   blobPadding        = 60,
+  blobLevel          = 0,    // which groupPath level to use for grouping
 ) {
   let _nodes = [];
 
   function force(alpha) {
     // ── 1. Compute per-group centroid + max-radius ──────────────────────────
-    const groups = new Map(); // group → { x, y, count, r }
+    const groups = new Map(); // groupKey → { x, y, count, r }
     for (const n of _nodes) {
-      if (!n.group || n.x == null) continue;
-      if (!groups.has(n.group)) groups.set(n.group, { x: 0, y: 0, count: 0, r: 0 });
-      const g = groups.get(n.group);
+      const gk = getGroupKey(n, blobLevel);
+      if (!gk || n.x == null) continue;
+      if (!groups.has(gk)) groups.set(gk, { x: 0, y: 0, count: 0, r: 0 });
+      const g = groups.get(gk);
       g.x += n.x; g.y += n.y; g.count++;
     }
     for (const g of groups.values()) { g.x /= g.count; g.y /= g.count; }
     // max distance from centroid → rough blob radius
     for (const n of _nodes) {
-      if (!n.group || n.x == null) continue;
-      const g = groups.get(n.group);
+      const gk = getGroupKey(n, blobLevel);
+      if (!gk || n.x == null) continue;
+      const g = groups.get(gk);
       const d = Math.sqrt((n.x - g.x) ** 2 + (n.y - g.y) ** 2);
       if (d > g.r) g.r = d;
     }
@@ -129,17 +151,15 @@ export function makeVoronoiContainmentForce(
 
     // ── 2. Gentle per-node centroid attraction ──────────────────────────────
     for (const n of _nodes) {
-      if (!n.group || n.x == null) continue;
-      const own = groups.get(n.group);
+      const gk = getGroupKey(n, blobLevel);
+      if (!gk || n.x == null) continue;
+      const own = groups.get(gk);
       if (!own) continue;
       n.vx += (own.x - n.x) * attractStrength * alpha;
       n.vy += (own.y - n.y) * attractStrength * alpha;
     }
 
     // ── 3. Group-level separation (alpha-independent position push) ─────────
-    // Push entire groups apart when their blobs overlap or are too close.
-    // Moving all nodes in a group together preserves internal structure while
-    // driving blobs into non-overlapping positions.
     for (let i = 0; i < groupList.length; i++) {
       const [gA, cA] = groupList[i];
       for (let j = i + 1; j < groupList.length; j++) {
@@ -147,42 +167,40 @@ export function makeVoronoiContainmentForce(
         const dx = cA.x - cB.x, dy = cA.y - cB.y;
         const d  = Math.sqrt(dx * dx + dy * dy) || 0.001;
 
-        // Desired minimum centroid-to-centroid distance
         const rA          = Math.max(cA.r, 40);
         const rB          = Math.max(cB.r, 40);
         const desiredDist = rA + rB + blobPadding;
 
         if (d < desiredDist) {
-          // Normalised push direction (A away from B)
           const nx = dx / d, ny = dy / d;
-          // Push proportional to how much they overlap, independent of alpha
           const overlap  = (desiredDist - d) / desiredDist;
           const pushMag  = overlap * separationStrength;
 
           for (const n of _nodes) {
             if (n.x == null) continue;
-            if (n.group === gA) { n.x += nx * pushMag; n.y += ny * pushMag; }
-            if (n.group === gB) { n.x -= nx * pushMag; n.y -= ny * pushMag; }
+            const nk = getGroupKey(n, blobLevel);
+            if (nk === gA) { n.x += nx * pushMag; n.y += ny * pushMag; }
+            if (nk === gB) { n.x -= nx * pushMag; n.y -= ny * pushMag; }
           }
         }
       }
     }
 
-    // ── 4. Per-node straggler enforcement (catch nodes that still crossed) ──
+    // ── 4. Per-node straggler enforcement ───────────────────────────────────
     for (const n of _nodes) {
-      if (!n.group || n.x == null) continue;
-      const own = groups.get(n.group);
+      const gk = getGroupKey(n, blobLevel);
+      if (!gk || n.x == null) continue;
+      const own = groups.get(gk);
       if (!own) continue;
       const ownDist = Math.sqrt((n.x - own.x) ** 2 + (n.y - own.y) ** 2) || 0.001;
       for (const [g, c] of groupList) {
-        if (g === n.group) continue;
+        if (g === gk) continue;
         const otherDist = Math.sqrt((n.x - c.x) ** 2 + (n.y - c.y) ** 2) || 0.001;
         if (otherDist < ownDist) {
           const crossDist = (ownDist - otherDist) * 0.5;
           const frac      = Math.min((crossDist / ownDist) * 0.5, 0.3);
           n.x += (own.x - n.x) * frac;
           n.y += (own.y - n.y) * frac;
-          // Cancel velocity toward wrong group
           const cx = c.x - n.x, cy = c.y - n.y;
           const cl = Math.sqrt(cx * cx + cy * cy) || 1;
           const proj = n.vx * (cx / cl) + n.vy * (cy / cl);
@@ -307,8 +325,7 @@ export default function GraphRenderer({ data, measures, onNodeClick,
 
   const types     = data?.measure_types || {};
   const isBlobMode = (data?.dimensions?.length ?? 0) >= 2;
-  const dim0      = data?.dimensions?.[0];   // outer dim (blob groups in blob mode, node dim in 1d)
-  const dim1      = data?.dimensions?.[1];   // inner dim (nodes in blob mode)
+  const dim0      = data?.dimensions?.[0];   // outermost dim (blob groups in blob mode, node dim in 1d)
 
   // Resolve color key: override if valid (in user measures OR in measure_types), else first measure
   const allMKeys = measures.map(measureKey);
@@ -324,18 +341,23 @@ export default function GraphRenderer({ data, measures, onNodeClick,
   // Min/max across all value rows (leaf rows in blob mode, top-level otherwise)
   const colorStats = useMemo(() => {
     if (!colorKey || !data?.rows) return { min: 0, max: 1 };
-    const rows = isBlobMode ? data.rows.flatMap(r => r.children || []) : data.rows;
-    const vals = rows.map(r => r.values[colorKey]).filter(v => v != null && isFinite(v));
+    const numDims = data?.dimensions?.length ?? 1;
+    const rows = isBlobMode ? flattenLeafRows(data.rows, numDims) : data.rows;
+    const vals = rows.map(r => r.values?.[colorKey]).filter(v => v != null && isFinite(v));
     if (!vals.length) return { min: 0, max: 1 };
     const mn = Math.min(...vals), mx = Math.max(...vals);
     return { min: mn, max: mx === mn ? mn + 1 : mx };
   }, [colorKey, data, isBlobMode]);
 
   // Map outer-dim value → blob color
+  // Level-0 (outer) group → palette colour
   const groupColorMap = useMemo(() => {
     if (!isBlobMode || !data?.rows) return new Map();
     return new Map(data.rows.map((r, i) => [r.key[dim0], BLOB_PALETTE[i % BLOB_PALETTE.length]]));
   }, [isBlobMode, data, dim0]);
+
+  // Number of blob nesting levels = dims.length - 1  (0 for 1-dim, 1 for 2-dim, 2 for 3-dim…)
+  const blobLevelCount = isBlobMode ? (data?.dimensions?.length ?? 1) - 1 : 0;
 
   // When coloring by diff_status_value, use an explicit 4-stop mapping instead
   // of the green→red gradient (whose midpoint is an ugly olive, and whose
@@ -542,32 +564,88 @@ export default function GraphRenderer({ data, measures, onNodeClick,
     }
 
     if (graphData.isBlobMode) {
-      // Pre-position nodes that have no coordinates yet into a group-circle
-      // layout so the simulation starts from a near-separated state rather than
-      // fully random (which can create deep interleaving that's hard to untangle).
-      const groupsList = [...new Set(graphData.nodes.map(n => n.group).filter(Boolean))];
-      const numGroups  = groupsList.length;
-      if (numGroups > 1) {
-        const spread   = Math.max(250, 100 * Math.sqrt(numGroups));
-        const groupPos = new Map(groupsList.map((g, i) => {
-          const angle = (2 * Math.PI * i) / numGroups;
-          return [g, { x: Math.cos(angle) * spread, y: Math.sin(angle) * spread }];
+      // Pre-position nodes hierarchically: outer groups first, inner groups
+      // within each outer region, so the simulation starts near-separated.
+      const blobLevels = (data?.dimensions?.length ?? 2) - 1; // number of blob rings
+      const outerGroups = [...new Set(graphData.nodes.map(n => n.group).filter(Boolean))];
+      const numOuter   = outerGroups.length;
+      if (numOuter > 1) {
+        const outerSpread = Math.max(250, 100 * Math.sqrt(numOuter));
+        const outerPos    = new Map(outerGroups.map((g, i) => {
+          const angle = (2 * Math.PI * i) / numOuter;
+          return [g, { x: Math.cos(angle) * outerSpread, y: Math.sin(angle) * outerSpread }];
         }));
-        for (const node of graphData.nodes) {
-          if (node.x == null && node.group != null) {
-            const gp = groupPos.get(node.group);
-            if (gp) {
-              node.x = gp.x + (Math.random() - 0.5) * 100;
-              node.y = gp.y + (Math.random() - 0.5) * 100;
+
+        // For inner levels, cluster within the outer group's region
+        if (blobLevels >= 2) {
+          // Group nodes by their innermost group key (level blobLevels-1)
+          const innerGroups = new Map(); // innerKey → [nodes]
+          for (const node of graphData.nodes) {
+            const innerKey = getGroupKey(node, blobLevels - 1);
+            if (!innerGroups.has(innerKey)) innerGroups.set(innerKey, []);
+            innerGroups.get(innerKey).push(node);
+          }
+          // Assign sub-region positions within each outer blob
+          const outerSubCount = new Map(); // outerKey → count of inner groups
+          for (const node of graphData.nodes) {
+            const ok = node.group;
+            if (!outerSubCount.has(ok)) outerSubCount.set(ok, new Set());
+            outerSubCount.get(ok).add(getGroupKey(node, 1));
+          }
+          const outerSubIdx = new Map(); // outerKey → { innerKey → idx }
+          for (const [ok, innerSet] of outerSubCount) {
+            const idxMap = {};
+            [...innerSet].forEach((ik, i) => { idxMap[ik] = i; });
+            outerSubIdx.set(ok, { idxMap, total: innerSet.size });
+          }
+          for (const node of graphData.nodes) {
+            if (node.x != null) continue;
+            const outerCenter = outerPos.get(node.group);
+            if (!outerCenter) continue;
+            const info = outerSubIdx.get(node.group);
+            if (info && info.total > 1) {
+              const ik    = getGroupKey(node, 1);
+              const idx   = info.idxMap[ik] ?? 0;
+              const angle = (2 * Math.PI * idx) / info.total;
+              const r     = Math.max(80, outerSpread * 0.35);
+              node.x = outerCenter.x + Math.cos(angle) * r + (Math.random() - 0.5) * 40;
+              node.y = outerCenter.y + Math.sin(angle) * r + (Math.random() - 0.5) * 40;
+            } else {
+              node.x = outerCenter.x + (Math.random() - 0.5) * 100;
+              node.y = outerCenter.y + (Math.random() - 0.5) * 100;
+            }
+          }
+        } else {
+          // Standard 2-dim: position within outer group circle
+          for (const node of graphData.nodes) {
+            if (node.x == null && node.group != null) {
+              const gp = outerPos.get(node.group);
+              if (gp) {
+                node.x = gp.x + (Math.random() - 0.5) * 100;
+                node.y = gp.y + (Math.random() - 0.5) * 100;
+              }
             }
           }
         }
       }
+
+      // Add one containment force per blob level (outermost first).
+      // Inner levels use tighter padding and slightly stronger containment.
+      // Existing "groupCentroid" key handles level 0; inner levels get
+      // "groupCentroid_L" keys so they can be removed independently.
+      for (let L = 0; L < blobLevels; L++) {
+        const forceKey = L === 0 ? "groupCentroid" : `groupCentroid_${L}`;
+        fg.d3Force(forceKey, makeNestedBlobForce(L, numOuter));
+      }
+      // Remove any stale inner forces from a previous (fewer-dim) render
+      for (let L = blobLevels; L < 6; L++) {
+        fg.d3Force(`groupCentroid_${L}`, null);
+      }
+    } else {
+      fg.d3Force("groupCentroid", null);
+      for (let L = 1; L < 6; L++) fg.d3Force(`groupCentroid_${L}`, null);
     }
 
-    fg.d3Force("groupCentroid", graphData.isBlobMode
-      ? makeVoronoiContainmentForce(0.10, 0.35, 60)
-      : null);
     fg.d3ReheatSimulation?.();
   }, [graphData, forceSpread]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -904,40 +982,61 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                   }
                 }
 
-                // Draw amorphous blobs behind nodes — one per outer-dim group.
-                // Blobs are separated by the physics force, not canvas clipping,
-                // so fill and stroke use the same unclipped path (no flat edges).
+                // Draw nested amorphous blobs behind nodes — one ring per
+                // blob level (outermost first so inner blobs paint over them).
+                // Blobs are separated by physics forces, not canvas clipping.
+                //
+                // Visual hierarchy per level:
+                //   Level 0 (outer): large padding, low opacity  → territory markers
+                //   Level 1+        : smaller padding, more opaque → clear sub-groups
+                //
+                // Inner-level blobs inherit their outer group's palette colour
+                // so the colour relationship is visually obvious.
 
-                // 1. Collect node positions per group
-                const groupPos = new Map();
+                const numLevels = blobLevelCount;  // e.g. 1 for 2-dim, 2 for 3-dim
+
+                // Collect positions keyed by group key at each level
+                // levelGroupPos[L] = Map<groupKey → [[x,y], ...]>
+                const levelGroupPos = Array.from({ length: numLevels }, () => new Map());
                 for (const node of activeNodes) {
                   if (node.x == null) continue;
-                  if (!groupPos.has(node.group)) groupPos.set(node.group, []);
-                  groupPos.get(node.group).push([node.x, node.y]);
+                  for (let L = 0; L < numLevels; L++) {
+                    const gk = getGroupKey(node, L);
+                    if (!gk) continue;
+                    if (!levelGroupPos[L].has(gk)) levelGroupPos[L].set(gk, []);
+                    levelGroupPos[L].get(gk).push([node.x, node.y]);
+                  }
                 }
 
-                // 2. Compute group centroids
-                const centroids = new Map();
-                for (const [group, pts] of groupPos) {
-                  centroids.set(group, [
-                    pts.reduce((s,p) => s+p[0], 0) / pts.length,
-                    pts.reduce((s,p) => s+p[1], 0) / pts.length,
-                  ]);
-                }
+                // Draw outermost level first → innermost last (higher z-order)
+                for (let L = 0; L < numLevels; L++) {
+                  // Styling: outer = large/faint, inner = tight/brighter
+                  const isOuter   = L === 0;
+                  const padding   = Math.max(12, (32 - L * 10)) / gs;
+                  const lineWidth = (isOuter ? 1.5 : 1.0) / gs;
+                  const labelSize = Math.max(9, 15 - L * 3) / gs;
 
-                // 3. Draw each blob
-                for (const [group, pts] of groupPos) {
-                  const color    = groupColorMap.get(group) || "#888888";
-                  const hull     = pts.length >= 3 ? convexHull(pts) : pts.map(p => [...p]);
-                  const [cx, cy] = centroids.get(group);
-                  drawBlob(ctx, hull, 32/gs, 1.5/gs, color);
+                  for (const [gk, pts] of levelGroupPos[L]) {
+                    // Outer group key is always gk's first segment (before '::')
+                    const outerKey = gk.split("::")[0];
+                    const base     = groupColorMap.get(outerKey) || "#888888";
 
-                  // Group label at centroid
-                  ctx.font         = `bold ${15/gs}px sans-serif`;
-                  ctx.fillStyle    = (groupColorMap.get(group) || "#888888") + "99";
-                  ctx.textAlign    = "center";
-                  ctx.textBaseline = "middle";
-                  ctx.fillText(String(group), cx, cy);
+                    const hull     = pts.length >= 3 ? convexHull(pts) : pts.map(p => [...p]);
+                    drawBlob(ctx, hull, padding, lineWidth, base);
+
+                    // Label: only at outermost level, or all levels when N > 2
+                    if (isOuter || numLevels >= 2) {
+                      const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length;
+                      const cy = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+                      // Show the last segment of the key (most specific label)
+                      const label = gk.split("::").at(-1);
+                      ctx.font         = `${isOuter ? "bold " : ""}${labelSize}px sans-serif`;
+                      ctx.fillStyle    = base + (isOuter ? "99" : "cc");
+                      ctx.textAlign    = "center";
+                      ctx.textBaseline = "middle";
+                      ctx.fillText(String(label), cx, cy - padding * 0.6);
+                    }
+                  }
                 }
               } : undefined}
               nodeCanvasObjectMode={() => "replace"}

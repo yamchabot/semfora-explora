@@ -4,6 +4,20 @@ import { useQuery } from "@tanstack/react-query";
 import { RepoContext } from "../App";
 import { api } from "../api";
 import { applyFilters } from "../utils/filterUtils.js";
+import { flattenLeafRows } from "../utils/graphData.js";
+
+/** Collect every row at every depth from an N-level pivot tree. */
+function flattenAllRows(rows) {
+  const out = [];
+  function walk(nodes) {
+    for (const r of nodes) {
+      out.push(r);
+      if (r.children?.length) walk(r.children);
+    }
+  }
+  walk(rows ?? []);
+  return out;
+}
 import { DEFAULT_DIMS, DEFAULT_MEASURES } from "../utils/exploreConstants.js";
 import { measureKey, measureStr, measureLabel, parseMeasuresParam } from "../utils/measureUtils.js";
 import { parseFiltersParam } from "../utils/dimUtils.js";
@@ -214,24 +228,17 @@ export default function Explore() {
   }, [compareRepo]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Highlight set: node IDs with diff_status_value < 0.49 (i.e., changed nodes)
+  // Walks the full N-level tree so diff colouring works at any nesting depth.
   const highlightSet = useMemo(() => {
     if (!compareRepo || !filteredData?.rows) return null;
     const set = new Set();
-    for (const row of filteredData.rows) {
+    for (const row of flattenAllRows(filteredData.rows)) {
       const val = row.values?.diff_status_value;
-      if (val !== undefined && val < 0.49) {
-        // Symbol grain: key is row.key.symbol; group grain: key is row.key[dims[0]]
-        const nodeId = row.key.symbol ?? row.key[effectiveDims[0]];
-        if (nodeId) set.add(nodeId);
-      }
-      // Also check children for 2-dim pivot rows
-      for (const child of row.children || []) {
-        const cval = child.values?.diff_status_value;
-        if (cval !== undefined && cval < 0.49) {
-          const cid = child.key.symbol ?? child.key[effectiveDims[1]];
-          if (cid) set.add(cid);
-        }
-      }
+      if (val === undefined || val >= 0.49) continue;
+      // Use the leaf-dim key if present, otherwise the most-specific available key
+      const leafDim = effectiveDims[effectiveDims.length - 1];
+      const nodeId  = row.key[leafDim] ?? row.key.symbol ?? row.key[effectiveDims[0]];
+      if (nodeId) set.add(nodeId);
     }
     return set.size > 0 ? set : null;
   }, [filteredData, compareRepo, effectiveDims]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -277,8 +284,8 @@ export default function Explore() {
     // and refreshes counts when a kind filter is active.
     const rows = pivotQuery.data?.rows;
     if (rows) {
-      // Flatten top-level rows + children so 2-dim pivots expose both levels
-      const allRows = rows.flatMap(r => [r, ...(r.children || [])]);
+      // Flatten entire N-level tree so all dim values are extractable at any depth
+      const allRows = flattenAllRows(rows);
       for (const d of [...allDims, ...dims]) {
         const localVals = [...new Set(allRows.map(r => String(r.key[d] ?? "")))].filter(Boolean);
         if (localVals.length > 0) {
