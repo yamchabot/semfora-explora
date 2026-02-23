@@ -1009,6 +1009,8 @@ function GraphRenderer({ data, measures, onNodeClick }) {
   const [colorKeyOverride, setColorKeyOverride] = useState(null);
   const [selectedNodeIds, setSelectedNodeIds]   = useState(() => new Set());
   const [fanOutDepth, setFanOutDepth]           = useState(5);
+  // Tracks the live d3-zoom transform so the wheel-pan handler has a consistent baseline
+  const zoomTransformRef = useRef({ k: 1, x: 0, y: 0 });
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -1309,6 +1311,32 @@ function GraphRenderer({ data, measures, onNodeClick }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedNodeIds, bfsDistances, chainNodeIds, chainEdgeMap]);
 
+  // ── Trackpad pan support ────────────────────────────────────────────────────
+  // d3-zoom captures ALL wheel events for zoom. We intercept in the capture
+  // phase before d3 sees it: two-finger scroll (no ctrlKey) → pan;
+  // pinch gesture (macOS reports as ctrlKey+wheel) → let d3 handle for zoom.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onWheel = (e) => {
+      if (e.ctrlKey) return; // pinch-to-zoom — d3 handles this
+      e.preventDefault();
+      e.stopPropagation();
+      const fg = fgRef.current;
+      if (!fg) return;
+      const { k, x, y } = zoomTransformRef.current;
+      if (!k) return;
+      // Optimistic update so rapid successive events have the right baseline
+      const newX = x - e.deltaX;
+      const newY = y - e.deltaY;
+      zoomTransformRef.current = { k, x: newX, y: newY };
+      // Convert screen-space offset to graph-space center and pan
+      fg.centerAt((size.w / 2 - newX) / k, (size.h / 2 - newY) / k, 0);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false, capture: true });
+    return () => el.removeEventListener("wheel", onWheel, { capture: true });
+  }, [size.w, size.h]);
+
   const totalEdges   = data?.graph_edges?.length || 0;
   const visibleEdges = graphData.links.length;
 
@@ -1510,6 +1538,28 @@ function GraphRenderer({ data, measures, onNodeClick }) {
                 return stepArrows[Math.min(cl - 1, stepArrows.length - 1)];
               }}
               linkDirectionalArrowRelPos={1}
+              linkDirectionalParticles={2}
+              linkDirectionalParticleSpeed={0.004}
+              linkDirectionalParticleWidth={link => {
+                // Show particles only on highlighted edges so they don't clutter the full graph
+                if (selectedNodeIds.size === 0) return 2;
+                const u = typeof link.source === "object" ? link.source.id : link.source;
+                const v = typeof link.target === "object" ? link.target.id : link.target;
+                if (selectedNodeIds.size === 1) return bfsDistances.has(u) ? 2.5 : 0;
+                return chainEdgeMap.has(`${u}|${v}`) ? 3 : 0;
+              }}
+              linkDirectionalParticleColor={link => {
+                const u = typeof link.source === "object" ? link.source.id : link.source;
+                const v = typeof link.target === "object" ? link.target.id : link.target;
+                if (selectedNodeIds.size === 1) {
+                  const d = bfsDistances.get(u);
+                  return d != null && d < stepColors.length ? stepColors[d] : "#ffffff";
+                }
+                const cl = chainEdgeMap.get(`${u}|${v}`);
+                if (cl != null) return stepColors[Math.min(cl - 1, stepColors.length - 1)];
+                return "#ffffff";
+              }}
+              onZoom={t => { zoomTransformRef.current = t; }}
               onNodeClick={(node, event) => {
                 const id = node?.id ?? null;
                 if (!id) return;
