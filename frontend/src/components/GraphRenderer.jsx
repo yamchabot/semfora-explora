@@ -224,11 +224,11 @@ export default function GraphRenderer({ data, measures, onNodeClick,
     if (colorKey !== "diff_status_value") return null;
     return (vals) => {
       const v = vals["diff_status_value"];
-      if (!isFinite(v)) return "#c8b89a"; // no data → dark cream fallback
+      if (!isFinite(v)) return "#484f58"; // no data → gray fallback
       if (v < 0.1)  return "#3fb950";     // added    → green
       if (v < 0.4)  return "#e3b341";     // modified → amber
       if (v > 0.9)  return "#f85149";     // removed  → red
-      return "#c8b89a";                   // unchanged → dark cream
+      return "#484f58";                   // unchanged → gray
     };
   }, [colorKey]);
 
