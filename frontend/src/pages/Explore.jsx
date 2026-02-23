@@ -848,10 +848,28 @@ function drawBlob(ctx, hull, padding, lineWidth, color) {
   // Expand each point outward from centroid
   const cx = hull.reduce((s,p)=>s+p[0],0) / hull.length;
   const cy = hull.reduce((s,p)=>s+p[1],0) / hull.length;
-  const exp = hull.map(([x,y]) => {
+  let exp = hull.map(([x,y]) => {
     const dx=x-cx, dy=y-cy, len=Math.sqrt(dx*dx+dy*dy)||1;
     return [x+dx/len*padding, y+dy/len*padding];
   });
+
+  // 2-point degenerate case: the two expanded points are collinear with the
+  // centroid, so all bezier midpoints collapse to the same location and the
+  // path has zero area (renders as a line, not a blob).
+  // Fix: insert two perpendicular "wing" points to form a 4-point diamond,
+  // which the bezier smoother then rounds into a proper oval.
+  if (exp.length === 2) {
+    const dx  = exp[1][0] - exp[0][0];
+    const dy  = exp[1][1] - exp[0][1];
+    const len = Math.sqrt(dx*dx + dy*dy) || 1;
+    const wing = padding * 0.65;         // perpendicular bulge ≈ 65% of padding
+    const nx   = -dy / len * wing;       // perpendicular unit × wing
+    const ny   =  dx / len * wing;
+    const mx   = (exp[0][0] + exp[1][0]) / 2;
+    const my   = (exp[0][1] + exp[1][1]) / 2;
+    exp = [exp[0], [mx + nx, my + ny], exp[1], [mx - nx, my - ny]];
+  }
+
   const n = exp.length;
   ctx.beginPath();
   if (n === 1) {
