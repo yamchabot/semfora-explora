@@ -422,3 +422,144 @@ describe("filterEdgesToNodes — d3 mutation safety", () => {
     expect(result).toHaveLength(1);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// applyFilters — N-dim recursive tree filtering
+// ─────────────────────────────────────────────────────────────────────────────
+
+function dimExclude(field, values) {
+  return { kind: "dim", field, mode: "exclude", values, pattern: "", id: `ex_${field}` };
+}
+
+function make3DimRows() {
+  // module → class → symbol  (3 levels)
+  return [
+    {
+      key: { module: "core" }, depth: 0, values: { symbol_count: 4 },
+      children: [
+        {
+          key: { module: "core", class: "Parser" }, depth: 1, values: { symbol_count: 2 },
+          children: [
+            { key: { module: "core", class: "Parser", symbol: "core::parse" },    depth: 2, values: { symbol_count: 1, dead_ratio: 0.1 }, children: [] },
+            { key: { module: "core", class: "Parser", symbol: "core::validate" }, depth: 2, values: { symbol_count: 1, dead_ratio: 0.9 }, children: [] },
+          ],
+        },
+        {
+          key: { module: "core", class: "Builder" }, depth: 1, values: { symbol_count: 2 },
+          children: [
+            { key: { module: "core", class: "Builder", symbol: "core::build" }, depth: 2, values: { symbol_count: 1, dead_ratio: 0.5 }, children: [] },
+          ],
+        },
+      ],
+    },
+    {
+      key: { module: "tests" }, depth: 0, values: { symbol_count: 2 },
+      children: [
+        {
+          key: { module: "tests", class: "(top-level)" }, depth: 1, values: { symbol_count: 2 },
+          children: [
+            { key: { module: "tests", class: "(top-level)", symbol: "tests::test_parse" }, depth: 2, values: { symbol_count: 1 }, children: [] },
+          ],
+        },
+      ],
+    },
+  ];
+}
+
+describe("applyFilters – 3-dim recursive tree filtering", () => {
+  it("module exclude filter removes entire subtree", () => {
+    const rows = make3DimRows();
+    const result = applyFilters(rows, [dimExclude("module", ["tests"])]);
+    expect(result).toHaveLength(1);
+    expect(result[0].key.module).toBe("core");
+  });
+
+  it("class exclude filter removes matching class and its symbols", () => {
+    const rows = make3DimRows();
+    const result = applyFilters(rows, [dimExclude("class", ["Builder"])]);
+    // Both modules survive: core (still has Parser), tests (has '(top-level)', not Builder)
+    expect(result).toHaveLength(2);
+    const coreRow = result.find(r => r.key.module === "core");
+    const coreClasses = coreRow.children.map(c => c.key.class);
+    expect(coreClasses).not.toContain("Builder");
+    expect(coreClasses).toContain("Parser");
+  });
+
+  it("class exclude keeps parent (core) when at least one child class survives", () => {
+    const rows = make3DimRows();
+    const result = applyFilters(rows, [dimExclude("class", ["Builder"])]);
+    expect(result[0].key.module).toBe("core");
+    expect(result[0].children).toHaveLength(1);
+  });
+
+  it("symbol-level field filter works at depth 2 (recursive fix)", () => {
+    // Filter: symbol include 'core::parse' only
+    const rows = make3DimRows();
+    const result = applyFilters(rows, [{
+      kind: "dim", field: "symbol", mode: "include", values: ["core::parse"], pattern: ""
+    }]);
+    // core module → Parser class → only core::parse survives
+    expect(result).toHaveLength(1);
+    expect(result[0].children).toHaveLength(1); // only Parser
+    expect(result[0].children[0].children).toHaveLength(1); // only core::parse
+    expect(result[0].children[0].children[0].key.symbol).toBe("core::parse");
+  });
+
+  it("measure filter at depth 2 prunes low dead_ratio leaves", () => {
+    const rows = make3DimRows();
+    // Keep only symbols with dead_ratio >= 0.5
+    const result = applyFilters(rows, [{
+      kind: "measure", mkey: "dead_ratio", expr: ">=0.5"
+    }]);
+    // core::parse (0.1) excluded; core::validate (0.9) and core::build (0.5) survive
+    const symbols = [];
+    const walk = (rows) => rows.forEach(r => {
+      if (r.depth === 2) symbols.push(r.key.symbol);
+      (r.children || []).forEach(c => walk([c]));
+    });
+    walk(result);
+    expect(symbols).not.toContain("core::parse");
+    expect(symbols).toContain("core::validate");
+    expect(symbols).toContain("core::build");
+  });
+
+  it("removing all descendants of a parent removes the parent too", () => {
+    // Exclude Builder AND Parser → core has no class children left → core removed
+    const rows = make3DimRows();
+    const result = applyFilters(rows, [dimExclude("class", ["Parser", "Builder"])]);
+    // tests module only has (top-level) class → still present
+    // core has no surviving classes → removed
+    const modules = result.map(r => r.key.module);
+    expect(modules).not.toContain("core");
+    expect(modules).toContain("tests");
+  });
+
+  it("preserves symbol children of surviving class rows", () => {
+    const rows = make3DimRows();
+    const result = applyFilters(rows, [dimExclude("module", ["tests"])]);
+    // core → Parser (2 symbols), Builder (1 symbol) — all intact
+    const parserRow = result[0].children.find(c => c.key.class === "Parser");
+    expect(parserRow.children).toHaveLength(2);
+    const builderRow = result[0].children.find(c => c.key.class === "Builder");
+    expect(builderRow.children).toHaveLength(1);
+  });
+
+  it("no-op filter preserves full 3-level structure", () => {
+    const rows = make3DimRows();
+    const result = applyFilters(rows, [dimExclude("module", ["nonexistent"])]);
+    expect(result).toHaveLength(2);
+    expect(result[0].children).toHaveLength(2);
+    expect(result[0].children[0].children).toHaveLength(2);
+  });
+
+  it("regex filter works at all depths", () => {
+    const rows = make3DimRows();
+    // Leading ! negates — "!test" excludes rows whose module matches /test/i
+    const result = applyFilters(rows, [{
+      kind: "dim", field: "module", mode: "regex", pattern: "!test", values: [], id: "x"
+    }]);
+    const modules = result.map(r => r.key.module);
+    expect(modules).not.toContain("tests");
+    expect(modules).toContain("core");
+  });
+});

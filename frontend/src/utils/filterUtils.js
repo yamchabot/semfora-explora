@@ -122,20 +122,32 @@ export function applyFilters(rows, filters) {
     return filters.every(f => testRow(row, f));
   }
 
-  return rows
-    .map(row => {
-      // Filter children first (if present)
-      if (row.children && row.children.length > 0) {
-        const filteredChildren = row.children.filter(child => rowPasses(child));
-        const parentPasses     = rowPasses(row);
-        // Keep parent only when it passes AND at least one child survives.
-        if (!parentPasses || filteredChildren.length === 0) return null;
-        return { ...row, children: filteredChildren };
-      }
-      // Leaf row
-      return rowPasses(row) ? row : null;
-    })
-    .filter(Boolean);
+  /**
+   * Recursively filter an N-level tree.
+   *
+   * A parent row is kept when:
+   *   1. It passes the filters itself, AND
+   *   2. If it has children, at least one child survives (after recursive filtering).
+   *
+   * This handles trees of arbitrary depth (1-dim flat, 2-dim parent/child,
+   * or 3+-dim nested) without hardcoding the number of levels.
+   */
+  function filterRows(rows) {
+    return rows
+      .map(row => {
+        if (row.children && row.children.length > 0) {
+          const filteredChildren = filterRows(row.children);  // ← recurse
+          const parentPasses     = rowPasses(row);
+          if (!parentPasses || filteredChildren.length === 0) return null;
+          return { ...row, children: filteredChildren };
+        }
+        // Leaf row (no children)
+        return rowPasses(row) ? row : null;
+      })
+      .filter(Boolean);
+  }
+
+  return filterRows(rows);
 }
 
 /**
