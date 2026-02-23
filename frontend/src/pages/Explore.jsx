@@ -939,6 +939,21 @@ function makeStepArrows(n) {
   });
 }
 
+/** Pure BFS — returns Map<nodeId, hops> from `start` following `adj`, bounded by `maxD`. */
+function bfsFromNode(start, adj, maxD) {
+  const dist = new Map([[start, 0]]);
+  const queue = [start];
+  while (queue.length) {
+    const cur = queue.shift();
+    const d   = dist.get(cur);
+    if (d >= maxD) continue;
+    for (const nb of (adj.get(cur) || [])) {
+      if (!dist.has(nb)) { dist.set(nb, d + 1); queue.push(nb); }
+    }
+  }
+  return dist;
+}
+
 function GraphRenderer({ data, measures, onNodeClick }) {
   const containerRef  = useRef(null);
   const fgRef         = useRef(null);
@@ -946,7 +961,7 @@ function GraphRenderer({ data, measures, onNodeClick }) {
   const [minWeight, setMinWeight] = useState(1);
   const [topK, setTopK]           = useState(0);
   const [colorKeyOverride, setColorKeyOverride] = useState(null);
-  const [selectedNodeId, setSelectedNodeId]     = useState(null);
+  const [selectedNodeIds, setSelectedNodeIds]   = useState(() => new Set());
   const [fanOutDepth, setFanOutDepth]           = useState(5);
 
   useEffect(() => {
@@ -1058,29 +1073,65 @@ function GraphRenderer({ data, measures, onNodeClick }) {
     return { nodes, links: filterEdges(data.graph_edges, validIds), isBlobMode:false };
   }, [data, minWeight, topK, colorKey, colorStats, sizeKey, dim0, dim1, isBlobMode]);
 
-  // BFS from selectedNodeId following directed edges forward (source → target).
-  // Returns Map<nodeId, hopDistance> for nodes reachable within fanOutDepth hops.
-  const bfsDistances = useMemo(() => {
-    if (!selectedNodeId || !graphData.links.length) return new Map();
-    const adj = new Map();
+  // Build forward + reverse adjacency maps from current graph links
+  const { fwdAdj, bwdAdj } = useMemo(() => {
+    const fwd = new Map(), bwd = new Map();
     for (const link of graphData.links) {
       const src = typeof link.source === "object" ? link.source.id : link.source;
       const tgt = typeof link.target === "object" ? link.target.id : link.target;
-      if (!adj.has(src)) adj.set(src, []);
-      adj.get(src).push(tgt);
+      if (!fwd.has(src)) fwd.set(src, []);  fwd.get(src).push(tgt);
+      if (!bwd.has(tgt)) bwd.set(tgt, []);  bwd.get(tgt).push(src);
     }
-    const dist = new Map([[selectedNodeId, 0]]);
-    const queue = [selectedNodeId];
-    while (queue.length) {
-      const cur = queue.shift();
-      const d = dist.get(cur);
-      if (d >= fanOutDepth) continue;
-      for (const nb of (adj.get(cur) || [])) {
-        if (!dist.has(nb)) { dist.set(nb, d + 1); queue.push(nb); }
+    return { fwdAdj: fwd, bwdAdj: bwd };
+  }, [graphData.links]);
+
+  // Single-select fan-out: BFS forward from the one selected node (depth ≤ fanOutDepth)
+  const bfsDistances = useMemo(() => {
+    if (selectedNodeIds.size !== 1) return new Map();
+    return bfsFromNode([...selectedNodeIds][0], fwdAdj, fanOutDepth);
+  }, [selectedNodeIds, fwdAdj, fanOutDepth]);
+
+  // Multi-select chain mode: for each edge (u→v), find the minimum path length
+  // across all ordered pairs (S, T) of selected nodes such that S→…→u→v→…→T.
+  // chain length = fwdDist[S][u] + 1 + bwdDist[T][v]   (i.e. reverse BFS from T)
+  const chainEdgeMap = useMemo(() => {
+    if (selectedNodeIds.size < 2) return new Map(); // Map<"u|v", minChainLen>
+    const sel = [...selectedNodeIds];
+    const fwd = sel.map(s => bfsFromNode(s, fwdAdj, fanOutDepth)); // forward from each S
+    const bwd = sel.map(t => bfsFromNode(t, bwdAdj, fanOutDepth)); // backward from each T (reverse graph)
+
+    const result = new Map();
+    for (const link of graphData.links) {
+      const u = typeof link.source === "object" ? link.source.id : link.source;
+      const v = typeof link.target === "object" ? link.target.id : link.target;
+      let minLen = Infinity;
+      for (let i = 0; i < sel.length; i++) {
+        const du = fwd[i].get(u);
+        if (du == null) continue;
+        for (let j = 0; j < sel.length; j++) {
+          if (i === j) continue;
+          const dv = bwd[j].get(v); // hops from v back to sel[j]
+          if (dv == null) continue;
+          const len = du + 1 + dv;
+          if (len <= fanOutDepth) minLen = Math.min(minLen, len);
+        }
       }
+      if (minLen < Infinity) result.set(`${u}|${v}`, minLen);
     }
-    return dist;
-  }, [selectedNodeId, graphData.links, fanOutDepth]);
+    return result;
+  }, [selectedNodeIds, fwdAdj, bwdAdj, graphData.links, fanOutDepth]);
+
+  // Nodes that lie on at least one connecting chain (+ the selected nodes themselves)
+  const chainNodeIds = useMemo(() => {
+    if (chainEdgeMap.size === 0) return new Set();
+    const ids = new Set(selectedNodeIds);
+    for (const key of chainEdgeMap.keys()) {
+      const bar = key.indexOf("|");
+      ids.add(key.slice(0, bar));
+      ids.add(key.slice(bar + 1));
+    }
+    return ids;
+  }, [chainEdgeMap, selectedNodeIds]);
 
   // Dynamic step arrays — recomputed when fanOutDepth changes
   const stepColors = useMemo(() => makeStepColors(fanOutDepth), [fanOutDepth]);
@@ -1147,12 +1198,17 @@ function GraphRenderer({ data, measures, onNodeClick }) {
           />
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:8, fontSize:12 }}>
-          <span style={{ color:"var(--text2)" }}>Fan-out depth:</span>
+          <span style={{ color:"var(--text2)" }} title="Max hops for fan-out (1 node selected) or chain search (2+ nodes, Shift+click)">Max hops:</span>
           <input type="number" min={1} max={10} value={fanOutDepth}
             onChange={e => setFanOutDepth(Math.max(1, Math.min(10, +e.target.value || 1)))}
             style={{ width:55, padding:"3px 8px", fontSize:12 }}
           />
         </div>
+        {selectedNodeIds.size >= 2 && (
+          <span style={{ fontSize:11, color:"var(--blue)", fontWeight:600 }}>
+            🔗 {selectedNodeIds.size} nodes — showing connecting chains
+          </span>
+        )}
         <span style={{ fontSize:11, color:"var(--text3)" }}>{visibleEdges} / {totalEdges} edges shown</span>
       </div>
 
@@ -1195,8 +1251,11 @@ function GraphRenderer({ data, measures, onNodeClick }) {
               } : undefined}
               nodeCanvasObjectMode={() => "replace"}
               nodeCanvasObject={(node, ctx) => {
-                const isSelected  = node.id === selectedNodeId;
-                const isReachable = selectedNodeId ? bfsDistances.has(node.id) : true;
+                const isSelected  = selectedNodeIds.has(node.id);
+                const anySelected = selectedNodeIds.size > 0;
+                const isReachable = !anySelected ? true
+                  : selectedNodeIds.size === 1 ? bfsDistances.has(node.id)
+                  : chainNodeIds.has(node.id);
 
                 // For symbol mode the id is "module::name" — show only the name part
                 const full  = node.name || "";
@@ -1209,8 +1268,8 @@ function GraphRenderer({ data, measures, onNodeClick }) {
                 const w     = Math.max(tw + padX * 2, 30);
                 const h     = fs + padY * 2;
 
-                // Dim nodes not reachable from selection
-                ctx.globalAlpha = selectedNodeId ? (isReachable ? 1.0 : 0.18) : 1.0;
+                // Dim nodes not on any chain (or not reachable in fan-out mode)
+                ctx.globalAlpha = anySelected ? (isReachable ? 1.0 : 0.18) : 1.0;
 
                 // Selection halo — drawn slightly larger, behind the pill
                 if (isSelected) {
@@ -1245,32 +1304,58 @@ function GraphRenderer({ data, measures, onNodeClick }) {
                 ctx.fill();
               }}
               linkWidth={link => {
-                if (!selectedNodeId) return Math.log(1 + (link.value||1)) * 0.8 + 0.3;
                 const src = typeof link.source === "object" ? link.source.id : link.source;
-                const d   = bfsDistances.get(src);
-                if (d == null || d >= stepWidths.length) return 0.3;
-                return stepWidths[d];
+                const tgt = typeof link.target === "object" ? link.target.id : link.target;
+                if (selectedNodeIds.size === 0) return Math.log(1 + (link.value||1)) * 0.8 + 0.3;
+                if (selectedNodeIds.size === 1) {
+                  const d = bfsDistances.get(src);
+                  return d != null && d < stepWidths.length ? stepWidths[d] : 0.3;
+                }
+                // Chain mode: width by min chain length (1-indexed step)
+                const cl = chainEdgeMap.get(`${src}|${tgt}`);
+                if (cl == null) return 0.3;
+                return stepWidths[Math.min(cl - 1, stepWidths.length - 1)];
               }}
               linkColor={link => {
-                if (!selectedNodeId) return "#30363d";
                 const src = typeof link.source === "object" ? link.source.id : link.source;
-                const d   = bfsDistances.get(src);
-                if (d == null || d >= stepColors.length) return "rgba(48,54,61,0.15)";
-                return stepColors[d];
+                const tgt = typeof link.target === "object" ? link.target.id : link.target;
+                if (selectedNodeIds.size === 0) return "#30363d";
+                if (selectedNodeIds.size === 1) {
+                  const d = bfsDistances.get(src);
+                  return d != null && d < stepColors.length ? stepColors[d] : "rgba(48,54,61,0.15)";
+                }
+                // Chain mode: color by min chain length covering this edge
+                const cl = chainEdgeMap.get(`${src}|${tgt}`);
+                if (cl == null) return "rgba(48,54,61,0.12)";
+                return stepColors[Math.min(cl - 1, stepColors.length - 1)];
               }}
               linkDirectionalArrowLength={link => {
-                if (!selectedNodeId) return 5;
                 const src = typeof link.source === "object" ? link.source.id : link.source;
-                const d   = bfsDistances.get(src);
-                if (d == null || d >= stepArrows.length) return 2;
-                return stepArrows[d];
+                const tgt = typeof link.target === "object" ? link.target.id : link.target;
+                if (selectedNodeIds.size === 0) return 5;
+                if (selectedNodeIds.size === 1) {
+                  const d = bfsDistances.get(src);
+                  return d != null && d < stepArrows.length ? stepArrows[d] : 2;
+                }
+                const cl = chainEdgeMap.get(`${src}|${tgt}`);
+                if (cl == null) return 2;
+                return stepArrows[Math.min(cl - 1, stepArrows.length - 1)];
               }}
               linkDirectionalArrowRelPos={1}
-              onNodeClick={node => {
-                // Toggle: click selected node again to deselect
-                const next = node?.id === selectedNodeId ? null : (node?.id ?? null);
-                setSelectedNodeId(next);
-                onNodeClick?.(next ? node : null);
+              onNodeClick={(node, event) => {
+                const id = node?.id ?? null;
+                if (!id) return;
+                setSelectedNodeIds(prev => {
+                  if (event?.shiftKey) {
+                    // Shift+click: toggle node in multi-select set
+                    const next = new Set(prev);
+                    if (next.has(id)) next.delete(id); else next.add(id);
+                    return next;
+                  }
+                  // Plain click: single-select (or deselect if already sole selection)
+                  return prev.size === 1 && prev.has(id) ? new Set() : new Set([id]);
+                });
+                onNodeClick?.(node);
               }}
               backgroundColor="#0d1117"
             />
