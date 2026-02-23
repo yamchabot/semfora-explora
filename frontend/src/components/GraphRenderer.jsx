@@ -149,8 +149,9 @@ export default function GraphRenderer({ data, measures, onNodeClick,
   colorKeyOverride, setColorKeyOverride, fanOutDepth, setFanOutDepth,
   selectedNodeIds, setSelectedNodeIds, hideIsolated, setHideIsolated,
   controlsH = 0, fillViewport = false,
-  nodeColorOverrides = null,   // Map<nodeId, cssColor> — bypasses metric gradient
+  nodeColorOverrides = null,   // Map<nodeId, cssColor> — bypasses metric gradient (Diff page)
   edgeColorOverrides = null,   // Map<"src|tgt", cssColor> — bypasses step/chain colors
+  highlightSet = null,         // Set<nodeId> — draws glow ring; color = node's own gradient color
 }) {
   const containerRef  = useRef(null);
   const fgRef         = useRef(null);
@@ -189,9 +190,9 @@ export default function GraphRenderer({ data, measures, onNodeClick,
   const dim0      = data?.dimensions?.[0];   // outer dim (blob groups in blob mode, node dim in 1d)
   const dim1      = data?.dimensions?.[1];   // inner dim (nodes in blob mode)
 
-  // Resolve color key: override if valid, else first measure
+  // Resolve color key: override if valid (in user measures OR in measure_types), else first measure
   const allMKeys = measures.map(measureKey);
-  const colorKey = (colorKeyOverride && allMKeys.includes(colorKeyOverride))
+  const colorKey = (colorKeyOverride && (allMKeys.includes(colorKeyOverride) || types[colorKeyOverride] !== undefined))
     ? colorKeyOverride
     : (allMKeys[0] ?? null);
 
@@ -464,6 +465,9 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                 {measureLabel(m)}{!m.special ? ` (${m.agg})` : ""}
               </option>
             ))}
+            {types.diff_status_value !== undefined && (
+              <option value="diff_status_value">diff status</option>
+            )}
           </select>
         </div>
         {/* Edge weight */}
@@ -627,8 +631,10 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                 // Resolve base color early (needed for diff ring below)
                 const baseColor = nodeColorOverrides?.get(node.id) ?? node.color;
 
-                // Diff glow ring — drawn outermost when diff overlay is active
-                if (nodeColorOverrides?.has(node.id)) {
+                // Diff glow ring — drawn when node is diff-highlighted.
+                // Fires for nodeColorOverrides (Diff page) OR highlightSet (Explore overlay).
+                // Uses baseColor so the glow matches the node's diff-colored fill.
+                if (nodeColorOverrides?.has(node.id) || highlightSet?.has(node.id)) {
                   // Soft bloom behind the ring
                   drawPill(ctx, node.x, node.y, w + 18, h + 18);
                   ctx.fillStyle = baseColor + "1a";  // ~10% opacity bloom

@@ -165,8 +165,8 @@ export default function Explore() {
   const kindsStr    = kinds.join(",");
 
   const pivotQuery = useQuery({
-    queryKey: ["explore", repoId, effectiveDims.join(","), measuresStr, kindsStr],
-    queryFn:  () => api.explorePivot(repoId, effectiveDims, measuresStr, kindsStr),
+    queryKey: ["explore", repoId, effectiveDims.join(","), measuresStr, kindsStr, compareRepo],
+    queryFn:  () => api.explorePivot(repoId, effectiveDims, measuresStr, kindsStr, compareRepo),
     enabled:  (renderer==="pivot"||renderer==="graph") && measures.length>0,
   });
 
@@ -186,58 +186,69 @@ export default function Explore() {
     return g;
   }, [allRepos]);
 
-  // ── Diff overlay — lightweight per-node status map ────────────────────────
-  // Fetches only changed nodes' statuses, overlaid on top of normal explore data.
-  // The explore graph (dims/measures/filters) is unchanged; only node colors differ.
-  const DIFF_NODE_COLORS = { added:"#3fb950", removed:"#f85149", modified:"#e3b341" };
+  // ── Diff overlay — driven by diff_status_value measure in pivot rows ────────
+  // When compareRepo is set, the explore endpoint annotates rows with
+  // diff_status_value (0.0=added, 0.25=modified, 0.5=unchanged, 1.0=removed)
+  // and edges with diff_status ("added"|"unchanged").
 
-  const diffStatusQuery = useQuery({
-    queryKey: ["diff-status", repoId, compareRepo],
-    queryFn:  () => api.diffStatus(repoId, compareRepo),
-    enabled:  !!compareRepo,
-    staleTime: Infinity,
-  });
+  // Auto-switch colorKey to diff_status_value when compare becomes active,
+  // restore to null when cleared (if user hadn't manually overridden it).
+  useEffect(() => {
+    if (compareRepo) {
+      setColorKeyOverride("diff_status_value");
+    } else {
+      setColorKeyOverride(prev => prev === "diff_status_value" ? null : prev);
+    }
+  }, [compareRepo]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Build nodeColorOverrides from the diff status map.
-  // Symbol-level nodes ("module::name") → direct lookup.
-  // Group-level nodes (module names without "::") → dominant status of their symbols.
-  const diffNodeColors = useMemo(() => {
-    const sm = diffStatusQuery.data?.status_map;
-    if (!sm || !compareRepo) return null;
-    const overrides = new Map();
-    // 1. Direct symbol-level coloring
-    for (const [nodeId, status] of Object.entries(sm)) {
-      const color = DIFF_NODE_COLORS[status];
-      if (color) overrides.set(nodeId, color);
-    }
-    // 2. Module-level aggregation (for group-by-module nodes without "::")
-    //    Priority: modified > added > removed
-    const modulePriority = new Map(); // module → highest priority status
-    const priority = { modified: 3, added: 2, removed: 1 };
-    for (const [nodeId, status] of Object.entries(sm)) {
-      const sep = nodeId.indexOf("::");
-      if (sep === -1) continue;
-      const module = nodeId.slice(0, sep);
-      const cur = modulePriority.get(module);
-      if (!cur || priority[status] > priority[cur]) modulePriority.set(module, status);
-    }
-    for (const [module, status] of modulePriority) {
-      if (!overrides.has(module)) {
-        const color = DIFF_NODE_COLORS[status];
-        if (color) overrides.set(module, color);
+  // Highlight set: node IDs with diff_status_value < 0.49 (i.e., changed nodes)
+  const highlightSet = useMemo(() => {
+    if (!compareRepo || !filteredData?.rows) return null;
+    const set = new Set();
+    for (const row of filteredData.rows) {
+      const val = row.values?.diff_status_value;
+      if (val !== undefined && val < 0.49) {
+        // Symbol grain: key is row.key.symbol; group grain: key is row.key[dims[0]]
+        const nodeId = row.key.symbol ?? row.key[effectiveDims[0]];
+        if (nodeId) set.add(nodeId);
+      }
+      // Also check children for 2-dim pivot rows
+      for (const child of row.children || []) {
+        const cval = child.values?.diff_status_value;
+        if (cval !== undefined && cval < 0.49) {
+          const cid = child.key.symbol ?? child.key[effectiveDims[1]];
+          if (cid) set.add(cid);
+        }
       }
     }
-    return overrides.size > 0 ? overrides : null;
-  }, [diffStatusQuery.data, compareRepo]); // eslint-disable-line react-hooks/exhaustive-deps
+    return set.size > 0 ? set : null;
+  }, [filteredData, compareRepo, effectiveDims]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Summary counts for the legend
+  // Edge color overrides from diff_status on explore graph_edges
+  const diffEdgeOverrides = useMemo(() => {
+    if (!compareRepo || !filteredData?.graph_edges) return null;
+    const map = new Map();
+    for (const e of filteredData.graph_edges) {
+      if (e.diff_status === "added") {
+        map.set(`${e.source}|${e.target}`, "#3fb950");
+      }
+    }
+    return map.size > 0 ? map : null;
+  }, [filteredData, compareRepo]);
+
+  // Summary counts for the legend (derived from rows)
   const diffStats = useMemo(() => {
-    const sm = diffStatusQuery.data?.status_map;
-    if (!sm) return null;
-    const counts = { added: 0, removed: 0, modified: 0 };
-    for (const status of Object.values(sm)) if (counts[status] !== undefined) counts[status]++;
+    if (!compareRepo || !filteredData?.rows) return null;
+    const counts = { added: 0, modified: 0, removed: 0, unchanged: 0 };
+    for (const row of filteredData.rows) {
+      const val = row.values?.diff_status_value;
+      if (val === 0.0)  counts.added++;
+      else if (val === 0.25) counts.modified++;
+      else if (val === 1.0)  counts.removed++;
+      else if (val === 0.5)  counts.unchanged++;
+    }
     return counts;
-  }, [diffStatusQuery.data]);
+  }, [filteredData, compareRepo]);
 
   const allDims       = ["module", "risk", "kind", "symbol", "dead", "high_risk", "in_cycle", "community"];
   const availableDims = allDims.filter(d => !dims.includes(d));
@@ -410,12 +421,12 @@ export default function Explore() {
           data={stableFilteredData} measures={measures} onNodeClick={setSelectedNode}
           minWeight={minWeight}               setMinWeight={setMinWeight}
           topK={topK}                         setTopK={setTopK}
-          colorKeyOverride={diffNodeColors ? null : colorKeyOverride}
-          setColorKeyOverride={diffNodeColors ? () => {} : setColorKeyOverride}
+          colorKeyOverride={colorKeyOverride} setColorKeyOverride={setColorKeyOverride}
           fanOutDepth={fanOutDepth}           setFanOutDepth={setFanOutDepth}
           selectedNodeIds={selectedNodeIds}   setSelectedNodeIds={setSelectedNodeIds}
           hideIsolated={hideIsolated}         setHideIsolated={setHideIsolated}
-          nodeColorOverrides={diffNodeColors}
+          highlightSet={highlightSet}
+          edgeColorOverrides={diffEdgeOverrides}
           controlsH={0} fillViewport={true}
         />
       )}
