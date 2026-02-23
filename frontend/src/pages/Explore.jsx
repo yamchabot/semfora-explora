@@ -62,6 +62,7 @@ export default function Explore() {
     return s ? new Set(s.split(",").filter(Boolean)) : new Set();
   });
   const [hideIsolated, setHideIsolated] = useState(() => searchParams.get("hi") === "1");
+  const [nodeDot,      setNodeDot]      = useState(() => searchParams.get("nd") === "1");
 
   // ── Compare / diff overlay ───────────────────────────────────────────────
   const [compareRepo, setCompareRepo] = useState(() => searchParams.get("cmp") || "");
@@ -135,11 +136,12 @@ export default function Explore() {
     if (fanOutDepth !== 5)          p.set("hops", fanOutDepth);
     if (selectedNodeIds.size > 0)   p.set("sel",  [...selectedNodeIds].join(","));
     if (hideIsolated)               p.set("hi",   "1");
+    if (nodeDot)                    p.set("nd",   "1");
     if (compareRepo)                p.set("cmp",  compareRepo);
     setSearchParams(p, { replace: true });
   }, [repoId, renderer, dims, measures, kinds, filters, // eslint-disable-line react-hooks/exhaustive-deps
       minWeight, topK, colorKeyOverride, fanOutDepth, selectedNodeIds, hideIsolated,
-      compareRepo]);
+      nodeDot, compareRepo]);
 
   // Always load available kinds for the selected repo
   const kindsQuery = useQuery({
@@ -427,6 +429,7 @@ export default function Explore() {
           fanOutDepth={fanOutDepth}           setFanOutDepth={setFanOutDepth}
           selectedNodeIds={selectedNodeIds}   setSelectedNodeIds={setSelectedNodeIds}
           hideIsolated={hideIsolated}         setHideIsolated={setHideIsolated}
+          nodeDot={nodeDot}                   setNodeDot={setNodeDot}
           highlightSet={highlightSet}
           edgeColorOverrides={diffEdgeOverrides}
           controlsH={0} fillViewport={true}

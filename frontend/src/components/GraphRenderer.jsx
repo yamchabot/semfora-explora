@@ -251,6 +251,7 @@ export default function GraphRenderer({ data, measures, onNodeClick,
   minWeight, setMinWeight, topK, setTopK,
   colorKeyOverride, setColorKeyOverride, fanOutDepth, setFanOutDepth,
   selectedNodeIds, setSelectedNodeIds, hideIsolated, setHideIsolated,
+  nodeDot = false, setNodeDot,
   controlsH = 0, fillViewport = false,
   nodeColorOverrides = null,   // Map<nodeId, cssColor> — bypasses metric gradient (Diff page)
   edgeColorOverrides = null,   // Map<"src|tgt", cssColor> — bypasses step/chain colors
@@ -269,9 +270,7 @@ export default function GraphRenderer({ data, measures, onNodeClick,
   const [couplingIds, setCouplingIds] = useState(new Set());
   // When true, the graph only shows cross-boundary nodes + edges (no non-coupling nodes).
   const [couplingOnly, setCouplingOnly] = useState(false);
-  // Dot mode: render nodes as plain circles instead of labelled pills.
-  // Useful when the graph is too dense to read individual labels.
-  const [nodeDot, setNodeDot] = useState(false);
+  // nodeDot and setNodeDot come in as props (URL-persisted in Explore.jsx)
   // Spread: scales charge repulsion and link distance together.
   // 350 = default; higher = more spread; lower = tighter.
   const SPREAD_DEFAULT = 350;
