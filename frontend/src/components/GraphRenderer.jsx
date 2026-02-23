@@ -253,6 +253,7 @@ export default function GraphRenderer({ data, measures, onNodeClick,
   colorKeyOverride, setColorKeyOverride, fanOutDepth, setFanOutDepth,
   selectedNodeIds, setSelectedNodeIds, hideIsolated, setHideIsolated,
   nodeDot = false, setNodeDot,
+  invertFlow = false, setInvertFlow,
   controlsH = 0, fillViewport = false,
   nodeColorOverrides = null,   // Map<nodeId, cssColor> — bypasses metric gradient (Diff page)
   edgeColorOverrides = null,   // Map<"src|tgt", cssColor> — bypasses step/chain colors
@@ -846,6 +847,18 @@ export default function GraphRenderer({ data, measures, onNodeClick,
               color:       nodeDot ? "#fff"       : "var(--text2)" }}
           >⬤</button>
         </Tooltip>
+        <Tooltip tip={invertFlow
+          ? "Particles flowing ← incoming calls (click to restore outgoing)"
+          : "Particles flowing → outgoing calls (click to reverse — show incoming)"}>
+          <button
+            onClick={() => setInvertFlow(v => !v)}
+            title={invertFlow ? "Reverse particle flow: showing incoming calls" : "Reverse particle flow: showing outgoing calls"}
+            style={{ fontSize:13, padding:"3px 7px", cursor:"pointer", borderRadius:4,
+              border:"1px solid var(--border2)",
+              background: invertFlow ? "var(--blue)" : "var(--bg3)",
+              color:       invertFlow ? "#fff"       : "var(--text2)" }}
+          >↩</button>
+        </Tooltip>
         <span style={{ fontSize:11, color:"var(--text3)", whiteSpace:"nowrap" }} title="Visible edges / total edges">{visibleEdges}/{totalEdges} edges</span>
       </div>{/* end inner controls flex */}
       </div>{/* end gradient overlay */}
@@ -1121,7 +1134,7 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                 if (selectedNodeIds.size === 1) return (fwdDistances.has(u) || bwdDistances.has(v)) ? 2 : 0;
                 return chainEdgeMap.has(`${u}|${v}`) ? 2 : 0;
               }}
-              linkDirectionalParticleSpeed={0.004}
+              linkDirectionalParticleSpeed={invertFlow ? -0.004 : 0.004}
               linkDirectionalParticleWidth={link => {
                 if (selectedNodeIds.size === 0) {
                   if (couplingIds.size > 0) {

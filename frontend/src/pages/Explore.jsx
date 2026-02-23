@@ -63,6 +63,7 @@ export default function Explore() {
   });
   const [hideIsolated, setHideIsolated] = useState(() => searchParams.get("hi") === "1");
   const [nodeDot,      setNodeDot]      = useState(() => searchParams.get("nd") === "1");
+  const [invertFlow,   setInvertFlow]   = useState(() => searchParams.get("rf") === "1");
 
   // ── Compare / diff overlay ───────────────────────────────────────────────
   const [compareRepo, setCompareRepo] = useState(() => searchParams.get("cmp") || "");
@@ -137,11 +138,12 @@ export default function Explore() {
     if (selectedNodeIds.size > 0)   p.set("sel",  [...selectedNodeIds].join(","));
     if (hideIsolated)               p.set("hi",   "1");
     if (nodeDot)                    p.set("nd",   "1");
+    if (invertFlow)                 p.set("rf",   "1");
     if (compareRepo)                p.set("cmp",  compareRepo);
     setSearchParams(p, { replace: true });
   }, [repoId, renderer, dims, measures, kinds, filters, // eslint-disable-line react-hooks/exhaustive-deps
       minWeight, topK, colorKeyOverride, fanOutDepth, selectedNodeIds, hideIsolated,
-      nodeDot, compareRepo]);
+      nodeDot, invertFlow, compareRepo]);
 
   // Always load available kinds for the selected repo
   const kindsQuery = useQuery({
@@ -430,6 +432,7 @@ export default function Explore() {
           selectedNodeIds={selectedNodeIds}   setSelectedNodeIds={setSelectedNodeIds}
           hideIsolated={hideIsolated}         setHideIsolated={setHideIsolated}
           nodeDot={nodeDot}                   setNodeDot={setNodeDot}
+          invertFlow={invertFlow}             setInvertFlow={setInvertFlow}
           highlightSet={highlightSet}
           edgeColorOverrides={diffEdgeOverrides}
           controlsH={0} fillViewport={true}
