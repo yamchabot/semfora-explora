@@ -277,11 +277,13 @@ export default function GraphRenderer({ data, measures, onNodeClick,
   // 350 = default; higher = more spread; lower = tighter.
   const SPREAD_DEFAULT = 350;
   const [forceSpread, setForceSpread] = useState(SPREAD_DEFAULT);
-  // Dot-mode hover tooltip
-  const [hoveredNode, setHoveredNode] = useState(null);
+  // Dot-mode hover tooltip — fully imperative so hover never triggers a React
+  // re-render (which would reset particle animation timing in ForceGraph2D).
   const tooltipRef = useRef(null);
-  // Clear stale hover tooltip when dot mode is turned off
-  useEffect(() => { if (!nodeDot) setHoveredNode(null); }, [nodeDot]);
+  // Hide tooltip when dot mode is turned off
+  useEffect(() => {
+    if (!nodeDot && tooltipRef.current) tooltipRef.current.style.display = "none";
+  }, [nodeDot]);
   const zoomTransformRef  = useRef({ k: 1, x: 0, y: 0 });
   const didOffsetRef      = useRef(false);
   // Persist node positions across graphData rebuilds (measure changes keep layout stable).
@@ -1170,7 +1172,16 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                 const c  = fg.centerAt() || { x: 0, y: 0 };
                 fg.centerAt(c.x, c.y + controlsH / (2 * k), 400);
               }}
-              onNodeHover={nodeDot ? (node) => setHoveredNode(node ?? null) : undefined}
+              onNodeHover={(node) => {
+                const el = tooltipRef.current;
+                if (!el) return;
+                if (node && nodeDot) {
+                  el.textContent = node.id;
+                  el.style.display = "block";
+                } else {
+                  el.style.display = "none";
+                }
+              }}
               onNodeClick={(node, event) => {
                 const id = node?.id ?? null;
                 if (!id) return;
@@ -1195,30 +1206,29 @@ export default function GraphRenderer({ data, measures, onNodeClick,
           )}
 
         {/* ── Dot-mode node hover tooltip ─────────────────────────────── */}
-        {nodeDot && hoveredNode && (
-          <div
-            ref={tooltipRef}
-            style={{
-              position:      "absolute",
-              pointerEvents: "none",
-              zIndex:        60,
-              background:    "var(--bg0, #0d1117)",
-              border:        "1px solid var(--border2, #30363d)",
-              borderRadius:  5,
-              padding:       "4px 10px",
-              fontSize:      12,
-              fontFamily:    "monospace",
-              color:         "var(--text, #e6edf3)",
-              whiteSpace:    "nowrap",
-              boxShadow:     "0 3px 10px rgba(0,0,0,0.55)",
-              // Initial position; updated imperatively on mousemove (no re-render per frame)
-              left:          0,
-              top:           0,
-            }}
-          >
-            {hoveredNode.id}
-          </div>
-        )}
+        {/* Always in the DOM; shown/hidden and positioned imperatively so   */}
+        {/* hover events never trigger a React re-render (which would reset  */}
+        {/* ForceGraph2D's particle animation timing).                        */}
+        <div
+          ref={tooltipRef}
+          style={{
+            display:       "none",     // shown imperatively via onNodeHover
+            position:      "absolute",
+            pointerEvents: "none",
+            zIndex:        60,
+            background:    "var(--bg0, #0d1117)",
+            border:        "1px solid var(--border2, #30363d)",
+            borderRadius:  5,
+            padding:       "4px 10px",
+            fontSize:      12,
+            fontFamily:    "monospace",
+            color:         "var(--text, #e6edf3)",
+            whiteSpace:    "nowrap",
+            boxShadow:     "0 3px 10px rgba(0,0,0,0.55)",
+            left:          0,
+            top:           0,
+          }}
+        />
 
         {/* ── Node search modal ───────────────────────────────────────── */}
         {showSearch && (
