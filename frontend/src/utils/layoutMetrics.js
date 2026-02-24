@@ -610,3 +610,175 @@ export function layoutQualityScore(nodes, links, opts = {}) {
 
   return { score: Math.round(score * 10) / 10, components, raw: { vis, ovlp, cross, stress, prox, integ } };
 }
+
+// ── 13. Cross-module edge visibility ─────────────────────────────────────────
+
+/**
+ * Of all edges that cross a blob boundary (different group keys), what
+ * fraction are visible — i.e. the gap between node surfaces exceeds threshold?
+ *
+ * Architecture Reviewers need to see these edges to understand coupling.
+ *
+ * Returns:
+ *   ratio      0–1   fraction of cross-module edges that are visible
+ *   count      number of cross-module edges found
+ *   visible    number of those with gap > threshold
+ */
+export function crossModuleEdgeVisibility(nodes, links, threshold = 8, groupKeyFn = n => n.group) {
+  const map = nodeMap(nodes);
+  let count = 0, visible = 0;
+
+  for (const link of links) {
+    const [a, b] = resolveLink(link, map);
+    if (!a || !b) continue;
+    if (groupKeyFn(a) === groupKeyFn(b)) continue; // same group — skip
+    count++;
+    const gap = dist(a, b) - nodeRadius(a) - nodeRadius(b);
+    if (gap > threshold) visible++;
+  }
+
+  return { ratio: count ? visible / count : 1, count, visible };
+}
+
+// ── 14. Node size variation ───────────────────────────────────────────────────
+
+/**
+ * Coefficient of variation (stddev / mean) of node visual radii.
+ * If all nodes are the same size the size encoding is useless (CV ≈ 0).
+ * A Complexity Auditor needs CV > 0.3 to reliably spot large vs small nodes.
+ *
+ * Returns:
+ *   cv      stddev / mean  (0 = all same, 1 = highly varied)
+ *   mean    px
+ *   stddev  px
+ *   min/max px
+ */
+export function nodeSizeVariation(nodes) {
+  if (!nodes.length) return { cv: 0, mean: 0, stddev: 0, min: 0, max: 0 };
+  const radii  = nodes.map(n => nodeRadius(n));
+  const mean   = radii.reduce((s, r) => s + r, 0) / radii.length;
+  const stddev = Math.sqrt(radii.reduce((s, r) => s + (r - mean) ** 2, 0) / radii.length);
+  return { cv: mean ? stddev / mean : 0, mean, stddev, min: Math.min(...radii), max: Math.max(...radii) };
+}
+
+// ── 15. Prominent node visibility ────────────────────────────────────────────
+
+/**
+ * For the top-N nodes by visual size (the most "important" nodes), what
+ * fraction are unobscured — i.e. not overlapping with other nodes?
+ *
+ * A Complexity Auditor needs prominent (large) nodes to stand out visually.
+ *
+ * Returns:
+ *   ratio        0–1   fraction of prominent nodes that are unobscured
+ *   topN         the nodes examined
+ *   obscured     prominent nodes that overlap with something
+ */
+export function prominentNodeVisibility(nodes, topN = 5) {
+  if (!nodes.length) return { ratio: 1, topN: [], obscured: [] };
+  const sorted   = [...nodes].sort((a, b) => nodeRadius(b) - nodeRadius(a));
+  const top      = sorted.slice(0, topN);
+  const obscured = [];
+
+  for (const prominent of top) {
+    const overlaps = nodes.some(other => {
+      if (other.id === prominent.id) return false;
+      return dist(prominent, other) < nodeRadius(prominent) + nodeRadius(other);
+    });
+    if (overlaps) obscured.push(prominent);
+  }
+
+  return { ratio: top.length ? (top.length - obscured.length) / top.length : 1, topN: top, obscured };
+}
+
+// ── 16. Auto-detect linear chains ────────────────────────────────────────────
+
+/**
+ * Find all maximal linear chains in the graph — sequences where each interior
+ * node has degree exactly 2 (one in, one out in the chain).
+ *
+ * Returns an array of ordered node-ID arrays, each of length ≥ 3.
+ * Used to automatically compute chainLinearity without needing a manual
+ * ordered-IDs input.
+ */
+export function autoDetectChains(nodes, links) {
+  const map = nodeMap(nodes);
+
+  // Build undirected adjacency
+  const adj = new Map(nodes.map(n => [n.id, new Set()]));
+  for (const link of links) {
+    const [a, b] = resolveLink(link, map);
+    if (!a || !b) continue;
+    adj.get(a.id).add(b.id);
+    adj.get(b.id).add(a.id);
+  }
+
+  const degree = id => (adj.get(id) ?? new Set()).size;
+
+  // Chain nodes: degree 1 (endpoint) or 2 (interior)
+  const isChainNode = id => degree(id) <= 2;
+
+  const visited = new Set();
+  const chains  = [];
+
+  // Start from each degree-1 node (chain endpoint)
+  for (const n of nodes) {
+    if (visited.has(n.id) || degree(n.id) !== 1 || !isChainNode(n.id)) continue;
+
+    const chain = [n.id];
+    visited.add(n.id);
+
+    let prev = null, cur = n.id;
+    while (true) {
+      const neighbours = [...(adj.get(cur) ?? [])].filter(nb => nb !== prev && isChainNode(nb));
+      if (!neighbours.length) break;
+      const next = neighbours[0];
+      if (visited.has(next)) break;
+      chain.push(next);
+      visited.add(next);
+      prev = cur; cur = next;
+      if (degree(cur) !== 2) break; // reached another endpoint
+    }
+
+    if (chain.length >= 3) chains.push(chain);
+  }
+
+  return chains;
+}
+
+// ── 17. Compute all facts at once ─────────────────────────────────────────────
+
+/**
+ * Run every metric and return a flat facts object ready for constraint checking.
+ * This is the single entry point for user simulation constraint systems.
+ */
+export function computeFacts(nodes, links, opts = {}) {
+  const { groupKeyFn = n => n.group, idealEdgeLength = 120, topProminentN = 5 } = opts;
+
+  const chains = autoDetectChains(nodes, links);
+  const chainLinearities = chains.map(ch => chainLinearity(nodes, ch));
+  const avgChainLinearity = chainLinearities.length
+    ? chainLinearities.reduce((s, c) => s + c.ratio, 0) / chainLinearities.length
+    : 1;
+  const avgChainStraightness = chainLinearities.length
+    ? chainLinearities.reduce((s, c) => s + c.straightness, 0) / chainLinearities.length
+    : 1;
+
+  return {
+    edgeVisibility:             edgeVisibility(nodes, links),
+    nodeOverlap:                nodeOverlap(nodes),
+    edgeCrossings:              edgeCrossings(nodes, links),
+    layoutStress:               layoutStress(nodes, links, idealEdgeLength),
+    hubCentrality:              hubCentrality(nodes, links),
+    chainLinearity:             { ratio: avgChainLinearity, straightness: avgChainStraightness, chains: chainLinearities },
+    blobIntegrity:              blobIntegrity(nodes, groupKeyFn),
+    blobSeparation:             blobSeparation(nodes, groupKeyFn),
+    gestaltProximity:           gestaltProximity(nodes, groupKeyFn),
+    angularResolution:          angularResolution(nodes, links),
+    edgeLengthUniformity:       edgeLengthUniformity(nodes, links),
+    crossModuleEdgeVisibility:  crossModuleEdgeVisibility(nodes, links, 8, groupKeyFn),
+    nodeSizeVariation:          nodeSizeVariation(nodes),
+    prominentNodeVisibility:    prominentNodeVisibility(nodes, topProminentN),
+    qualityScore:               layoutQualityScore(nodes, links, { groupKeyFn, idealEdgeLength }),
+  };
+}
