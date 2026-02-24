@@ -215,18 +215,110 @@ function makeHubCenteringForce(nodes, links, minDegree = 3, strength = 0.20) {
   };
 }
 
+// ── Meta-simulation: topology-aware initial blob positions ───────────────────
+// Runs a lightweight spring-layout simulation at the module (blob) level before
+// the full simulation. One meta-node per module, weighted by cross-edge count.
+// Strongly-coupled module pairs are pulled close; weakly-coupled stay far.
+// Returns { moduleId → {x, y} } or null for single/two-module graphs.
+//
+// Why this works: the full D3 simulation is good at INTRA-module layout but
+// bad at global INTER-module arrangement — it treats blobs as collections of
+// point masses, not as atomic units. The meta-sim treats each blob as one node
+// and finds the optimal global arrangement, then uses that as the initial
+// centroid positions for the full sim.
+function metaSimPositions(nodes, links) {
+  const nodeGroup = {};
+  nodes.forEach(n => { nodeGroup[n.id] = n.group; });
+  const groups = [...new Set(nodes.map(n => n.group))];
+
+  if (groups.length < 3) return null;  // only useful for 3+ modules
+
+  // Count cross-module edges per group pair
+  const pairWeights = {};
+  links.forEach(l => {
+    const s  = typeof l.source === 'object' ? l.source.id : l.source;
+    const t  = typeof l.target === 'object' ? l.target.id : l.target;
+    const gs = nodeGroup[s], gt = nodeGroup[t];
+    if (!gs || !gt || gs === gt) return;
+    const key = gs < gt ? `${gs}|${gt}` : `${gt}|${gs}`;
+    pairWeights[key] = (pairWeights[key] || 0) + 1;
+  });
+
+  if (Object.keys(pairWeights).length === 0) return null;
+
+  const maxWeight = Math.max(...Object.values(pairWeights));
+
+  // Meta-nodes: one per group, initial positions on a circle
+  const targetSpread = Math.max(400, L * Math.sqrt(groups.length) * 2.2);
+  const metaNodes = groups.map((g, i) => {
+    const a = (i / groups.length) * 2 * Math.PI;
+    return {
+      id: g,
+      x: Math.cos(a) * targetSpread * 0.5,
+      y: Math.sin(a) * targetSpread * 0.5,
+      vx: 0, vy: 0,
+    };
+  });
+
+  // Meta-links: shorter target distance for stronger coupling
+  const metaLinks = Object.entries(pairWeights).map(([key, w]) => {
+    const [g1, g2] = key.split('|');
+    return {
+      source: g1, target: g2, weight: w,
+      // Stronger coupling → shorter target distance → placed adjacent
+      _distance: targetSpread * 0.7 * Math.pow(maxWeight / w, 0.35),
+      _strength: Math.min(0.9, 0.15 * w),
+    };
+  });
+
+  const metaSim = forceSimulation(metaNodes)
+    .numDimensions(2)
+    .force("link", forceLink(metaLinks).id(n => n.id)
+      .distance(l => l._distance)
+      .strength(l => l._strength))
+    .force("charge",  forceManyBody().strength(-1200))
+    .force("center",  forceCenter(0, 0))
+    .stop();
+
+  for (let i = 0; i < 300; i++) metaSim.tick();
+
+  const positions = {};
+  metaNodes.forEach(mn => { positions[mn.id] = { x: mn.x, y: mn.y }; });
+  return positions;
+}
+
 function settle(nodes, links, ticks = 800) {
   const groups = [...new Set(nodes.map(n => n.group))];
 
   // ── Fix 1: Degree-based sizes (before collision radii are computed) ─────────
   assignDegreeBasedSizes(nodes, links);
 
-  // ── Initial positions: spread groups on a circle, nodes within each group ───
-  const spread = Math.max(400, L * Math.sqrt(groups.length) * 2.2);
+  // ── Initial positions: topology-aware blob placement via meta-simulation ────
+  // For 3+ modules, run a lightweight blob-level spring layout first so that
+  // strongly-coupled module pairs start adjacent (fewer routing violations).
+  // For 1–2 modules, fall back to the simple circle placement.
+  const spread  = Math.max(400, L * Math.sqrt(groups.length) * 2.2);
+  const metaPos = metaSimPositions(nodes, links);
+
+  // Scale meta-positions so the furthest blob centroid sits at `spread`
+  let metaScale = 1;
+  if (metaPos) {
+    const maxDist = Math.max(1, ...Object.values(metaPos).map(p => Math.hypot(p.x, p.y)));
+    metaScale = spread / maxDist;
+  }
+
   groups.forEach((g, gi) => {
-    const a   = (gi / groups.length) * 2 * Math.PI;
-    const cx  = groups.length > 1 ? Math.cos(a) * spread : 0;
-    const cy  = groups.length > 1 ? Math.sin(a) * spread : 0;
+    let cx, cy;
+    if (metaPos && metaPos[g]) {
+      cx = metaPos[g].x * metaScale;
+      cy = metaPos[g].y * metaScale;
+    } else if (groups.length > 1) {
+      const a = (gi / groups.length) * 2 * Math.PI;
+      cx = Math.cos(a) * spread;
+      cy = Math.sin(a) * spread;
+    } else {
+      cx = 0; cy = 0;
+    }
     const mem = nodes.filter(n => n.group === g);
     const mr  = Math.max(80, L * Math.sqrt(mem.length) * 0.5);
     mem.forEach((n, i) => {
@@ -253,7 +345,7 @@ function settle(nodes, links, ticks = 800) {
       })()
     : null;
 
-  // ── Cross-module link map (for weakened strength / longer distance) ─────────
+  // ── Cross-module link map (for weakened strength / topology-aware distance) ──
   const nodeGroup = {};
   nodes.forEach(n => { nodeGroup[n.id] = n.group; });
   function isCross(l) {
@@ -262,14 +354,42 @@ function settle(nodes, links, ticks = 800) {
     return nodeGroup[s] !== nodeGroup[t];
   }
 
+  // Count cross-module edges per module pair so we can scale link distances.
+  // More edges between a pair → shorter target distance → they sit adjacent.
+  // This is the force that makes the meta-sim topology-aware arrangement *stick*
+  // through the full simulation instead of being scrambled by charge repulsion.
+  const pairWeights = {};
+  links.forEach(l => {
+    const s  = typeof l.source === "object" ? l.source.id : l.source;
+    const t  = typeof l.target === "object" ? l.target.id : l.target;
+    const gs = nodeGroup[s], gt = nodeGroup[t];
+    if (!gs || !gt || gs === gt) return;
+    const key = gs < gt ? `${gs}|${gt}` : `${gt}|${gs}`;
+    pairWeights[key] = (pairWeights[key] || 0) + 1;
+  });
+  const maxPairWeight = Math.max(1, ...Object.values(pairWeights), 0);
+
+  function crossLinkDist(l) {
+    const s  = typeof l.source === "object" ? l.source.id : l.source;
+    const t  = typeof l.target === "object" ? l.target.id : l.target;
+    const gs = nodeGroup[s], gt = nodeGroup[t];
+    const key = gs < gt ? `${gs}|${gt}` : `${gt}|${gs}`;
+    const w   = pairWeights[key] || 1;
+    // Only adjust distance when there is actual variation in edge counts.
+    // If all pairs have the same weight, keep the original L*2.5 (no regression).
+    // When there IS variation: max-weight pair → L*1.5, min-weight → L*2.5.
+    if (maxPairWeight <= 1) return L * 2.5;
+    const t_norm = (w - 1) / (maxPairWeight - 1); // 0 at weakest, 1 at strongest
+    return L * (2.5 - 1.0 * t_norm);              // L*2.5 → L*1.5
+  }
+
   // ── Build simulation ────────────────────────────────────────────────────────
   const sim = forceSimulation(nodes)
     .numDimensions(2)
     .force("link", forceLink(links).id(n => n.id)
-      // Cross-module links: much weaker + longer target distance, so they
-      // communicate coupling without collapsing the blobs into each other.
-      // Matches the app's blob-mode link physics (cross=0.02, intra=0.4).
-      .distance(l => isCross(l) ? L * 2.5 : L)
+      // Cross-module links: much weaker + topology-scaled target distance.
+      // Strong-coupling pairs get distance ≈ L*1.5; weak pairs ≈ L*3.0.
+      .distance(l => isCross(l) ? crossLinkDist(l) : L)
       .strength(l => isCross(l) ? 0.02  : 0.4))
     .force("charge",  forceManyBody().strength(-120))
     .force("center",  forceCenter(0, 0))
@@ -623,6 +743,31 @@ const SCENARIOS = {
      mkChain("c","Catalog",3), mkChain("d","Delivery",3),
      mkChain("e","Email",3),   mkChain("f","Frontend",3)],
     [["f2","a0"], ["f2","c0"], ["d2","b0"], ["d2","e0"], ["c2","d0"]]
+  ),
+
+  // Gateway bypass: Frontend and Backend have strong direct coupling (4 edges),
+  // but Gateway is also connected to both (2 edges each) and to Auth/DB.
+  // With the naive circle layout, Gateway gets pulled between Frontend and
+  // Backend, so the 4 FE→BE edges visually cross through the Gateway blob.
+  // Expected: blob_edge_routing < 1.0 before meta-sim fix.
+  five_modules_gateway: () => combine(
+    [
+      mkChain("fe",  "Frontend",  4),
+      mkHub("gw",    "Gateway",   3),   // gwhub, gws0, gws1, gws2
+      mkChain("be",  "Backend",   4),
+      mkChain("au",  "Auth",      3),
+      mkChain("db",  "DB",        3),
+    ],
+    [
+      // Gateway ↔ Frontend (2 edges)
+      ["fe3", "gwhub"], ["fe2", "gwhub"],
+      // Gateway ↔ Backend (2 edges)
+      ["gwhub", "be0"], ["gwhub", "be1"],
+      // Frontend ↔ Backend — direct, STRONGER than via Gateway (4 edges)
+      ["fe3", "be0"], ["fe2", "be1"], ["fe1", "be2"], ["fe0", "be3"],
+      // Gateway ↔ Auth, Gateway ↔ DB (auxiliary connections)
+      ["gwhub", "au0"], ["gwhub", "db0"],
+    ]
   ),
 
   // Spaghetti: many cross-module edges — tests Fatima's Implies tolerance

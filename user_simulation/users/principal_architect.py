@@ -21,6 +21,9 @@ PRINCIPAL_ARCHITECT = Person(
         P.spatial_cluster_purity  >= 0.60,  # KMeans on positions recovers the module structure
         # Multi-module systems must have clear visual boundaries
         Implies(P.module_count >= 2, P.module_separation >= 40.0),
+        # Cross-module edges must not visually route through foreign blobs
+        # (needs ≥ 3 modules for any "intermediate" blob to exist)
+        Implies(P.module_count >= 3, P.blob_edge_routing >= 0.80),
         # When layout stress is elevated, edge visibility must compensate
         Implies(P.layout_stress > 1.20, P.cross_edge_visibility >= 0.90),
         # When degree distribution is highly skewed, the hub must be visually central

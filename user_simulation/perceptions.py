@@ -83,6 +83,12 @@ class Perceptions:
     # Within-group proximity relative to between-group (0–1; 1 = perfectly cohesive)
     gestalt_cohesion: float
 
+    # Fraction of connected module-pair corridors that are unobstructed by other blobs
+    # (1.0 = every A→C straight-line path is clear of foreign blobs;
+    #  <1.0 = some cross-module edges visually route through an intermediate blob)
+    # Only meaningful for module_count >= 3; trivially 1.0 for ≤ 2 modules.
+    blob_edge_routing: float
+
     # ── Dependencies ──────────────────────────────────────────────────────────
 
     # Fraction of cross-module edges that are visually discernible (0–1)
@@ -876,6 +882,7 @@ def compute_perceptions(facts: dict) -> Perceptions:
     edge_angles     = facts.get("edgeAngles", [])
     node_list       = facts.get("nodeList", [])
     chain_node_pos  = facts.get("chainNodePos", [])
+    blob_routing_v  = float(facts.get("blobEdgeRouting", {}).get("ratio", 1.0))
 
     # ── 2. sklearn metrics ────────────────────────────────────────────────────
     sil, ari = _silhouette_and_ari(node_list, mod_count)
@@ -906,6 +913,7 @@ def compute_perceptions(facts: dict) -> Perceptions:
         "silhouette_by_module":  float(sil),
         "spatial_cluster_purity": float(ari),
         "chain_r2":              _chain_r2(chain_node_pos),
+        "blob_edge_routing":     blob_routing_v,
     }
 
     # ── 4. Tier 2: composed ───────────────────────────────────────────────────
@@ -927,6 +935,7 @@ def compute_perceptions(facts: dict) -> Perceptions:
         module_separation      = r["module_separation"],
         blob_integrity         = r["blob_integrity"],
         gestalt_cohesion       = r["gestalt_cohesion"],
+        blob_edge_routing      = r["blob_edge_routing"],
         cross_edge_visibility  = r["cross_edge_visibility"],
         cross_edge_count       = r["cross_edge_count"],
         cross_edge_ratio       = r["cross_edge_ratio"],

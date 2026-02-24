@@ -22,6 +22,8 @@ ENGINEERING_VP = Person(
         Implies(P.module_count >= 2, P.module_separation     >= 40.0),
         Implies(P.module_count >= 2, P.cross_edge_visibility >= 0.80),
         Implies(P.module_count >= 2, P.silhouette_by_module  >= 0.40),
+        # Cross-module routing: connections shouldn't visually thread through foreign blobs
+        Implies(P.module_count >= 3, P.blob_edge_routing     >= 0.75),
         # Single-module: at least the graph must be legible
         P.node_overlap  <= 0.02,
         P.edge_visibility >= 0.70,

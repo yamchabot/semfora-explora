@@ -36,7 +36,8 @@ def _make_perceptions(**kw) -> Perceptions:
     defaults = dict(
         # ── Tier 1: Raw ───────────────────────────────────────────────────────
         module_count=2, module_separation=50.0, blob_integrity=0.90,
-        gestalt_cohesion=0.60, cross_edge_visibility=0.82, cross_edge_count=2,
+        gestalt_cohesion=0.60, blob_edge_routing=1.0,
+        cross_edge_visibility=0.82, cross_edge_count=2,
         cross_edge_ratio=0.15, edge_visibility=0.85, chain_elongation=2.00,
         chain_straightness=0.68, hub_centrality_error=0.22, node_size_cv=0.35,
         node_overlap=0.02, edge_crossings=0.20, layout_stress=1.10,
@@ -383,6 +384,36 @@ class TestZ3ArithLayer:
         assert len(result.failed_descriptions) >= 1
         assert any("chain_elongation" in d or "chain_r2" in d
                    for d in result.failed_descriptions)
+
+    def test_blob_routing_fail_triggers_fatima(self):
+        """blob_edge_routing < 0.80 makes Fatima fail when module_count >= 3."""
+        p = self._base_perceptions(
+            module_count=5, blob_edge_routing=0.40
+        )
+        result = check_person(PRINCIPAL_ARCHITECT, p)
+        assert not result.satisfied
+        assert any("blob_edge_routing" in d for d in result.failed_descriptions)
+
+    def test_blob_routing_fail_triggers_marcus(self):
+        """blob_edge_routing < 0.75 makes Marcus fail when module_count >= 3."""
+        p = self._base_perceptions(
+            module_count=5, blob_edge_routing=0.40
+        )
+        result = check_person(ENGINEERING_VP, p)
+        assert not result.satisfied
+        assert any("blob_edge_routing" in d for d in result.failed_descriptions)
+
+    def test_blob_routing_ignored_for_two_modules(self):
+        """blob_edge_routing doesn't trigger for module_count=2 (no foreign blobs to route through)."""
+        p = self._base_perceptions(
+            module_count=2, blob_edge_routing=0.0,
+            module_separation=80.0, blob_integrity=0.95,
+            silhouette_by_module=0.65, spatial_cluster_purity=0.80,
+        )
+        result_fatima = check_person(PRINCIPAL_ARCHITECT, p)
+        assert result_fatima.satisfied
+        result_marcus = check_person(ENGINEERING_VP, p)
+        assert result_marcus.satisfied
 
     def test_implies_description_mentions_antecedent(self):
         """Implies failure description explains the conditional."""

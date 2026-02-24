@@ -704,7 +704,144 @@ export function prominentNodeVisibility(nodes, topN = 5) {
   return { ratio: top.length ? (top.length - obscured.length) / top.length : 1, topN: top, obscured };
 }
 
-// ── 16. Auto-detect linear chains ────────────────────────────────────────────
+// ── 16. Blob edge routing ─────────────────────────────────────────────────────
+
+/**
+ * For multi-module graphs, measures whether cross-module edge corridors are
+ * "clean" — i.e., the straight-line path between two connected modules'
+ * centroids does NOT pass through any other module's blob.
+ *
+ * This captures the user-visible problem where Module A connects to Module C,
+ * but Module B physically sits between them so all A→C edges visually
+ * cross through B even though A↔B and B↔C coupling may be much weaker.
+ *
+ * The check is centroid-to-centroid, not per-edge, so it measures blob-level
+ * layout quality rather than individual edge geometry.
+ *
+ * Returns:
+ *   ratio           0–1  fraction of connected corridors that are unobstructed
+ *                        (1.0 = every A→C path is visually clear of other blobs)
+ *   violatingPairs  int  number of connected module pairs with blocked corridors
+ *   totalPairs      int  total number of connected module pairs checked
+ */
+export function blobEdgeRouting(nodes, links, groupKeyFn = n => n.group) {
+  const groups = [...new Set(nodes.map(groupKeyFn))];
+  if (groups.length < 3) {
+    // Need ≥ 3 modules for any "intermediate" blob to obstruct a corridor.
+    // Two-module graphs trivially have perfect routing.
+    return { ratio: 1.0, violatingPairs: 0, totalPairs: 0 };
+  }
+
+  // Centroid and approximate visual radius per group
+  const groupNodes = {};
+  nodes.forEach(n => {
+    const g = groupKeyFn(n);
+    if (!groupNodes[g]) groupNodes[g] = [];
+    groupNodes[g].push(n);
+  });
+
+  const centroids = {}, radii = {};
+  for (const g of groups) {
+    const ns = groupNodes[g];
+    const cx = ns.reduce((s, n) => s + n.x, 0) / ns.length;
+    const cy = ns.reduce((s, n) => s + n.y, 0) / ns.length;
+    centroids[g] = { x: cx, y: cy };
+    // Visual radius: max distance from centroid to node surface
+    radii[g] = ns.reduce(
+      (mx, n) => Math.max(mx, Math.hypot(n.x - cx, n.y - cy) + (n.val ?? 6) + 8),
+      20
+    );
+  }
+
+  // Find all directly-connected module pairs (at least one cross-edge)
+  const nMap = new Map(nodes.map(n => [n.id, n]));
+  const connectedPairSet = new Set();
+  for (const link of links) {
+    const srcId = typeof link.source === 'object' ? link.source.id : link.source;
+    const tgtId = typeof link.target === 'object' ? link.target.id : link.target;
+    const src = nMap.get(srcId), tgt = nMap.get(tgtId);
+    if (!src || !tgt) continue;
+    const sg = groupKeyFn(src), tg = groupKeyFn(tgt);
+    if (sg === tg) continue;
+    const key = sg < tg ? `${sg}|${tg}` : `${tg}|${sg}`;
+    connectedPairSet.add(key);
+  }
+
+  const connectedPairs = [...connectedPairSet];
+  if (connectedPairs.length === 0) return { ratio: 1.0, violatingPairs: 0, totalPairs: 0 };
+
+  // Build a weight map (number of cross-edges per pair) so violations on
+  // strongly-coupled pairs count more than violations on weak pairs.
+  // Semantic justification: Fatima cares more about a heavily-used FE→BE
+  // corridor being clear than a single auxiliary GW→Auth edge.
+  const nMapR = new Map(nodes.map(n => [n.id, n]));
+  const pairWeightsR = {};
+  for (const link of links) {
+    const srcId = typeof link.source === 'object' ? link.source.id : link.source;
+    const tgtId = typeof link.target === 'object' ? link.target.id : link.target;
+    const src = nMapR.get(srcId), tgt = nMapR.get(tgtId);
+    if (!src || !tgt) continue;
+    const sg = groupKeyFn(src), tg = groupKeyFn(tgt);
+    if (sg === tg) continue;
+    const key = sg < tg ? `${sg}|${tg}` : `${tg}|${sg}`;
+    pairWeightsR[key] = (pairWeightsR[key] || 0) + 1;
+  }
+
+  let violatingWeight = 0, totalWeight = 0, violatingPairs = 0;
+  for (const key of connectedPairs) {
+    const pairW = pairWeightsR[key] || 1;
+    totalWeight += pairW;
+
+    const [ga, gc] = key.split('|');
+    const ca = centroids[ga], cc = centroids[gc];
+    const dx = cc.x - ca.x, dy = cc.y - ca.y;
+    const corridorLen2 = dx * dx + dy * dy;
+    if (corridorLen2 < 1) continue;
+
+    let blocked = false;
+    for (const gb of groups) {
+      if (gb === ga || gb === gc) continue;
+      const cb = centroids[gb];
+      const rb = radii[gb];
+
+      // Project centroid_B onto the corridor segment A→C.
+      // t ∈ [0,1]: t=0 at A's centroid, t=1 at C's centroid.
+      const t = Math.max(0, Math.min(1,
+        ((cb.x - ca.x) * dx + (cb.y - ca.y) * dy) / corridorLen2
+      ));
+
+      // Only check blobs that are genuinely in the middle of the corridor —
+      // blobs very close to either endpoint are adjacent and expected to be
+      // "next to" one of the modules, not "between" them.
+      if (t < 0.15 || t > 0.85) continue;
+
+      const closestX = ca.x + t * dx;
+      const closestY = ca.y + t * dy;
+      const distToSeg = Math.hypot(cb.x - closestX, cb.y - closestY);
+
+      // Corridor blocked if a blob's visual radius (plus a small margin) overlaps
+      // the straight-line path between the two connected centroids.
+      if (distToSeg < rb + 25) {
+        blocked = true;
+        break; // one obstruction per corridor is enough
+      }
+    }
+    if (blocked) {
+      violatingWeight += pairW;
+      violatingPairs++;
+    }
+  }
+
+  // Weighted ratio: violations on heavy-traffic corridors penalise more.
+  // Unweighted count also returned for diagnostics.
+  const ratio = totalWeight > 0
+    ? (totalWeight - violatingWeight) / totalWeight
+    : 1.0;
+  return { ratio, violatingPairs, totalPairs: connectedPairs.length,
+           violatingWeight, totalWeight };
+}
+
+// ── 17. Auto-detect linear chains ────────────────────────────────────────────
 
 /**
  * Find all maximal linear chains in the graph — sequences where each interior
@@ -849,5 +986,6 @@ export function computeFacts(nodes, links, opts = {}) {
     nodeSizeVariation:          nodeSizeVariation(nodes),
     prominentNodeVisibility:    prominentNodeVisibility(nodes, topProminentN),
     qualityScore:               layoutQualityScore(nodes, links, { groupKeyFn, idealEdgeLength }),
+    blobEdgeRouting:            blobEdgeRouting(nodes, links, groupKeyFn),
   };
 }
