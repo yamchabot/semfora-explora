@@ -24,6 +24,10 @@ ENGINEERING_VP = Person(
         Implies(P.module_count >= 2, P.silhouette_by_module  >= 0.40),
         # Cross-module routing: connections shouldn't visually thread through foreign blobs
         Implies(P.module_count >= 3, P.blob_edge_routing     >= 0.75),
+        # Module corridors should not geometrically cross each other.
+        # Threshold 0.50 allows K4 theoretical minimum (~0.33) plus some slack
+        # for nearly-fully-connected architectures.
+        Implies(P.module_count >= 3, P.inter_module_crossings <= 0.50),
         # Single-module: at least the graph must be legible
         P.node_overlap  <= 0.02,
         P.edge_visibility >= 0.70,

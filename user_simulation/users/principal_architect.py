@@ -24,6 +24,10 @@ PRINCIPAL_ARCHITECT = Person(
         # Cross-module edges must not visually route through foreign blobs
         # (needs ≥ 3 modules for any "intermediate" blob to exist)
         Implies(P.module_count >= 3, P.blob_edge_routing >= 0.80),
+        # Module corridors must not cross each other (weighted by edge count).
+        # K4 (fully-connected 4-module) has a theoretical minimum of ~0.33 in any
+        # circular arrangement, so the threshold is set above that floor.
+        Implies(P.module_count >= 3, P.inter_module_crossings <= 0.40),
         # When layout stress is elevated, edge visibility must compensate
         Implies(P.layout_stress > 1.20, P.cross_edge_visibility >= 0.90),
         # When degree distribution is highly skewed, the hub must be visually central

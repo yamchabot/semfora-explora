@@ -704,7 +704,90 @@ export function prominentNodeVisibility(nodes, topN = 5) {
   return { ratio: top.length ? (top.length - obscured.length) / top.length : 1, topN: top, obscured };
 }
 
-// ── 16. Blob edge routing ─────────────────────────────────────────────────────
+// ── 16. Corridor-to-corridor crossings ───────────────────────────────────────
+
+/**
+ * Count how many pairs of cross-module edge corridors geometrically cross each other.
+ *
+ * A "corridor" is the straight line between two directly-connected modules'
+ * centroids. Two corridors cross when their line segments intersect in the
+ * interior — independent of whether any blob sits in the way (that is
+ * blobEdgeRouting's job).
+ *
+ * Classic cause: modules A and C are strongly coupled but end up on opposite
+ * sides of the layout (180° apart on the naive circle), while modules B and D
+ * are also strongly coupled but also opposite. The A-C corridor and B-D
+ * corridor cross at the centre.
+ *
+ * Returns:
+ *   crossingPairs    int   number of corridor pairs that cross
+ *   totalPairs       int   total distinct corridor pairs checked
+ *   ratio            0–1   crossingPairs / totalPairs (0 = no crossings)
+ *   weightedRatio    0–1   weight-adjusted version (heavy corridors penalise more)
+ */
+export function interModuleCrossings(nodes, links, groupKeyFn = n => n.group) {
+  // Note: uses the segmentsIntersect() helper defined above (near edgeCrossings).
+  const groups = [...new Set(nodes.map(groupKeyFn))];
+  if (groups.length < 3) return { crossingPairs: 0, totalPairs: 0, ratio: 0, weightedRatio: 0 };
+
+  // Centroid per group
+  const groupNodes = {};
+  nodes.forEach(n => {
+    const g = groupKeyFn(n);
+    if (!groupNodes[g]) groupNodes[g] = [];
+    groupNodes[g].push(n);
+  });
+  const centroids = {};
+  for (const g of groups) {
+    const ns = groupNodes[g];
+    centroids[g] = {
+      x: ns.reduce((s, n) => s + n.x, 0) / ns.length,
+      y: ns.reduce((s, n) => s + n.y, 0) / ns.length,
+    };
+  }
+
+  // Connected module pairs and their edge-count weight
+  const nMap = new Map(nodes.map(n => [n.id, n]));
+  const pairWeights = {};
+  for (const link of links) {
+    const srcId = typeof link.source === 'object' ? link.source.id : link.source;
+    const tgtId = typeof link.target === 'object' ? link.target.id : link.target;
+    const src = nMap.get(srcId), tgt = nMap.get(tgtId);
+    if (!src || !tgt) continue;
+    const sg = groupKeyFn(src), tg = groupKeyFn(tgt);
+    if (sg === tg) continue;
+    const key = sg < tg ? `${sg}|${tg}` : `${tg}|${sg}`;
+    pairWeights[key] = (pairWeights[key] || 0) + 1;
+  }
+
+  const corridors = Object.keys(pairWeights);
+  if (corridors.length < 2) return { crossingPairs: 0, totalPairs: 0, ratio: 0, weightedRatio: 0 };
+
+  let crossingPairs = 0, crossingWeight = 0, totalPairs = 0, totalWeight = 0;
+
+  for (let i = 0; i < corridors.length; i++) {
+    const [a1, a2] = corridors[i].split('|');
+    const wA = pairWeights[corridors[i]];
+    for (let j = i + 1; j < corridors.length; j++) {
+      const [b1, b2] = corridors[j].split('|');
+      const wB = pairWeights[corridors[j]];
+      // Skip pairs that share a module (corridors that meet at a point can't cross)
+      if (a1 === b1 || a1 === b2 || a2 === b1 || a2 === b2) continue;
+      totalPairs++;
+      totalWeight += wA + wB;
+      if (segmentsIntersect(centroids[a1], centroids[a2], centroids[b1], centroids[b2])) {
+        crossingPairs++;
+        crossingWeight += wA + wB;
+      }
+    }
+  }
+
+  const ratio         = totalPairs > 0 ? crossingPairs / totalPairs : 0;
+  const weightedRatio = totalWeight > 0 ? crossingWeight / totalWeight : 0;
+  return { crossingPairs, totalPairs, ratio, weightedRatio };
+}
+
+// ── 18. Blob edge routing ─────────────────────────────────────────────────────
 
 /**
  * For multi-module graphs, measures whether cross-module edge corridors are
@@ -841,7 +924,7 @@ export function blobEdgeRouting(nodes, links, groupKeyFn = n => n.group) {
            violatingWeight, totalWeight };
 }
 
-// ── 17. Auto-detect linear chains ────────────────────────────────────────────
+// ── 19. Auto-detect linear chains ────────────────────────────────────────────
 
 /**
  * Find all maximal linear chains in the graph — sequences where each interior
@@ -896,7 +979,7 @@ export function autoDetectChains(nodes, links) {
   return chains;
 }
 
-// ── 17. Compute all facts at once ─────────────────────────────────────────────
+// ── 20. Compute all facts at once ─────────────────────────────────────────────
 
 /**
  * Run every metric and return a flat facts object ready for constraint checking.
@@ -987,5 +1070,6 @@ export function computeFacts(nodes, links, opts = {}) {
     prominentNodeVisibility:    prominentNodeVisibility(nodes, topProminentN),
     qualityScore:               layoutQualityScore(nodes, links, { groupKeyFn, idealEdgeLength }),
     blobEdgeRouting:            blobEdgeRouting(nodes, links, groupKeyFn),
+    interModuleCrossings:       interModuleCrossings(nodes, links, groupKeyFn),
   };
 }

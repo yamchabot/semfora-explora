@@ -215,23 +215,101 @@ function makeHubCenteringForce(nodes, links, minDegree = 3, strength = 0.20) {
   };
 }
 
-// ── Meta-simulation: topology-aware initial blob positions ───────────────────
-// Runs a lightweight spring-layout simulation at the module (blob) level before
-// the full simulation. One meta-node per module, weighted by cross-edge count.
-// Strongly-coupled module pairs are pulled close; weakly-coupled stay far.
-// Returns { moduleId → {x, y} } or null for single/two-module graphs.
+// ── Crossing-optimal circular order ──────────────────────────────────────────
+// Given n module groups and their pairwise edge weights, find the circular
+// ordering that minimises weighted corridor-corridor crossings.
 //
-// Why this works: the full D3 simulation is good at INTRA-module layout but
-// bad at global INTER-module arrangement — it treats blobs as collections of
-// point masses, not as atomic units. The meta-sim treats each blob as one node
-// and finds the optimal global arrangement, then uses that as the initial
-// centroid positions for the full sim.
+// Two corridors (A,C) and (B,D) cross iff B and D are interleaved with A and C
+// on the circle (i.e., going clockwise: A…B…C…D or A…D…C…B).
+//
+// For n ≤ 8: enumerate all (n-1)! orderings (max 5040 for n=8).
+// For n > 8: 2-opt hill-climb until no swap reduces the crossing count.
+function findOptimalCircularOrder(groups, pairWeights) {
+  const n = groups.length;
+  if (n <= 2) return groups;
+
+  const corridors = Object.entries(pairWeights); // [[key, weight], ...]
+
+  function weightedCrossings(order) {
+    const pos = new Map(order.map((g, i) => [g, i]));
+    let cost = 0;
+    for (let i = 0; i < corridors.length; i++) {
+      const [kA, wA] = corridors[i];
+      const [a1, a2] = kA.split('|');
+      const ia1 = pos.get(a1), ia2 = pos.get(a2);
+      if (ia1 == null || ia2 == null) continue;
+      for (let j = i + 1; j < corridors.length; j++) {
+        const [kB, wB] = corridors[j];
+        const [b1, b2] = kB.split('|');
+        const ib1 = pos.get(b1), ib2 = pos.get(b2);
+        if (ib1 == null || ib2 == null) continue;
+        if (a1 === b1 || a1 === b2 || a2 === b1 || a2 === b2) continue;
+        // Corridors cross if b1 and b2 interleave a1 and a2 on the circle
+        const [lo, hi] = ia1 < ia2 ? [ia1, ia2] : [ia2, ia1];
+        const arcLen   = hi - lo;
+        const b1InArc  = ib1 > lo && ib1 < hi;
+        const b2InArc  = ib2 > lo && ib2 < hi;
+        if (b1InArc !== b2InArc) cost += wA + wB;
+      }
+    }
+    return cost;
+  }
+
+  if (n <= 8) {
+    // Exact: enumerate (n-1)! permutations with first element fixed
+    const fixed = groups[0];
+    const rest  = groups.slice(1);
+    let bestOrder    = [fixed, ...rest];
+    let bestCrossings = weightedCrossings(bestOrder);
+
+    function permute(arr, cur) {
+      if (arr.length === 0) {
+        const order = [fixed, ...cur];
+        const c = weightedCrossings(order);
+        if (c < bestCrossings) { bestCrossings = c; bestOrder = order; }
+        return;
+      }
+      for (let i = 0; i < arr.length; i++) {
+        permute([...arr.slice(0, i), ...arr.slice(i + 1)], [...cur, arr[i]]);
+      }
+    }
+    permute(rest, []);
+    return bestOrder;
+  }
+
+  // Greedy 2-opt for larger n: repeatedly swap adjacent pairs
+  let order   = [...groups];
+  let cost    = weightedCrossings(order);
+  let improved = true;
+  while (improved) {
+    improved = false;
+    for (let i = 1; i < n - 1; i++) {
+      [order[i], order[i + 1]] = [order[i + 1], order[i]];
+      const c = weightedCrossings(order);
+      if (c < cost) { cost = c; improved = true; }
+      else           { [order[i], order[i + 1]] = [order[i + 1], order[i]]; }
+    }
+  }
+  return order;
+}
+
+// ── Meta-simulation: topology-aware initial blob positions ───────────────────
+// Two-step approach:
+//   1. Find the crossing-optimal circular ordering for the modules
+//      (minimises the number of corridor-corridor crossing pairs).
+//   2. Start the meta spring-sim from that circular order so that it refines
+//      positions while mostly preserving the crossing-optimal arrangement.
+//
+// For ≤ 8 modules the crossing optimisation is exact (enumerate all orderings).
+// For larger counts a 2-opt heuristic is used.
+//
+// Returns { moduleId → {x, y} } or null for single/two-module graphs.
 function metaSimPositions(nodes, links) {
   const nodeGroup = {};
   nodes.forEach(n => { nodeGroup[n.id] = n.group; });
   const groups = [...new Set(nodes.map(n => n.group))];
 
-  if (groups.length < 3) return null;  // only useful for 3+ modules
+  if (groups.length < 3) return null;
 
   // Count cross-module edges per group pair
   const pairWeights = {};
@@ -246,12 +324,15 @@ function metaSimPositions(nodes, links) {
 
   if (Object.keys(pairWeights).length === 0) return null;
 
-  const maxWeight = Math.max(...Object.values(pairWeights));
-
-  // Meta-nodes: one per group, initial positions on a circle
+  const maxWeight  = Math.max(...Object.values(pairWeights));
   const targetSpread = Math.max(400, L * Math.sqrt(groups.length) * 2.2);
-  const metaNodes = groups.map((g, i) => {
-    const a = (i / groups.length) * 2 * Math.PI;
+
+  // Step 1: crossing-optimal circular order
+  const optOrder = findOptimalCircularOrder(groups, pairWeights);
+
+  // Step 2: place meta-nodes on the circle using the optimal order
+  const metaNodes = optOrder.map((g, i) => {
+    const a = (i / optOrder.length) * 2 * Math.PI;
     return {
       id: g,
       x: Math.cos(a) * targetSpread * 0.5,
@@ -260,12 +341,11 @@ function metaSimPositions(nodes, links) {
     };
   });
 
-  // Meta-links: shorter target distance for stronger coupling
+  // Step 3: spring refinement — pull strongly-coupled pairs closer together
   const metaLinks = Object.entries(pairWeights).map(([key, w]) => {
     const [g1, g2] = key.split('|');
     return {
       source: g1, target: g2, weight: w,
-      // Stronger coupling → shorter target distance → placed adjacent
       _distance: targetSpread * 0.7 * Math.pow(maxWeight / w, 0.35),
       _strength: Math.min(0.9, 0.15 * w),
     };
@@ -743,6 +823,22 @@ const SCENARIOS = {
      mkChain("c","Catalog",3), mkChain("d","Delivery",3),
      mkChain("e","Email",3),   mkChain("f","Frontend",3)],
     [["f2","a0"], ["f2","c0"], ["d2","b0"], ["d2","e0"], ["c2","d0"]]
+  ),
+
+  // Corridor-cross test: two pairs of strongly-coupled modules that end up on
+  // opposite sides of the naive circle, so their corridors cross at the centre.
+  // Groups created in order A, B, C, D → naive circle: A(0°) B(90°) C(180°) D(270°).
+  // A-C (4 edges) get placed diagonally opposite, B-D (4 edges) also opposite.
+  // The A-C corridor (horizontal) crosses the B-D corridor (vertical) at (0,0).
+  // Expected: interModuleCrossings.ratio > 0 before meta-sim fix.
+  four_modules_cross: () => combine(
+    [mkHub("a","A",4), mkHub("b","B",4), mkHub("c","C",4), mkHub("d","D",4)],
+    [
+      // A ↔ C: strongly coupled (4 edges)
+      ["ahub","chub"], ["as0","cs0"], ["as1","cs1"], ["as2","cs2"],
+      // B ↔ D: strongly coupled (4 edges)
+      ["bhub","dhub"], ["bs0","ds0"], ["bs1","ds1"], ["bs2","ds2"],
+    ]
   ),
 
   // Gateway bypass: Frontend and Backend have strong direct coupling (4 edges),

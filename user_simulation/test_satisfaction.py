@@ -36,7 +36,7 @@ def _make_perceptions(**kw) -> Perceptions:
     defaults = dict(
         # ── Tier 1: Raw ───────────────────────────────────────────────────────
         module_count=2, module_separation=50.0, blob_integrity=0.90,
-        gestalt_cohesion=0.60, blob_edge_routing=1.0,
+        gestalt_cohesion=0.60, blob_edge_routing=1.0, inter_module_crossings=0.0,
         cross_edge_visibility=0.82, cross_edge_count=2,
         cross_edge_ratio=0.15, edge_visibility=0.85, chain_elongation=2.00,
         chain_straightness=0.68, hub_centrality_error=0.22, node_size_cv=0.35,
@@ -402,6 +402,31 @@ class TestZ3ArithLayer:
         result = check_person(ENGINEERING_VP, p)
         assert not result.satisfied
         assert any("blob_edge_routing" in d for d in result.failed_descriptions)
+
+    def test_corridor_crossing_fails_fatima(self):
+        """inter_module_crossings > 0.20 with 3+ modules makes Fatima fail."""
+        p = self._base_perceptions(module_count=4, inter_module_crossings=0.80)
+        result = check_person(PRINCIPAL_ARCHITECT, p)
+        assert not result.satisfied
+        assert any("inter_module_crossings" in d for d in result.failed_descriptions)
+
+    def test_corridor_crossing_fails_marcus(self):
+        """inter_module_crossings > 0.30 with 3+ modules makes Marcus fail."""
+        p = self._base_perceptions(module_count=4, inter_module_crossings=0.80)
+        result = check_person(ENGINEERING_VP, p)
+        assert not result.satisfied
+        assert any("inter_module_crossings" in d for d in result.failed_descriptions)
+
+    def test_corridor_crossing_ignored_for_two_modules(self):
+        """inter_module_crossings constraint doesn't fire for module_count=2."""
+        p = self._base_perceptions(
+            module_count=2, inter_module_crossings=1.0,
+            module_separation=80.0, blob_integrity=0.95,
+            silhouette_by_module=0.65, spatial_cluster_purity=0.80,
+            blob_edge_routing=1.0,
+        )
+        assert check_person(PRINCIPAL_ARCHITECT, p).satisfied
+        assert check_person(ENGINEERING_VP, p).satisfied
 
     def test_blob_routing_ignored_for_two_modules(self):
         """blob_edge_routing doesn't trigger for module_count=2 (no foreign blobs to route through)."""

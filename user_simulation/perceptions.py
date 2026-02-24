@@ -89,6 +89,14 @@ class Perceptions:
     # Only meaningful for module_count >= 3; trivially 1.0 for ≤ 2 modules.
     blob_edge_routing: float
 
+    # Fraction of connected corridor pairs that geometrically cross each other
+    # (0 = no corridor-corridor crossings; 1 = all corridor pairs cross).
+    # Weighted by edge count: a crossing between two heavy corridors scores higher.
+    # Distinct from blob_edge_routing: this is segment-segment intersection,
+    # not segment-passes-through-a-blob.
+    # Only meaningful for module_count >= 3.
+    inter_module_crossings: float
+
     # ── Dependencies ──────────────────────────────────────────────────────────
 
     # Fraction of cross-module edges that are visually discernible (0–1)
@@ -882,7 +890,8 @@ def compute_perceptions(facts: dict) -> Perceptions:
     edge_angles     = facts.get("edgeAngles", [])
     node_list       = facts.get("nodeList", [])
     chain_node_pos  = facts.get("chainNodePos", [])
-    blob_routing_v  = float(facts.get("blobEdgeRouting", {}).get("ratio", 1.0))
+    blob_routing_v     = float(facts.get("blobEdgeRouting", {}).get("ratio", 1.0))
+    inter_cross_v      = float(facts.get("interModuleCrossings", {}).get("weightedRatio", 0.0))
 
     # ── 2. sklearn metrics ────────────────────────────────────────────────────
     sil, ari = _silhouette_and_ari(node_list, mod_count)
@@ -913,7 +922,8 @@ def compute_perceptions(facts: dict) -> Perceptions:
         "silhouette_by_module":  float(sil),
         "spatial_cluster_purity": float(ari),
         "chain_r2":              _chain_r2(chain_node_pos),
-        "blob_edge_routing":     blob_routing_v,
+        "blob_edge_routing":      blob_routing_v,
+        "inter_module_crossings": inter_cross_v,
     }
 
     # ── 4. Tier 2: composed ───────────────────────────────────────────────────
@@ -936,6 +946,7 @@ def compute_perceptions(facts: dict) -> Perceptions:
         blob_integrity         = r["blob_integrity"],
         gestalt_cohesion       = r["gestalt_cohesion"],
         blob_edge_routing      = r["blob_edge_routing"],
+        inter_module_crossings = r["inter_module_crossings"],
         cross_edge_visibility  = r["cross_edge_visibility"],
         cross_edge_count       = r["cross_edge_count"],
         cross_edge_ratio       = r["cross_edge_ratio"],

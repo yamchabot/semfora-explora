@@ -6,6 +6,7 @@ import { lerpColor, makeStepColors, makeStepWidths, makeStepArrows } from "../ut
 import { bfsFromNode, buildAdjacencyMaps, convexHull, findChainEdges, collectChainNodeIds } from "../utils/graphAlgo.js";
 import { buildGraphData, flattenLeafRows, getGroupKey } from "../utils/graphData.js";
 import { Tooltip } from "./Tooltip.jsx";
+import { computeTopologyAwareGroupPos } from "../utils/topologyLayout.js";
 
 // ── Canvas helpers ──────────────────────────────────────────────────────────────
 
@@ -633,10 +634,17 @@ export default function GraphRenderer({ data, measures, onNodeClick,
         }
         const maxGroupSize = Math.max(...groupNodeCounts.values(), 1);
         const outerSpread = Math.max(350, Math.sqrt(maxGroupSize) * linkDistBase * 0.8 * Math.sqrt(numOuter));
-        const outerPos    = new Map(outerGroups.map((g, i) => {
-          const angle = (2 * Math.PI * i) / numOuter;
-          return [g, { x: Math.cos(angle) * outerSpread, y: Math.sin(angle) * outerSpread }];
-        }));
+        // Topology-aware initial placement: find the circular ordering that
+        // minimises corridor-corridor crossings between strongly-coupled pairs,
+        // rather than using the arbitrary insertion order of the groups Set.
+        // For ≤ 8 groups this is exact (enumerate (n-1)! permutations).
+        // For larger counts a 2-opt heuristic is used.
+        const outerPos = computeTopologyAwareGroupPos(
+          graphData.nodes,
+          graphData.links,
+          outerGroups,
+          outerSpread
+        );
 
         // For inner levels, cluster within the outer group's region
         if (blobLevels >= 2) {

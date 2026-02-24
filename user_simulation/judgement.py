@@ -42,7 +42,8 @@ class P:
     module_separation     = Real("module_separation")
     blob_integrity        = Real("blob_integrity")
     gestalt_cohesion      = Real("gestalt_cohesion")
-    blob_edge_routing     = Real("blob_edge_routing")
+    blob_edge_routing       = Real("blob_edge_routing")
+    inter_module_crossings  = Real("inter_module_crossings")
 
     # Dependencies
     cross_edge_visibility = Real("cross_edge_visibility")
