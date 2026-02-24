@@ -1,0 +1,241 @@
+{
+  "moduleCount": 2,
+  "crossEdgeRatio": 0.05555555555555555,
+  "edgeVisibility": {
+    "ratio": 1,
+    "avgGap": 120.37822224149664,
+    "minGap": 110.58273769481558,
+    "invisible": []
+  },
+  "nodeOverlap": {
+    "ratio": 0,
+    "maxOverlap": 0,
+    "overlapping": []
+  },
+  "edgeCrossings": {
+    "count": 0,
+    "ratio": 0,
+    "normalised": 0
+  },
+  "layoutStress": {
+    "stress": 6.382447073326422,
+    "perEdge": 0.03732425189079779
+  },
+  "hubCentrality": {
+    "hubs": [
+      {
+        "nodeId": "troot",
+        "error": 6.08199728324681,
+        "normalised": 0.04052848014625496
+      },
+      {
+        "nodeId": "trootL",
+        "error": 28.3810587982015,
+        "normalised": 0.20055864110587995
+      },
+      {
+        "nodeId": "trootLL",
+        "error": 46.11934377438055,
+        "normalised": 0.342272059585149
+      },
+      {
+        "nodeId": "trootLR",
+        "error": 54.21668328795547,
+        "normalised": 0.4168289958942094
+      },
+      {
+        "nodeId": "trootR",
+        "error": 13.427767125979068,
+        "normalised": 0.09568575349297133
+      },
+      {
+        "nodeId": "trootRL",
+        "error": 42.924756452066916,
+        "normalised": 0.32572090855541913
+      },
+      {
+        "nodeId": "trootRR",
+        "error": 34.800683895816476,
+        "normalised": 0.2587245406213267
+      }
+    ],
+    "avgNormalised": 0.24004562562874437
+  },
+  "chainLinearity": {
+    "ratio": 16.080383496103266,
+    "straightness": 1,
+    "chains": [
+      {
+        "ratio": 16.080383496103266,
+        "major": 419.62027903836236,
+        "minor": 26.09516614700441,
+        "stepAngles": [
+          14.020010640277293,
+          3.7027123061190346
+        ],
+        "straightness": 1
+      }
+    ]
+  },
+  "blobIntegrity": {
+    "ratio": 1,
+    "violations": [],
+    "blobRadii": {}
+  },
+  "blobSeparation": {
+    "minClearance": -140.80161680307464,
+    "avgClearance": -140.80161680307464,
+    "separationRatio": -0.22850997511965193,
+    "overlapping": [
+      [
+        "Tree",
+        "Chain"
+      ]
+    ]
+  },
+  "gestaltProximity": {
+    "withinAvg": 370.84382510663033,
+    "betweenAvg": 547.6672810947584,
+    "ratio": 0.6771334310228152,
+    "cohesion": 0.3228665689771848
+  },
+  "angularResolution": {
+    "minAngle": 43.869481635352926,
+    "avgMinAngle": 100.95018202390591,
+    "poorNodes": []
+  },
+  "edgeLengthUniformity": {
+    "mean": 137.0448889081633,
+    "stddev": 8.221623928296433,
+    "cv": 0.05999219667218613,
+    "min": 126.58273769481558,
+    "max": 154.29695276013805
+  },
+  "crossModuleEdgeVisibility": {
+    "ratio": 1,
+    "count": 1,
+    "visible": 1
+  },
+  "nodeSizeVariation": {
+    "cv": 0.2581732785890615,
+    "mean": 7.473684210526316,
+    "stddev": 1.9295055557708805,
+    "min": 6,
+    "max": 10
+  },
+  "prominentNodeVisibility": {
+    "ratio": 1,
+    "topN": [
+      {
+        "id": "troot",
+        "group": "Tree",
+        "groupPath": [
+          "Tree"
+        ],
+        "val": 10,
+        "x": -5.799023594545824,
+        "y": 7.941022076714298,
+        "vx": 1.7403408939021414e-7,
+        "vy": -1.273750652763654e-7,
+        "index": 0
+      },
+      {
+        "id": "trootL",
+        "group": "Tree",
+        "groupPath": [
+          "Tree"
+        ],
+        "val": 10,
+        "x": 96.00151291845758,
+        "y": 118.42709364917621,
+        "vx": -6.704435326938022e-7,
+        "vy": 6.518956243195221e-7,
+        "index": 1
+      },
+      {
+        "id": "trootLL",
+        "group": "Tree",
+        "groupPath": [
+          "Tree"
+        ],
+        "val": 10,
+        "x": 220.14946898366867,
+        "y": 185.3332686218895,
+        "vx": -4.848590004846015e-7,
+        "vy": 5.924228562596082e-7,
+        "index": 2
+      },
+      {
+        "id": "trootLR",
+        "group": "Tree",
+        "groupPath": [
+          "Tree"
+        ],
+        "val": 10,
+        "x": 53.45796815744098,
+        "y": 244.7202117622528,
+        "vx": -1.5841303832531604e-7,
+        "vy": 0.0000010201222224018798,
+        "index": 5
+      },
+      {
+        "id": "trootR",
+        "group": "Tree",
+        "groupPath": [
+          "Tree"
+        ],
+        "val": 10,
+        "x": 48.14962467704487,
+        "y": -127.37069252269045,
+        "vx": -1.8766422736788902e-7,
+        "vy": -4.964747546530944e-7,
+        "index": 8
+      }
+    ],
+    "obscured": []
+  },
+  "qualityScore": {
+    "score": 92.9,
+    "components": {
+      "edgeVisibility": 1,
+      "noOverlap": 1,
+      "fewCrossings": 1,
+      "lowStress": 0.9813378740546012,
+      "gestaltCohesion": 0.3228665689771848,
+      "blobIntegrity": 1
+    },
+    "raw": {
+      "vis": {
+        "ratio": 1,
+        "avgGap": 120.37822224149664,
+        "minGap": 110.58273769481558,
+        "invisible": []
+      },
+      "ovlp": {
+        "ratio": 0,
+        "maxOverlap": 0,
+        "overlapping": []
+      },
+      "cross": {
+        "count": 0,
+        "ratio": 0,
+        "normalised": 0
+      },
+      "stress": {
+        "stress": 6.382447073326422,
+        "perEdge": 0.03732425189079779
+      },
+      "prox": {
+        "withinAvg": 370.84382510663033,
+        "betweenAvg": 547.6672810947584,
+        "ratio": 0.6771334310228152,
+        "cohesion": 0.3228665689771848
+      },
+      "integ": {
+        "ratio": 1,
+        "violations": [],
+        "blobRadii": {}
+      }
+    }
+  }
+}

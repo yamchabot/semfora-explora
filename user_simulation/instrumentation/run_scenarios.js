@@ -6,15 +6,6 @@
  * user_simulation/instrumentation/output/<scenario>.json.
  *
  * The JSON files are consumed by perceptions.py → judgement.py.
- *
- * Usage (from repo root):
- *   node --experimental-vm-modules user_simulation/instrumentation/run_scenarios.js
- *
- * Or via the vitest runner (picks up the simulation environment):
- *   cd frontend && npx vitest run ../../user_simulation/instrumentation/run_scenarios.js
- *
- * To run against a different codebase: write your own runner that produces
- * the same JSON schema and drop it alongside this file.
  */
 
 import { writeFileSync, mkdirSync } from "fs";
@@ -25,10 +16,10 @@ import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide }
   from "d3-force-3d";
 import { computeFacts } from "./layout_metrics.js";
 
-const __dir    = dirname(fileURLToPath(import.meta.url));
-const OUT_DIR  = resolve(__dir, "output");
+const __dir   = dirname(fileURLToPath(import.meta.url));
+const OUT_DIR = resolve(__dir, "output");
 
-// ── Simulation helper ─────────────────────────────────────────────────────────
+// ── Simulation ────────────────────────────────────────────────────────────────
 
 const L = 120;
 
@@ -37,9 +28,8 @@ function node(id, group = "M", val = 6) {
 }
 
 function settle(nodes, links, ticks = 600) {
-  // Spread groups in a circle before simulation (mirrors GraphRenderer.jsx)
-  const groups  = [...new Set(nodes.map(n => n.group))];
-  const spread  = Math.max(300, L * Math.sqrt(groups.length) * 1.8);
+  const groups = [...new Set(nodes.map(n => n.group))];
+  const spread = Math.max(300, L * Math.sqrt(groups.length) * 1.8);
   groups.forEach((g, gi) => {
     const a   = (gi / groups.length) * 2 * Math.PI;
     const cx  = groups.length > 1 ? Math.cos(a) * spread : 0;
@@ -65,52 +55,357 @@ function settle(nodes, links, ticks = 600) {
   return nodes;
 }
 
+// ── Factory helpers ───────────────────────────────────────────────────────────
+
+/** Linear chain of n nodes in group g. */
+function mkChain(prefix, g, n) {
+  const ids = Array.from({ length: n }, (_, i) => `${prefix}${i}`);
+  return {
+    nodes: ids.map(id => node(id, g)),
+    links: ids.slice(1).map((id, i) => ({ source: ids[i], target: id })),
+  };
+}
+
+/** Hub-and-spoke: one central hub + nSpokes leaves in group g. */
+function mkHub(prefix, g, nSpokes, hubVal = 12) {
+  const hub    = node(`${prefix}hub`, g, hubVal);
+  const spokes = Array.from({ length: nSpokes }, (_, i) => node(`${prefix}s${i}`, g));
+  return {
+    nodes: [hub, ...spokes],
+    links: spokes.map(s => ({ source: hub.id, target: s.id })),
+  };
+}
+
+/** Merge multiple module descriptors + explicit cross-edges into one graph. */
+function combine(modules, crossEdges = []) {
+  return {
+    nodes: modules.flatMap(m => m.nodes),
+    links: [
+      ...modules.flatMap(m => m.links),
+      ...crossEdges.map(([s, t]) => ({ source: s, target: t })),
+    ],
+  };
+}
+
+/** A chain where every node has a "side leaf" attached (bushy chain). */
+function mkBushyChain(prefix, g, n) {
+  const ids   = Array.from({ length: n }, (_, i) => `${prefix}${i}`);
+  const leafs = ids.map((id, i) => node(`${prefix}l${i}`, g));
+  return {
+    nodes: [...ids.map(id => node(id, g)), ...leafs],
+    links: [
+      ...ids.slice(1).map((id, i) => ({ source: ids[i], target: id })),
+      ...ids.map((id, i) => ({ source: id, target: leafs[i].id })),
+    ],
+  };
+}
+
+/** Star: all nodes point to a single sink. */
+function mkStar(prefix, g, n) {
+  const sink    = node(`${prefix}sink`, g, 14);
+  const sources = Array.from({ length: n }, (_, i) => node(`${prefix}src${i}`, g));
+  return {
+    nodes: [sink, ...sources],
+    links: sources.map(s => ({ source: s.id, target: sink.id })),
+  };
+}
+
+/** Tree: binary tree of depth d. */
+function mkTree(prefix, g, depth) {
+  const nodes = [], links = [];
+  function build(id, d) {
+    nodes.push(node(id, g, d === depth ? 6 : 10));
+    if (d < depth) {
+      const l = `${id}L`, r = `${id}R`;
+      links.push({ source: id, target: l }, { source: id, target: r });
+      build(l, d + 1); build(r, d + 1);
+    }
+  }
+  build(`${prefix}root`, 0);
+  return { nodes, links };
+}
+
+/** Diamond: two middle-layer nodes both depend on a root and both feed a sink. */
+function mkDiamond(prefix, g) {
+  const root = node(`${prefix}root`, g, 10);
+  const mid1 = node(`${prefix}mid1`, g);
+  const mid2 = node(`${prefix}mid2`, g);
+  const sink = node(`${prefix}sink`, g, 10);
+  return {
+    nodes: [root, mid1, mid2, sink],
+    links: [
+      { source: root.id, target: mid1.id },
+      { source: root.id, target: mid2.id },
+      { source: mid1.id, target: sink.id },
+      { source: mid2.id, target: sink.id },
+    ],
+  };
+}
+
 // ── Scenarios ─────────────────────────────────────────────────────────────────
 
 const SCENARIOS = {
 
-  pipeline: () => {
-    const ids   = ["parse", "validate", "transform", "enrich", "save", "respond"];
-    const nodes = ids.map(id => node(id));
-    const links = ids.slice(1).map((id, i) => ({ source: ids[i], target: id }));
-    return { nodes, links };
+  // ── Single-module: chains ──────────────────────────────────────────────────
+
+  chain_3:  () => mkChain("n", "M", 3),
+  chain_4:  () => mkChain("n", "M", 4),
+  chain_5:  () => mkChain("n", "M", 5),
+  pipeline: () => mkChain("n", "M", 6),   // original
+  chain_7:  () => mkChain("n", "M", 7),
+  chain_8:  () => mkChain("n", "M", 8),
+  chain_10: () => mkChain("n", "M", 10),
+  chain_12: () => mkChain("n", "M", 12),
+  chain_15: () => mkChain("n", "M", 15),
+
+  // ── Single-module: hubs ───────────────────────────────────────────────────
+
+  hub_3:        () => mkHub("h", "M", 3),
+  hub_4:        () => mkHub("h", "M", 4),
+  hub_and_spoke: () => mkHub("h", "M", 5),  // original
+  hub_6:        () => mkHub("h", "M", 6),
+  hub_7:        () => mkHub("h", "M", 7),
+  hub_8:        () => mkHub("h", "M", 8),
+  hub_10:       () => mkHub("h", "M", 10),
+  hub_15:       () => mkHub("h", "M", 15),
+
+  // ── Single-module: other topologies ──────────────────────────────────────
+
+  star_5:       () => mkStar("n", "M", 5),
+  star_8:       () => mkStar("n", "M", 8),
+  star_12:      () => mkStar("n", "M", 12),
+  tree_2:       () => mkTree("t", "M", 2),   // depth-2 binary tree: 7 nodes
+  tree_3:       () => mkTree("t", "M", 3),   // depth-3 binary tree: 15 nodes
+  bushy_chain_4: () => mkBushyChain("n", "M", 4),
+  bushy_chain_6: () => mkBushyChain("n", "M", 6),
+  diamond:      () => mkDiamond("d", "M"),
+
+  // ── Two modules ───────────────────────────────────────────────────────────
+
+  two_modules_small: () => combine(
+    [mkChain("a", "A", 3), mkChain("b", "B", 3)],
+    [["a2", "b0"]]
+  ),
+  two_modules_medium: () => combine(
+    [mkChain("a", "A", 5), mkChain("b", "B", 5)],
+    [["a4", "b0"], ["a2", "b2"]]
+  ),
+  two_modules_large: () => combine(
+    [mkChain("a", "A", 8), mkChain("b", "B", 8)],
+    [["a7", "b0"], ["a3", "b3"], ["a5", "b5"]]
+  ),
+  two_modules_asymmetric: () => combine(
+    [mkChain("a", "A", 3), mkChain("b", "B", 8)],
+    [["a2", "b0"]]
+  ),
+  two_modules_coupled: () => combine(
+    [mkChain("a", "A", 5), mkChain("b", "B", 5)],
+    [["a0","b0"], ["a1","b1"], ["a2","b2"], ["a3","b3"], ["a4","b4"]]
+  ),
+  two_modules_hub_chain: () => combine(
+    [mkHub("a", "A", 4), mkChain("b", "B", 5)],
+    [["ahub", "b0"]]
+  ),
+  two_modules_hub_hub: () => combine(
+    [mkHub("a", "A", 4), mkHub("b", "B", 4)],
+    [["ahub", "bhub"]]
+  ),
+  two_modules_star_chain: () => combine(
+    [mkStar("a", "A", 5), mkChain("b", "B", 4)],
+    [["asink", "b0"]]
+  ),
+  two_modules_deep: () => combine(
+    [mkChain("a", "A", 10), mkChain("b", "B", 10)],
+    [["a9", "b0"], ["a4", "b4"]]
+  ),
+  two_modules_trees: () => combine(
+    [mkTree("a", "A", 2), mkTree("b", "B", 2)],
+    [["aroot", "broot"]]
+  ),
+
+  // ── Three modules ─────────────────────────────────────────────────────────
+
+  three_modules: () => combine(            // original
+    [mkChain("a", "A", 5), mkChain("b", "B", 5), mkChain("c", "C", 5)],
+    [["a4", "b0"], ["b4", "c0"]]
+  ),
+  three_modules_small: () => combine(
+    [mkChain("a", "A", 3), mkChain("b", "B", 3), mkChain("c", "C", 3)],
+    [["a2", "b0"], ["b2", "c0"]]
+  ),
+  three_modules_large: () => combine(
+    [mkChain("a", "A", 8), mkChain("b", "B", 8), mkChain("c", "C", 8)],
+    [["a7", "b0"], ["b7", "c0"], ["a3", "c3"]]
+  ),
+  three_modules_hubs: () => combine(
+    [mkHub("a", "A", 4), mkHub("b", "B", 4), mkHub("c", "C", 4)],
+    [["ahub", "bhub"], ["bhub", "chub"]]
+  ),
+  three_modules_mixed: () => combine(
+    [mkChain("a", "A", 5), mkHub("b", "B", 4), mkChain("c", "C", 5)],
+    [["a4", "bhub"], ["bhub", "c0"]]
+  ),
+  three_modules_coupled: () => combine(
+    [mkChain("a", "A", 4), mkChain("b", "B", 4), mkChain("c", "C", 4)],
+    [["a0","b0"], ["a1","b1"], ["a2","c0"], ["a3","c1"], ["b2","c2"], ["b3","c3"]]
+  ),
+  three_modules_star: () => combine(
+    [mkChain("a", "A", 4), mkHub("b", "B", 5), mkChain("c", "C", 4)],
+    [["a0", "bs0"], ["c0", "bs1"]]
+  ),
+  three_modules_asymmetric: () => combine(
+    [mkChain("a", "A", 2), mkChain("b", "B", 5), mkChain("c", "C", 8)],
+    [["a1", "b0"], ["b4", "c0"]]
+  ),
+
+  // ── Four modules ──────────────────────────────────────────────────────────
+
+  four_modules_small: () => combine(
+    [mkChain("a","A",3), mkChain("b","B",3), mkChain("c","C",3), mkChain("d","D",3)],
+    [["a2","b0"], ["b2","c0"], ["c2","d0"]]
+  ),
+  four_modules_medium: () => combine(
+    [mkChain("a","A",4), mkChain("b","B",4), mkChain("c","C",4), mkChain("d","D",4)],
+    [["a3","b0"], ["b3","c0"], ["c3","d0"]]
+  ),
+  four_modules_large: () => combine(
+    [mkChain("a","A",5), mkChain("b","B",5), mkChain("c","C",5), mkChain("d","D",5)],
+    [["a4","b0"], ["b4","c0"], ["c4","d0"], ["a2","c2"]]
+  ),
+  four_modules_pipeline: () => combine(
+    [mkChain("a","A",4), mkChain("b","B",4), mkChain("c","C",4), mkChain("d","D",4)],
+    [["a3","b0"], ["b3","c0"], ["c3","d0"]]
+  ),
+  four_modules_star: () => combine(
+    [mkChain("a","A",4), mkChain("b","B",4), mkChain("c","C",4), mkHub("d","D",3)],
+    [["a3","dhub"], ["b3","dhub"], ["c3","dhub"]]
+  ),
+  four_modules_coupled: () => combine(
+    [mkChain("a","A",3), mkChain("b","B",3), mkChain("c","C",3), mkChain("d","D",3)],
+    [["a0","b0"],["a1","c0"],["a2","d0"],["b1","c1"],["b2","d1"],["c2","d2"]]
+  ),
+  four_modules_hubs: () => combine(
+    [mkHub("a","A",3), mkHub("b","B",3), mkHub("c","C",3), mkHub("d","D",3)],
+    [["ahub","bhub"], ["bhub","chub"], ["chub","dhub"]]
+  ),
+  four_modules_mixed: () => combine(
+    [mkChain("a","A",5), mkHub("b","B",4), mkChain("c","C",3), mkStar("d","D",4)],
+    [["a4","bhub"], ["bhub","c0"], ["c2","dsink"]]
+  ),
+
+  // ── Five modules ──────────────────────────────────────────────────────────
+
+  five_modules_small: () => combine(
+    [mkChain("a","A",3), mkChain("b","B",3), mkChain("c","C",3),
+     mkChain("d","D",3), mkChain("e","E",3)],
+    [["a2","b0"], ["b2","c0"], ["c2","d0"], ["d2","e0"]]
+  ),
+  five_modules_medium: () => combine(
+    [mkChain("a","A",4), mkChain("b","B",4), mkChain("c","C",4),
+     mkChain("d","D",4), mkChain("e","E",4)],
+    [["a3","b0"], ["b3","c0"], ["c3","d0"], ["d3","e0"]]
+  ),
+  five_modules_star: () => combine(
+    [mkHub("a","A",4), mkChain("b","B",3), mkChain("c","C",3),
+     mkChain("d","D",3), mkChain("e","E",3)],
+    [["ahub","b0"], ["ahub","c0"], ["ahub","d0"], ["ahub","e0"]]
+  ),
+  five_modules_ring: () => combine(
+    [mkChain("a","A",3), mkChain("b","B",3), mkChain("c","C",3),
+     mkChain("d","D",3), mkChain("e","E",3)],
+    [["a2","b0"], ["b2","c0"], ["c2","d0"], ["d2","e0"], ["e2","a0"]]
+  ),
+  five_modules_hub: () => combine(
+    [mkHub("a","A",3), mkHub("b","B",3), mkHub("c","C",3),
+     mkHub("d","D",3), mkHub("e","E",3)],
+    [["ahub","bhub"], ["ahub","chub"], ["ahub","dhub"], ["ahub","ehub"]]
+  ),
+
+  // ── Special topologies ────────────────────────────────────────────────────
+
+  // Two modules with a shared high-degree bridge node
+  bridge: () => combine(
+    [mkChain("a","A",4), mkChain("b","B",4)],
+    [["a1","b0"], ["a2","b1"], ["a3","b2"], ["a0","b3"]]
+  ),
+
+  // Layered architecture: presentation → business → data
+  layered_arch: () => combine(
+    [mkChain("ui","UI",4), mkChain("svc","SVC",5), mkChain("db","DB",3)],
+    [["ui3","svc0"], ["ui2","svc1"], ["svc4","db0"], ["svc3","db1"]]
+  ),
+
+  // Microservices: 6 tiny modules, very sparse coupling
+  microservices: () => combine(
+    [mkChain("a","Auth",2), mkChain("u","User",2), mkChain("p","Payment",2),
+     mkChain("o","Order",2), mkChain("n","Notify",2), mkChain("g","Gateway",2)],
+    [["g1","a0"], ["g1","u0"], ["o1","p0"], ["o1","n0"]]
+  ),
+
+  // Wide flat hub — stress-tests hub centrality
+  hub_20: () => mkHub("h", "M", 20),
+
+  // Very deep pipeline — stress-tests chain elongation
+  pipeline_20: () => mkChain("n", "M", 20),
+
+  // Binary tree (full, depth 3) with a sibling module
+  tree_with_module: () => combine(
+    [mkTree("t","Tree",3), mkChain("c","Chain",4)],
+    [["troot", "c0"]]
+  ),
+
+  // Two modules where one is a dense star feeding into the other
+  funnel: () => combine(
+    [mkStar("a","A",8), mkChain("b","B",5)],
+    [["asink","b0"], ["asink","b2"]]
+  ),
+
+  // Hourglass: star → hub → star
+  hourglass: () => {
+    const top  = mkStar("t","M",4);
+    const bot  = mkStar("b","M",4);
+    const mid  = node("mid","M",12);
+    return {
+      nodes: [...top.nodes, mid, ...bot.nodes],
+      links: [
+        ...top.links,
+        { source: "tsink", target: "mid" },
+        { source: "mid",   target: "bsink" },
+        ...bot.links,
+      ],
+    };
   },
 
-  hub_and_spoke: () => {
-    const nodes = [node("router", "M", 14),
-      ...["handlerA","handlerB","handlerC","handlerD","handlerE"].map(id => node(id))];
-    const links = nodes.slice(1).map(n => ({ source: "router", target: n.id }));
-    return { nodes, links };
-  },
+  // Six-module enterprise: 6 teams, intentionally sparse
+  enterprise_6: () => combine(
+    [mkChain("a","Auth",3),    mkChain("b","Billing",3),
+     mkChain("c","Catalog",3), mkChain("d","Delivery",3),
+     mkChain("e","Email",3),   mkChain("f","Frontend",3)],
+    [["f2","a0"], ["f2","c0"], ["d2","b0"], ["d2","e0"], ["c2","d0"]]
+  ),
 
-  three_modules: () => {
-    const mk = (prefix, g, n) =>
-      Array.from({ length: n }, (_, i) => node(`${prefix}${i}`, g));
-    const nodesA = mk("a", "A", 5);
-    const nodesB = mk("b", "B", 5);
-    const nodesC = mk("c", "C", 5);
-    const nodes  = [...nodesA, ...nodesB, ...nodesC];
-    const links  = [
-      ...nodesA.slice(1).map((n, i) => ({ source: nodesA[i].id, target: n.id })),
-      ...nodesB.slice(1).map((n, i) => ({ source: nodesB[i].id, target: n.id })),
-      ...nodesC.slice(1).map((n, i) => ({ source: nodesC[i].id, target: n.id })),
-      { source: "a4", target: "b0" },
-      { source: "b4", target: "c0" },
-    ];
-    return { nodes, links };
-  },
-
+  // Spaghetti: many cross-module edges — tests Fatima's Implies tolerance
+  spaghetti: () => combine(
+    [mkChain("a","A",4), mkChain("b","B",4), mkChain("c","C",4)],
+    [
+      ["a0","b0"],["a0","c0"],["a1","b1"],["a1","c1"],
+      ["a2","b2"],["a2","c2"],["a3","b3"],["a3","c3"],
+      ["b0","c0"],["b1","c1"],["b2","c2"],
+    ]
+  ),
 };
 
 // ── Run and write ─────────────────────────────────────────────────────────────
 
 mkdirSync(OUT_DIR, { recursive: true });
 
+let count = 0;
 for (const [name, factory] of Object.entries(SCENARIOS)) {
   const { nodes, links } = factory();
   settle(nodes, links);
   const facts = computeFacts(nodes, links);
   const path  = resolve(OUT_DIR, `${name}.json`);
   writeFileSync(path, JSON.stringify(facts, null, 2));
-  console.log(`wrote ${path}`);
+  count++;
 }
+console.log(`wrote ${count} scenarios to ${OUT_DIR}`);
