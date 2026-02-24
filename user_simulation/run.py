@@ -174,6 +174,15 @@ def main():
 
     print_report(results)
 
+    # ── HTML report ───────────────────────────────────────────────────────────
+    try:
+        from user_simulation.report import generate_report
+        report_path = REPO_ROOT / "user_simulation_report.html"
+        out = generate_report(results, report_path)
+        print(f"\n📊 HTML report: {out}")
+    except Exception as e:
+        print(f"\n⚠  HTML report skipped: {e}")
+
     any_fail = any(
         not r.satisfied
         for scenario_results in results.values()
