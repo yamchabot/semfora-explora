@@ -114,7 +114,11 @@ export function makeNestedBlobForce(level, blobCount = 1) {
   const levelFactor = Math.max(0.4, 1 - level * 0.25);
   const padding     = Math.max(15, 60 - level * 15);
   return makeVoronoiContainmentForce(
-    0.10 * levelFactor,
+    // Centripetal attraction is near-zero: the link force should form the
+    // program shape (call chains, hubs, trees) within the blob freely.
+    // A tiny residual (0.005) prevents fully disconnected nodes from drifting
+    // out of their territory. DO NOT increase this — it fights the link force.
+    0.005,
     0.35 * levelFactor,
     padding,
     level,
@@ -621,7 +625,14 @@ export default function GraphRenderer({ data, measures, onNodeClick,
       const outerGroups = [...new Set(graphData.nodes.map(n => n.group).filter(Boolean))];
       const numOuter   = outerGroups.length;
       if (numOuter > 1) {
-        const outerSpread = Math.max(250, 100 * Math.sqrt(numOuter));
+        // Scale spread by both number of groups and the size of the largest group.
+        // Larger groups need more room for the link force to form call-graph topology.
+        const groupNodeCounts = new Map();
+        for (const n of graphData.nodes) {
+          if (n.group) groupNodeCounts.set(n.group, (groupNodeCounts.get(n.group) ?? 0) + 1);
+        }
+        const maxGroupSize = Math.max(...groupNodeCounts.values(), 1);
+        const outerSpread = Math.max(350, Math.sqrt(maxGroupSize) * linkDistBase * 0.8 * Math.sqrt(numOuter));
         const outerPos    = new Map(outerGroups.map((g, i) => {
           const angle = (2 * Math.PI * i) / numOuter;
           return [g, { x: Math.cos(angle) * outerSpread, y: Math.sin(angle) * outerSpread }];
@@ -654,26 +665,32 @@ export default function GraphRenderer({ data, measures, onNodeClick,
             const outerCenter = outerPos.get(node.group);
             if (!outerCenter) continue;
             const info = outerSubIdx.get(node.group);
+            const gc   = groupNodeCounts.get(node.group) ?? 1;
+            const jitter = Math.max(60, Math.sqrt(gc) * linkDistBase * 0.3);
             if (info && info.total > 1) {
               const ik    = getGroupKey(node, 1);
               const idx   = info.idxMap[ik] ?? 0;
               const angle = (2 * Math.PI * idx) / info.total;
               const r     = Math.max(80, outerSpread * 0.35);
-              node.x = outerCenter.x + Math.cos(angle) * r + (Math.random() - 0.5) * 40;
-              node.y = outerCenter.y + Math.sin(angle) * r + (Math.random() - 0.5) * 40;
+              node.x = outerCenter.x + Math.cos(angle) * r + (Math.random() - 0.5) * jitter * 2;
+              node.y = outerCenter.y + Math.sin(angle) * r + (Math.random() - 0.5) * jitter * 2;
             } else {
-              node.x = outerCenter.x + (Math.random() - 0.5) * 100;
-              node.y = outerCenter.y + (Math.random() - 0.5) * 100;
+              node.x = outerCenter.x + (Math.random() - 0.5) * jitter * 2;
+              node.y = outerCenter.y + (Math.random() - 0.5) * jitter * 2;
             }
           }
         } else {
-          // Standard 2-dim: position within outer group circle
+          // Standard 2-dim: position within outer group circle.
+          // Jitter scales with group size so larger groups start more spread
+          // out, giving the link force room to form call-graph topology.
           for (const node of graphData.nodes) {
             if (node.x == null && node.group != null) {
               const gp = outerPos.get(node.group);
               if (gp) {
-                node.x = gp.x + (Math.random() - 0.5) * 100;
-                node.y = gp.y + (Math.random() - 0.5) * 100;
+                const gc = groupNodeCounts.get(node.group) ?? 1;
+                const jitter = Math.max(80, Math.sqrt(gc) * linkDistBase * 0.4);
+                node.x = gp.x + (Math.random() - 0.5) * jitter * 2;
+                node.y = gp.y + (Math.random() - 0.5) * jitter * 2;
               }
             }
           }
