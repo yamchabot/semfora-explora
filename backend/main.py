@@ -110,6 +110,9 @@ async def regenerate_simulation_report_browser():
 </script></body></html>""")
 
 
+import logging as _logging
+_log = _logging.getLogger("simulation")
+
 @app.post("/simulation-report/generate", include_in_schema=False)
 async def regenerate_simulation_report():
     """Re-run the user simulation pipeline and regenerate the HTML report."""
@@ -119,6 +122,7 @@ async def regenerate_simulation_report():
             or "/workspace/node-v22.13.0-linux-arm64/bin/node")
     cmd = ["python3", str(REPO_ROOT / "user_simulation" / "run.py")]
     env = {**os.environ, "NODE": node}
+    _log.info("generate: starting pipeline node=%s", node)
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -128,14 +132,22 @@ async def regenerate_simulation_report():
             stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
-        # exit 0 = all happy, exit 1 = some unhappy — both mean the pipeline ran
-        if proc.returncode > 1:
-            return JSONResponse({"ok": False, "error": stderr.decode() or stdout.decode()}, status_code=500)
-        out_lines = stdout.decode().strip().split("\n")
+        rc = proc.returncode
+        out_str = stdout.decode()
+        err_str = stderr.decode()
+        _log.info("generate: rc=%d stdout=%r stderr=%r", rc, out_str[-200:], err_str[-200:])
+        # exit 0 = all happy, exit 1 = some unhappy — both mean the pipeline ran ok
+        if rc > 1:
+            return JSONResponse({"ok": False, "error": err_str or out_str}, status_code=500)
+        out_lines = out_str.strip().split("\n")
         summary = next((l for l in out_lines if "satisfied" in l), out_lines[0] if out_lines else "done")
-        return JSONResponse({"ok": True, "output": summary})
+        return JSONResponse({"ok": True, "output": summary.strip()})
     except asyncio.TimeoutError:
+        _log.error("generate: timed out")
         return JSONResponse({"ok": False, "error": "pipeline timed out (120s)"}, status_code=500)
+    except Exception as e:
+        _log.exception("generate: unexpected error: %s", e)
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
 # ── Serve React frontend (must be last) ──────────────────────────────────────
