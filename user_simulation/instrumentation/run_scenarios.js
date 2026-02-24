@@ -12,7 +12,7 @@ import { writeFileSync, mkdirSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 
-import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide }
+import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide, forceX, forceY }
   from "d3-force-3d";
 import { computeFacts } from "./layout_metrics.js";
 
@@ -27,9 +27,108 @@ function node(id, group = "M", val = 6) {
   return { id, group, groupPath: [group], val, x: 0, y: 0, vx: 0, vy: 0 };
 }
 
-function settle(nodes, links, ticks = 600) {
+// ── Fix 1: Degree-based node sizing ─────────────────────────────────────────
+// Encodes structural importance (degree) into visual size so node_size_cv > 0.
+// High-degree hubs get larger val; leaf nodes stay small. Matches the kind of
+// size encoding the real app uses for enriched graphs (utility_score / degree).
+function assignDegreeBasedSizes(nodes, links) {
+  const deg = {};
+  links.forEach(l => {
+    const s = typeof l.source === "object" ? l.source.id : l.source;
+    const t = typeof l.target === "object" ? l.target.id : l.target;
+    deg[s] = (deg[s] || 0) + 1;
+    deg[t] = (deg[t] || 0) + 1;
+  });
+  nodes.forEach(n => {
+    const d = deg[n.id] || 1;
+    // Always override with degree-based size. Higher-degree nodes (hubs,
+    // bridges) get significantly larger val, producing non-trivial node_size_cv.
+    // val = 4 + degree * 4  →  leaf=8, degree-2=12, hub-8=36, hub-20=84
+    n.val = Math.max(4, Math.round(4 + d * 4));
+  });
+}
+
+// ── Fix 2: Chain elongation via topological forceX ───────────────────────────
+// For single-module linear-chain topologies (max-degree ≤ 2, connected) the
+// D3 charge force causes nodes to curl into a ring instead of a line.
+// We detect the chain order and add a forceX that anchors each node to its
+// position along the chain, producing a straight horizontal layout.
+function detectLinearChain(nodes, links) {
+  const adj = {};
+  nodes.forEach(n => { adj[n.id] = []; });
+  links.forEach(l => {
+    const s = typeof l.source === "object" ? l.source.id : l.source;
+    const t = typeof l.target === "object" ? l.target.id : l.target;
+    if (adj[s]) adj[s].push(t);
+    if (adj[t]) adj[t].push(s);
+  });
+  const endpoints = nodes.filter(n => adj[n.id].length === 1);
+  if (endpoints.length !== 2) return null;   // not a simple path
+  const order = [];
+  const visited = new Set();
+  let cur = endpoints[0].id;
+  while (cur) {
+    order.push(cur);
+    visited.add(cur);
+    cur = (adj[cur] || []).find(id => !visited.has(id)) ?? null;
+  }
+  return order.length === nodes.length ? order : null;
+}
+
+// ── Fix 3: Inter-blob centroid repulsion (position-based) ────────────────────
+// Cross-module edges pull blobs together, causing negative minClearance.
+// This force pushes module centroids apart whenever they'd overlap, using
+// direct position updates (like forceCollide) so it stays effective after
+// the simulation has cooled and link forces would otherwise win.
+function makeBlobRepulsion(nodes, targetClearance = 80) {
+  const groupMap = {};
+  nodes.forEach(n => {
+    if (!groupMap[n.group]) groupMap[n.group] = [];
+    groupMap[n.group].push(n);
+  });
+  const groups = Object.keys(groupMap);
+
+  return function blobRepulsion() {
+    // Recompute centroids and radii each tick (nodes move)
+    const centroids = {}, radii = {};
+    groups.forEach(g => {
+      const ns = groupMap[g];
+      const cx = ns.reduce((s, n) => s + n.x, 0) / ns.length;
+      const cy = ns.reduce((s, n) => s + n.y, 0) / ns.length;
+      centroids[g] = { x: cx, y: cy };
+      radii[g] = ns.reduce((mx, n) => {
+        const r = Math.hypot(n.x - cx, n.y - cy) + (n.val ?? 6) + 12;
+        return Math.max(mx, r);
+      }, 40);
+    });
+
+    for (let i = 0; i < groups.length; i++) {
+      for (let j = i + 1; j < groups.length; j++) {
+        const g1 = groups[i], g2 = groups[j];
+        const dx = centroids[g2].x - centroids[g1].x;
+        const dy = centroids[g2].y - centroids[g1].y;
+        const dist = Math.hypot(dx, dy) || 0.01;
+        const minDist = radii[g1] + radii[g2] + targetClearance;
+        if (dist >= minDist) continue;
+
+        // Position correction: split evenly, cap at 8px per tick for stability
+        const correction = Math.min(8, (minDist - dist) * 0.4);
+        const nx = dx / dist, ny = dy / dist;
+        groupMap[g1].forEach(n => { n.x -= nx * correction; n.y -= ny * correction; });
+        groupMap[g2].forEach(n => { n.x += nx * correction; n.y += ny * correction; });
+      }
+    }
+  };
+}
+
+function settle(nodes, links, ticks = 800) {
   const groups = [...new Set(nodes.map(n => n.group))];
-  const spread = Math.max(300, L * Math.sqrt(groups.length) * 1.8);
+
+  // ── Fix 1: Degree-based sizes (before collision radii are computed) ─────────
+  assignDegreeBasedSizes(nodes, links);
+
+  // ── Initial positions: spread groups on a circle, nodes within each group ───
+  const spread = Math.max(400, L * Math.sqrt(groups.length) * 2.2);
   groups.forEach((g, gi) => {
     const a   = (gi / groups.length) * 2 * Math.PI;
     const cx  = groups.length > 1 ? Math.cos(a) * spread : 0;
@@ -43,13 +142,56 @@ function settle(nodes, links, ticks = 600) {
     });
   });
 
+  // ── Fix 2: Detect chain topology for elongation force ──────────────────────
+  const chainOrder = groups.length === 1 ? detectLinearChain(nodes, links) : null;
+  const chainPositions = chainOrder
+    ? (() => {
+        const w = L * (chainOrder.length - 1);
+        const pos = {};
+        chainOrder.forEach((id, i) => {
+          pos[id] = (i / Math.max(1, chainOrder.length - 1) - 0.5) * w;
+        });
+        // Pre-position so the simulation starts near-converged
+        nodes.forEach(n => {
+          if (pos[n.id] != null) { n.x = pos[n.id]; n.y = (Math.random() - 0.5) * 30; }
+        });
+        return pos;
+      })()
+    : null;
+
+  // ── Cross-module link map (for weakened strength / longer distance) ─────────
+  const nodeGroup = {};
+  nodes.forEach(n => { nodeGroup[n.id] = n.group; });
+  function isCross(l) {
+    const s = typeof l.source === "object" ? l.source.id : l.source;
+    const t = typeof l.target === "object" ? l.target.id : l.target;
+    return nodeGroup[s] !== nodeGroup[t];
+  }
+
+  // ── Build simulation ────────────────────────────────────────────────────────
   const sim = forceSimulation(nodes)
     .numDimensions(2)
-    .force("link",    forceLink(links).id(n => n.id).distance(L).strength(0.5))
+    .force("link", forceLink(links).id(n => n.id)
+      // Cross-module links: much weaker + longer target distance, so they
+      // communicate coupling without collapsing the blobs into each other.
+      // Matches the app's blob-mode link physics (cross=0.02, intra=0.4).
+      .distance(l => isCross(l) ? L * 2.5 : L)
+      .strength(l => isCross(l) ? 0.02  : 0.4))
     .force("charge",  forceManyBody().strength(-120))
     .force("center",  forceCenter(0, 0))
     .force("collide", forceCollide(n => (n.val ?? 6) + 15).strength(0.85))
     .stop();
+
+  // Fix 2: chain elongation
+  if (chainPositions) {
+    sim.force("chainX", forceX(n => chainPositions[n.id] ?? 0).strength(0.45));
+    sim.force("chainY", forceY(0).strength(0.25));
+  }
+
+  // Fix 3: blob repulsion (only for multi-module graphs)
+  if (groups.length >= 2) {
+    sim.force("blobRepulsion", makeBlobRepulsion(nodes, 80));
+  }
 
   for (let i = 0; i < ticks; i++) sim.tick();
   return nodes;

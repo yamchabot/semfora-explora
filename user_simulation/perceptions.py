@@ -853,8 +853,9 @@ def compute_perceptions(facts: dict) -> Perceptions:
     cross_vis   = facts["crossModuleEdgeVisibility"]["ratio"]
     cross_count = facts["crossModuleEdgeVisibility"]["count"]
     edge_vis    = facts["edgeVisibility"]["ratio"]
-    chain_elo   = facts["chainLinearity"]["ratio"]
-    chain_str   = facts["chainLinearity"]["straightness"]
+    # ratio can be None (legacy JSON with Infinity) or absent — treat as 1.0 (no chain)
+    chain_elo   = float(facts["chainLinearity"]["ratio"]) if facts["chainLinearity"]["ratio"] is not None else 1.0
+    chain_str   = float(facts["chainLinearity"]["straightness"]) if facts["chainLinearity"]["straightness"] is not None else 1.0
     hub         = facts["hubCentrality"]["avgNormalised"]
     overlap     = facts["nodeOverlap"]["ratio"]
     stress      = facts["layoutStress"]["perEdge"]

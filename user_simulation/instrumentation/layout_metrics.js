@@ -64,7 +64,10 @@ export function axisSpans(nodes) {
   const proj2 = nodes.map(n => (n.x - cx) * c2 + (n.y - cy) * s2);
   const span = p => Math.max(...p) - Math.min(...p);
   const major = span(proj1), minor = span(proj2);
-  return { major, minor, ratio: minor < 1 ? Infinity : major / minor };
+  // Cap at 10.0 — a perfectly straight chain has minor≈0 → Infinity, which
+  // serialises to JSON null. 10.0 means "essentially infinite elongation" and
+  // is safely above any user constraint threshold (max 2.2 in current formulas).
+  return { major, minor, ratio: minor < 1 ? 10.0 : Math.min(10.0, major / minor) };
 }
 
 // ── 1. Edge visibility ────────────────────────────────────────────────────────
