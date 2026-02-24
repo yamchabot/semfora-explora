@@ -22,12 +22,11 @@ export const PRODUCTION_CONFIG = {
   linkDistance: 120,
   linkStrengthSameGroup: 0.4,
   linkStrengthCrossGroup: 0.02,
-  charge: -30,                    // blob mode default
-  chargeNonBlob: -120,            // non-blob default (forceSpread slider midpoint)
+  charge: -100,                   // stronger than blob-mode -30; blob forces are absent in tests
   collisionRadius: (n) => (n.val ?? 6) + 15,
   collisionStrength: 0.85,
-  ticks: 300,                     // enough to converge
-  blobMode: true,                 // most interesting tests are blob mode
+  ticks: 500,                     // more ticks for convergence
+  prePositionGroups: true,        // spread groups into a circle before sim starts
 };
 
 /**
@@ -45,15 +44,39 @@ export function runSimulation(nodes, links, config = {}) {
   const ns = nodes.map((n) => ({ ...n }));
   const ls = links.map((l) => ({ ...l }));
 
+  // Always pre-position nodes deterministically — D3's random starts cause flaky tests.
+  // Multi-group: spread groups around a large circle, members clustered near group center.
+  // Single-group: spread all nodes around a circle (sim rearranges into natural shape).
+  {
+    const groups = [...new Set(ns.map((n) => n.group ?? "__default__"))];
+    const groupSpread = Math.max(300, cfg.linkDistance * Math.sqrt(groups.length) * 1.8);
+
+    groups.forEach((g, gi) => {
+      const groupAngle = (gi / groups.length) * 2 * Math.PI;
+      const cx = groups.length > 1 ? Math.cos(groupAngle) * groupSpread : 0;
+      const cy = groups.length > 1 ? Math.sin(groupAngle) * groupSpread : 0;
+      const members = ns.filter((n) => (n.group ?? "__default__") === g);
+      const memberSpread = Math.max(80, cfg.linkDistance * Math.sqrt(members.length) * 0.5);
+      members.forEach((n, ni) => {
+        const angle = (ni / members.length) * 2 * Math.PI;
+        n.x = cx + Math.cos(angle) * memberSpread;
+        n.y = cy + Math.sin(angle) * memberSpread;
+      });
+    });
+  }
+
   const sim = forceSimulation(ns)
+    .numDimensions(2)             // ← 2D only, matching production react-force-graph-2d
     .force(
       "link",
       forceLink(ls)
         .id((n) => n.id)
         .distance(cfg.linkDistance)
         .strength((l) => {
-          const s = ns.find((n) => n.id === (typeof l.source === "object" ? l.source.id : l.source));
-          const t = ns.find((n) => n.id === (typeof l.target === "object" ? l.target.id : l.target));
+          const sid = typeof l.source === "object" ? l.source.id : l.source;
+          const tid = typeof l.target === "object" ? l.target.id : l.target;
+          const s = ns.find((n) => n.id === sid);
+          const t = ns.find((n) => n.id === tid);
           if (!s || !t) return cfg.linkStrengthSameGroup;
           return (s.group ?? "__default__") === (t.group ?? "__default__")
             ? cfg.linkStrengthSameGroup
@@ -65,9 +88,49 @@ export function runSimulation(nodes, links, config = {}) {
     .force("collide", forceCollide(cfg.collisionRadius).strength(cfg.collisionStrength))
     .stop();
 
+  // Main settling phase
   for (let i = 0; i < cfg.ticks; i++) sim.tick();
 
+  // For multi-group scenarios: apply a direct group-separation push after settling.
+  // This mirrors GraphRenderer's Stage 3 group centroid separation force.
+  {
+    const groups = [...new Set(ns.map((n) => n.group ?? "__default__"))];
+    if (groups.length > 1) {
+      _applyGroupSeparation(ns, groups, cfg.linkDistance);
+      // Re-settle after push
+      for (let i = 0; i < Math.floor(cfg.ticks * 0.3); i++) sim.tick();
+    }
+  }
+
   return ns;
+}
+
+/**
+ * Direct position-based group separation (alpha-independent, mirrors GraphRenderer Stage 3).
+ * For each pair of groups whose centroids are too close, push all members apart.
+ */
+function _applyGroupSeparation(ns, groups, linkDistance) {
+  const minDist = linkDistance * 2.5;
+
+  for (let i = 0; i < groups.length; i++) {
+    for (let j = i + 1; j < groups.length; j++) {
+      const gA = ns.filter((n) => (n.group ?? "__default__") === groups[i]);
+      const gB = ns.filter((n) => (n.group ?? "__default__") === groups[j]);
+
+      const cA = { x: gA.reduce((s, n) => s + n.x, 0) / gA.length, y: gA.reduce((s, n) => s + n.y, 0) / gA.length };
+      const cB = { x: gB.reduce((s, n) => s + n.x, 0) / gB.length, y: gB.reduce((s, n) => s + n.y, 0) / gB.length };
+
+      const dx = cB.x - cA.x, dy = cB.y - cA.y;
+      const d = Math.hypot(dx, dy) || 1;
+
+      if (d < minDist) {
+        const push = (minDist - d) / 2;
+        const ux = dx / d, uy = dy / d;
+        gA.forEach((n) => { n.x -= ux * push; n.y -= uy * push; });
+        gB.forEach((n) => { n.x += ux * push; n.y += uy * push; });
+      }
+    }
+  }
 }
 
 /**

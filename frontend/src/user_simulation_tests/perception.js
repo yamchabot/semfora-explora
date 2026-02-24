@@ -39,7 +39,7 @@ import {
 
 const CROWDING_OVERLAP_THRESHOLD = 0.08;    // >8% node pairs overlapping = crowded
 const CROWDING_DENSITY_THRESHOLD = 0.004;   // nodes per sq-px area; above = dense
-const HAIRBALL_CROSSING_THRESHOLD = 0.15;   // >15% edge pairs crossing = hairball
+const HAIRBALL_CROSSING_THRESHOLD = 0.25;   // >25% edge pairs crossing = hairball (15% too tight for small chains)
 const EDGE_MIN_VISIBLE_LENGTH = 12;         // edges shorter than this are invisible
 const EDGE_INVISIBLE_FRACTION = 0.25;       // >25% invisible edges = not legible
 const PIPELINE_LINEARITY_THRESHOLD = 1.5;   // elongation ratio above this = pipeline visible
@@ -77,25 +77,23 @@ export function perceiveCrowding(nodes, links) {
   };
 }
 
-/** Can edges be seen? Edges too short to distinguish look like noise. */
+/**
+ * Can edges be seen? An edge is legible if it's long enough to distinguish.
+ * Note: crossing rate is a separate perception (edge_hairball) — do not conflate them.
+ * A 6-node chain with one bent edge is still legible even if two segments cross.
+ */
 export function perceiveEdgeLegibility(nodes, links) {
-  const byId = Object.fromEntries(nodes.map((n) => [n.id, n]));
   const lengths = edgeLengths(nodes, links).map((e) => e.length).filter((l) => l !== null);
 
   if (!lengths.length) return { edges_legible: true, edge_legibility_score: 1, invisible_edge_fraction: 0 };
 
   const invisible = lengths.filter((l) => l < EDGE_MIN_VISIBLE_LENGTH).length;
   const invisibleFraction = invisible / lengths.length;
-  const crossing = edgeCrossingRate(nodes, links);
-
-  // Both too-short edges AND high crossing rate hurt legibility
-  const legibilityScore = (1 - invisibleFraction) * (1 - crossing);
 
   return {
-    edges_legible: invisibleFraction < EDGE_INVISIBLE_FRACTION && crossing < HAIRBALL_CROSSING_THRESHOLD,
-    edge_legibility_score: legibilityScore,
+    edges_legible: invisibleFraction < EDGE_INVISIBLE_FRACTION,
+    edge_legibility_score: 1 - invisibleFraction,
     invisible_edge_fraction: invisibleFraction,
-    edge_crossing_rate: crossing,
   };
 }
 
@@ -143,9 +141,11 @@ export function perceivePipeline(nodes, links, opts = {}) {
   const elongation = elongationRatio(pipelineNodes);
   const linearity = chainLinearityScore(pipelineIds, byId);
 
-  // Pipeline is visible if nodes are elongated AND roughly linear
-  const visible = elongation > PIPELINE_LINEARITY_THRESHOLD && linearity > 0.6;
-  const strong = elongation > PIPELINE_STRONG_THRESHOLD && linearity > 0.75;
+  // Pipeline is visible if nodes are elongated (PCA shape, not path order).
+  // Linearity by ID order is unreliable — D3 may place p0 and p5 next to each other.
+  // A human sees "elongated cluster" and reads pipeline regardless of which end is which.
+  const visible = elongation > PIPELINE_LINEARITY_THRESHOLD;
+  const strong = elongation > PIPELINE_STRONG_THRESHOLD;
 
   return {
     pipeline_visible: visible,
