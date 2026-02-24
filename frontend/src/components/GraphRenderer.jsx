@@ -660,15 +660,23 @@ export default function GraphRenderer({ data, measures, onNodeClick,
             [...innerSet].forEach((ik, i) => { idxMap[ik] = i; });
             outerSubIdx.set(ok, { idxMap, total: innerSet.size });
           }
+          // Per-inner-class node counts for correct jitter scaling.
+          // Using outer (module) count over-spreads inner blobs and causes
+          // Stage 3 separation to fight itself in a compressed space.
+          const innerGroupCounts = new Map();
+          for (const [ik, nodes] of innerGroups) innerGroupCounts.set(ik, nodes.length);
+
           for (const node of graphData.nodes) {
             if (node.x != null) continue;
             const outerCenter = outerPos.get(node.group);
             if (!outerCenter) continue;
-            const info = outerSubIdx.get(node.group);
-            const gc   = groupNodeCounts.get(node.group) ?? 1;
-            const jitter = Math.max(60, Math.sqrt(gc) * linkDistBase * 0.3);
+            const info    = outerSubIdx.get(node.group);
+            const ik      = getGroupKey(node, 1);
+            const igc     = innerGroupCounts.get(ik) ?? 1;
+            // Jitter scales with this inner class's own node count — gives each
+            // class blob proportional starting room without bloating its neighbours.
+            const jitter  = Math.max(40, Math.sqrt(igc) * linkDistBase * 0.35);
             if (info && info.total > 1) {
-              const ik    = getGroupKey(node, 1);
               const idx   = info.idxMap[ik] ?? 0;
               const angle = (2 * Math.PI * idx) / info.total;
               const r     = Math.max(80, outerSpread * 0.35);
@@ -709,11 +717,10 @@ export default function GraphRenderer({ data, measures, onNodeClick,
       for (let L = blobLevels; L < 6; L++) {
         fg.d3Force(`groupCentroid_${L}`, null);
       }
-      // Short-range collision: keeps nodes spread inside the blob without
-      // long-range charge pushing everything to the perimeter.
-      // Dynamic radius = visual radius + 4px gap, so edges remain visible
-      // between nodes of any size (val ranges from ~4 to ~22).
-      fg.d3Force("blobCollide", forceCollide(n => (n.val ?? 6) + 4).strength(0.85));
+      // Short-range collision: minimum node separation so edges are always
+      // visible. Gap = 15px beyond visual radius gives comfortable breathing
+      // room between nodes at all blob levels (val ranges ~4 to ~22).
+      fg.d3Force("blobCollide", forceCollide(n => (n.val ?? 6) + 15).strength(0.85));
     } else {
       fg.d3Force("groupCentroid", null);
       for (let L = 1; L < 6; L++) fg.d3Force(`groupCentroid_${L}`, null);
