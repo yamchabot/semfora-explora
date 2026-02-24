@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import ForceGraph2D from "react-force-graph-2d";
+import { forceCollide } from "d3-force-3d";
 import { measureKey, measureLabel } from "../utils/measureUtils.js";
 import { lerpColor, makeStepColors, makeStepWidths, makeStepArrows } from "../utils/colorUtils.js";
 import { bfsFromNode, buildAdjacencyMaps, convexHull, findChainEdges, collectChainNodeIds } from "../utils/graphAlgo.js";
@@ -166,6 +167,8 @@ export function makeVoronoiContainmentForce(
       n.vx += (own.x - n.x) * attractStrength * effAlpha;
       n.vy += (own.y - n.y) * attractStrength * effAlpha;
     }
+
+    // (Stage 2.5 removed — collision force handles intra-blob spacing instead)
 
     // ── 3. Group-level separation (alpha-independent position push) ─────────
     for (let i = 0; i < groupList.length; i++) {
@@ -584,7 +587,14 @@ export default function GraphRenderer({ data, measures, onNodeClick,
     if (!fg) return;
 
     const charge = fg.d3Force("charge");
-    if (charge) charge.strength(-forceSpread).distanceMax(Math.round(400 * forceSpread / SPREAD_DEFAULT));
+    if (charge) {
+      // In blob mode, long-range charge (default -350) causes nodes to drift to
+      // the blob perimeter and park there (ring pattern). Replace with a tiny
+      // charge (-5) just enough to maintain some global structure between blobs,
+      // while forceCollide handles local node spacing instead.
+      const effectiveCharge = graphData?.isBlobMode ? -5 : -forceSpread;
+      charge.strength(effectiveCharge).distanceMax(Math.round(400 * forceSpread / SPREAD_DEFAULT));
+    }
 
     const link = fg.d3Force("link");
     if (link) {
@@ -682,9 +692,13 @@ export default function GraphRenderer({ data, measures, onNodeClick,
       for (let L = blobLevels; L < 6; L++) {
         fg.d3Force(`groupCentroid_${L}`, null);
       }
+      // Short-range collision: keeps nodes spread inside the blob without
+      // long-range charge pushing everything to the perimeter.
+      fg.d3Force("blobCollide", forceCollide(7).strength(0.85));
     } else {
       fg.d3Force("groupCentroid", null);
       for (let L = 1; L < 6; L++) fg.d3Force(`groupCentroid_${L}`, null);
+      fg.d3Force("blobCollide", null);
     }
 
     fg.d3ReheatSimulation?.();
