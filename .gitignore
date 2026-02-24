@@ -13,3 +13,4 @@ user_simulation_report.html
 *.db-wal
 .env
 user_simulation/node_modules
+user_simulation/instrumentation/output/
