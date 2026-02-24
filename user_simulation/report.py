@@ -154,6 +154,10 @@ header {
   border-bottom: 1px solid var(--border);
   padding-bottom: 20px;
   margin-bottom: 28px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 header h1 {
@@ -161,6 +165,22 @@ header h1 {
   font-weight: 600;
   margin-bottom: 6px;
 }
+
+.regen-btn {
+  flex-shrink: 0;
+  background: var(--card2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color .15s, background .15s;
+}
+.regen-btn:hover  { border-color: var(--blue); background: #1f2937; }
+.regen-btn:active { opacity: .7; }
+.regen-btn[disabled] { opacity: .5; cursor: not-allowed; }
 
 .summary {
   font-size: 13px;
@@ -490,13 +510,40 @@ def generate_report(
 <body>
 
 <header>
-  <h1>🐉 User Simulation Report</h1>
-  <div class="summary">
-    <span><strong>{n_pass}</strong> / <strong>{total}</strong> person×scenario checks satisfied ({pct}%)</span>
-    <span><span class="s-pass">{n_pass} passed</span> &nbsp; <span class="s-fail">{n_fail} failed</span></span>
-    <span><strong>{n_scenarios}</strong> scenarios &nbsp; <strong>{n_people}</strong> people</span>
+  <div>
+    <h1>🐉 User Simulation Report</h1>
+    <div class="summary">
+      <span><strong>{n_pass}</strong> / <strong>{total}</strong> person×scenario checks satisfied ({pct}%)</span>
+      <span><span class="s-pass">{n_pass} passed</span> &nbsp; <span class="s-fail">{n_fail} failed</span></span>
+      <span><strong>{n_scenarios}</strong> scenarios &nbsp; <strong>{n_people}</strong> people</span>
+    </div>
   </div>
+  <button class="regen-btn" id="regenBtn" onclick="runRegen()">🔄 Regenerate</button>
 </header>
+
+<script>
+async function runRegen() {{
+  const btn = document.getElementById('regenBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Running…';
+  try {{
+    const r = await fetch('/simulation-report/generate', {{method:'POST'}});
+    const d = await r.json();
+    if (d.ok) {{
+      btn.textContent = '✅ Done — reloading…';
+      setTimeout(() => location.reload(), 800);
+    }} else {{
+      btn.textContent = '❌ Error';
+      btn.disabled = false;
+      alert('Pipeline error:\\n' + (d.error || 'unknown'));
+    }}
+  }} catch(e) {{
+    btn.textContent = '❌ Failed';
+    btn.disabled = false;
+    alert('Request failed: ' + e.message);
+  }}
+}}
+</script>
 
 {cards_html}
 
