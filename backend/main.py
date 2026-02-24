@@ -47,6 +47,8 @@ app.include_router(explore.router)
 REPO_ROOT   = Path(__file__).parent.parent
 REPORT_HTML = REPO_ROOT / "user_simulation_report.html"
 
+_NO_CACHE = {"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache"}
+
 @app.get("/simulation-report", response_class=HTMLResponse, include_in_schema=False)
 async def serve_simulation_report():
     """Serve the self-contained user-simulation HTML report."""
@@ -59,8 +61,9 @@ async def serve_simulation_report():
                 "</body></html>"
             ),
             status_code=404,
+            headers=_NO_CACHE,
         )
-    return HTMLResponse(content=REPORT_HTML.read_text(), status_code=200)
+    return HTMLResponse(content=REPORT_HTML.read_text(), status_code=200, headers=_NO_CACHE)
 
 
 import asyncio, shutil, os
