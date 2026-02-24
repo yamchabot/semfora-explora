@@ -10,3 +10,4 @@ data/analysis_report.json
 *.db-shm
 *.db-wal
 .env
+user_simulation/node_modules

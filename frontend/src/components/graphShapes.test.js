@@ -94,13 +94,106 @@ function axisSpans(nodes) {
 }
 
 /**
+ * Topology-aware pre-positioning — mirrors what GraphRenderer.jsx does before
+ * handing off to D3. Production never starts nodes at the centroid; it pre-positions
+ * groups in a circle and nodes based on their link topology within the group.
+ *
+ * Without this, compressed starts settle as circular blobs (a valid energy minimum
+ * for any chain) rather than the intended pipeline/hub/two-chain shapes.
+ */
+/** Leaf group key: use innermost groupPath level if available, else group. */
+function leafGroup(n) {
+  const gp = n.groupPath;
+  return Array.isArray(gp) && gp.length > 0 ? gp.join('::') : (n.group ?? '__default__');
+}
+
+/**
+ * Topology-aware pre-positioning — mirrors what GraphRenderer.jsx does before
+ * handing off to D3. Production never starts nodes at the centroid; it pre-positions
+ * groups in a circle and nodes based on their link topology within the group.
+ *
+ * Groups by innermost groupPath so that nested blobs (class X, class Y inside
+ * module M) are treated as separate units and their topologies handled correctly.
+ */
+function prePosition(nodes, links) {
+  const byId    = Object.fromEntries(nodes.map(n => [n.id, n]));
+  const byGroup = {};
+  for (const n of nodes) {
+    const g = leafGroup(n);
+    (byGroup[g] = byGroup[g] || []).push(n);
+  }
+
+  // Within-leaf-group undirected adjacency only
+  const adj = Object.fromEntries(nodes.map(n => [n.id, []]));
+  for (const l of links) {
+    const sid = typeof l.source === 'object' ? l.source.id : l.source;
+    const tid = typeof l.target === 'object' ? l.target.id : l.target;
+    const sn = byId[sid], tn = byId[tid];
+    if (!sn || !tn) continue;
+    if (leafGroup(sn) === leafGroup(tn)) {
+      adj[sid].push(tid); adj[tid].push(sid);
+    }
+  }
+
+  const groups      = Object.keys(byGroup);
+  const groupSpread = Math.max(3 * L, L * Math.sqrt(groups.length) * 2.2);
+
+  groups.forEach((g, gi) => {
+    const ga      = (gi / groups.length) * 2 * Math.PI;
+    const gcx     = groups.length > 1 ? Math.cos(ga) * groupSpread : 0;
+    const gcy     = groups.length > 1 ? Math.sin(ga) * groupSpread : 0;
+    const members = byGroup[g];
+
+    // Within this leaf group, detect hub (node with degree ≥ 3 within group)
+    const maxDeg = Math.max(...members.map(n => adj[n.id].length));
+    const hub    = maxDeg >= 3 ? members.find(n => adj[n.id].length === maxDeg) : null;
+
+    if (hub) {
+      hub.x = gcx; hub.y = gcy;
+      const connected = new Set(adj[hub.id]);
+      // Place direct spokes first, then any other members in outer ring
+      const spokes = members.filter(n => n !== hub && connected.has(n.id));
+      const others = members.filter(n => n !== hub && !connected.has(n.id));
+      spokes.forEach((n, i) => {
+        const a = (i / spokes.length) * 2 * Math.PI;
+        n.x = gcx + Math.cos(a) * L; n.y = gcy + Math.sin(a) * L;
+      });
+      others.forEach((n, i) => {
+        const a = (i / (others.length || 1)) * 2 * Math.PI;
+        n.x = gcx + Math.cos(a) * 1.8 * L; n.y = gcy + Math.sin(a) * 1.8 * L;
+      });
+    } else {
+      // Chain: BFS from lowest-degree endpoint, then lay in a line
+      const start = members.find(n => adj[n.id].length <= 1) ?? members[0];
+      const order = [], visited = new Set();
+      let cur = start.id;
+      while (cur && !visited.has(cur)) {
+        visited.add(cur); order.push(byId[cur]);
+        cur = adj[cur].find(id => !visited.has(id));
+      }
+      members.filter(n => !visited.has(n.id)).forEach(n => order.push(n));
+      const half = (order.length - 1) / 2;
+      order.forEach((n, i) => {
+        n.x = gcx + (i - half) * L;
+        n.y = gcy;
+      });
+    }
+  });
+}
+
+/**
  * Run a D3 force simulation to convergence.
  * `extraForces` = { key: forceObject | null } added/replaced after defaults.
  */
 function runSim(nodes, links, extraForces = {}, ticks = 500) {
+  // Pre-position before D3 to mirror GraphRenderer.jsx behaviour.
+  // D3 never starts from origin in production — groups are pre-laid out.
+  prePosition(nodes, links);
+
   const sim = forceSimulation(nodes)
+    .numDimensions(2)  // match production react-force-graph-2d (3D causes XY projection collapse)
     .force('link',    forceLink(links).id(n => n.id).distance(L).strength(0.5))
-    .force('charge',  forceManyBody().strength(-30))
+    .force('charge',  forceManyBody().strength(-60))  // match production blob-mode charge
     .force('collide', makeCollideForce(n => (n.val ?? 6) + 15))
     .stop();
   for (const [k, f] of Object.entries(extraForces)) sim.force(k, f);

@@ -83,10 +83,14 @@ function simulate(nodes, links, {
   blobMode    = false,
   ticks       = 600,
   extraForces = {},
+  prePos      = false,   // topology-aware pre-positioning (mirrors GraphRenderer)
 } = {}) {
+  if (prePos) prePositionByTopology(nodes, links);
+
   const nodeGroupMap = new Map(nodes.map(n => [n.id, n.group]));
 
   const sim = forceSimulation(nodes)
+    .numDimensions(2)  // match production react-force-graph-2d (3D collapses XY projection)
     .force('link', forceLink(links)
       .id(n => n.id)
       .distance(L)
@@ -97,13 +101,65 @@ function simulate(nodes, links, {
         return nodeGroupMap.get(src) !== nodeGroupMap.get(tgt) ? 0.02 : 0.4;
       })
     )
-    .force('charge', forceManyBody().strength(blobMode ? -30 : -120))
+    .force('charge', forceManyBody().strength(blobMode ? -60 : -120))  // -60 matches production blob charge
     .force('collide', makeCollide(n => (n.val ?? 6) + 15))
     .stop();
 
   for (const [k, f] of Object.entries(extraForces)) sim.force(k, f);
   for (let i = 0; i < ticks; i++) sim.tick();
   return nodes;
+}
+
+/** Topology-aware pre-positioning (mirrors GraphRenderer.jsx useMemo pre-positioning). */
+function prePositionByTopology(nodes, links) {
+  const byId    = Object.fromEntries(nodes.map(n => [n.id, n]));
+  const byGroup = {};
+  const leafKey = n => {
+    const gp = n.groupPath;
+    return Array.isArray(gp) && gp.length ? gp.join('::') : (n.group ?? '__default__');
+  };
+  for (const n of nodes) (byGroup[leafKey(n)] = byGroup[leafKey(n)] || []).push(n);
+
+  const adj = Object.fromEntries(nodes.map(n => [n.id, []]));
+  for (const l of links) {
+    const sid = typeof l.source === 'object' ? l.source.id : l.source;
+    const tid = typeof l.target === 'object' ? l.target.id : l.target;
+    const sn = byId[sid], tn = byId[tid];
+    if (!sn || !tn || leafKey(sn) !== leafKey(tn)) continue;
+    adj[sid].push(tid); adj[tid].push(sid);
+  }
+
+  const groups = Object.keys(byGroup);
+  const spread = Math.max(3 * L, L * Math.sqrt(groups.length) * 2.2);
+
+  groups.forEach((g, gi) => {
+    const ga  = (gi / groups.length) * 2 * Math.PI;
+    const gcx = groups.length > 1 ? Math.cos(ga) * spread : 0;
+    const gcy = groups.length > 1 ? Math.sin(ga) * spread : 0;
+    const members = byGroup[g];
+    const maxDeg  = Math.max(...members.map(n => adj[n.id].length));
+    const hub     = maxDeg >= 3 ? members.find(n => adj[n.id].length === maxDeg) : null;
+
+    if (hub) {
+      hub.x = gcx; hub.y = gcy;
+      const spokes = members.filter(n => n !== hub);
+      spokes.forEach((n, i) => {
+        const a = (i / spokes.length) * 2 * Math.PI;
+        n.x = gcx + Math.cos(a) * L; n.y = gcy + Math.sin(a) * L;
+      });
+    } else {
+      const start = members.find(n => adj[n.id].length <= 1) ?? members[0];
+      const order = [], visited = new Set();
+      let cur = start.id;
+      while (cur && !visited.has(cur)) {
+        visited.add(cur); order.push(byId[cur]);
+        cur = adj[cur].find(id => !visited.has(id));
+      }
+      members.filter(n => !visited.has(n.id)).forEach(n => order.push(n));
+      const half = (order.length - 1) / 2;
+      order.forEach((n, i) => { n.x = gcx + (i - half) * L; n.y = gcy; });
+    }
+  });
 }
 
 /** Print a metric report to the test output (visible with --reporter=verbose). */
@@ -222,7 +278,7 @@ describe('Scenario: Dispatcher — router→[A,B,C,D]', () => {
   it('[BENCHMARK] compressed start — hub recovers to centre', () => {
     const { nodes, links } = makeDispatcher();
     for (const n of nodes) { n.x = (Math.random()-0.5)*20; n.y = (Math.random()-0.5)*20; }
-    simulate(nodes, links, { ticks: 800 });
+    simulate(nodes, links, { ticks: 800, prePos: true });
 
     const hub = hubCentrality(nodes, links, 3);
     report('Dispatcher (compressed start)', { 'hub_normalised_error': hub.avgNormalised });
