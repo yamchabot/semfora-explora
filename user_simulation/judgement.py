@@ -4,8 +4,14 @@ judgement.py  —  Layer 3: User satisfaction via Z3
 A Person is satisfied when their Z3 formula evaluates to `sat` given
 the current perceptions.
 
-The formulas are written directly in Z3's expression language over
-the perception boolean variables defined in P below. No custom DSL.
+Formulas are written directly in Z3's expression language over the
+numeric perception variables defined in P below. No custom DSL.
+
+Users express real constraints:
+  P.module_count >= 3
+  P.blob_integrity >= 0.92
+  Implies(P.cross_edge_count >= 3, P.module_separation >= 50.0)
+  Implies(P.layout_stress > 1.20, P.cross_edge_visibility >= 0.90)
 
 Usage:
     from judgement import P, Person, check_person
@@ -17,36 +23,44 @@ Usage:
 
 from __future__ import annotations
 import dataclasses
-from dataclasses import dataclass
-from typing import NamedTuple
+from dataclasses import dataclass, field
 
-from .z3_compat import Bool, And, Or, Not, Implies, Solver, sat, unsat, BoolRef
-from .perceptions import Perceptions, DESCRIPTIONS
+from .z3_compat import Real, Int, And, Or, Not, Implies, If, Solver, sat, unsat, BoolRef, ArithRef
+from .perceptions import Perceptions
 
 
 # ── Symbolic perception variables ─────────────────────────────────────────────
 #
-# These are the Z3 Bool variables that user formulas are written over.
-# One variable per field in Perceptions — named identically.
+# One Z3 variable per field in Perceptions — named identically.
+# User formulas are written over these variables.
 
 class P:
-    """Symbolic boolean variables, one per perception field."""
-    modules_distinguishable   = Bool("modules_distinguishable")
-    module_boundaries_clear   = Bool("module_boundaries_clear")
-    module_membership_correct = Bool("module_membership_correct")
+    """Symbolic numeric variables, one per perception field."""
 
-    dependencies_traceable    = Bool("dependencies_traceable")
-    coupling_clearly_visible  = Bool("coupling_clearly_visible")
+    # Module structure
+    module_count          = Int("module_count")
+    module_separation     = Real("module_separation")
+    blob_integrity        = Real("blob_integrity")
+    gestalt_cohesion      = Real("gestalt_cohesion")
 
-    call_chains_readable      = Bool("call_chains_readable")
-    edges_are_visible         = Bool("edges_are_visible")
+    # Dependencies
+    cross_edge_visibility = Real("cross_edge_visibility")
+    cross_edge_count      = Int("cross_edge_count")
+    cross_edge_ratio      = Real("cross_edge_ratio")
+    edge_visibility       = Real("edge_visibility")
 
-    hotspots_identifiable     = Bool("hotspots_identifiable")
-    node_importance_apparent  = Bool("node_importance_apparent")
+    # Call chains
+    chain_elongation      = Real("chain_elongation")
+    chain_straightness    = Real("chain_straightness")
 
-    graph_is_navigable        = Bool("graph_is_navigable")
-    layout_is_trustworthy     = Bool("layout_is_trustworthy")
-    not_a_hairball            = Bool("not_a_hairball")
+    # Node prominence
+    hub_centrality_error  = Real("hub_centrality_error")
+    node_size_cv          = Real("node_size_cv")
+
+    # Cognitive load
+    node_overlap          = Real("node_overlap")
+    edge_crossings        = Real("edge_crossings")
+    layout_stress         = Real("layout_stress")
 
 
 # ── Person ─────────────────────────────────────────────────────────────────────
@@ -55,13 +69,13 @@ class P:
 class Person:
     """
     A person who uses the graph for a specific purpose.
-    `formula` is a Z3 boolean expression over P.* variables.
-    `pronoun` is the subject pronoun to use in narrative output (he/she/they).
+    `formula` is a Z3 expression over P.* variables.
+    `pronoun` is used in narrative output (he/she/they).
     """
     name:    str
     role:    str
     goal:    str
-    formula: BoolRef   # Z3 expression — what must be true for them to be satisfied
+    formula: object    # Z3 boolean expression
     pronoun: str = "they"
 
 
@@ -69,101 +83,114 @@ class Person:
 
 @dataclass
 class CheckResult:
-    person:      Person
-    satisfied:   bool
-    failed_vars: list[str]   # perception names that are False and appear in the formula
-    reasons:     dict        # field → why it's false (from compute_reasons)
-    summary:     str
+    person:               Person
+    satisfied:            bool
+    # List of (constraint_key, human_description) — key is the constraint sexpr,
+    # description includes the measured value. Used for cross-scenario deduplication.
+    failed_constraints:   list   # list of (sexpr_key: str, description: str)
+    summary:              str
+
+    @property
+    def failed_descriptions(self) -> list:
+        return [desc for _, desc in self.failed_constraints]
 
     def __str__(self):
         return self.summary
 
 
-def check_person(
-    person: Person,
-    perceptions: Perceptions,
-    reasons: dict[str, str] | None = None,
-) -> CheckResult:
+def _conjuncts(formula):
+    """Yield atomic conjuncts from a (possibly nested) And expression."""
+    # Works with both real Z3 and the shim
+    op = getattr(formula, '_op', None)
+    if op == "and":
+        for arg in formula._args:
+            yield from _conjuncts(arg)
+    else:
+        yield formula
+
+
+def _eval_conjunct(conjunct, assignment: dict) -> bool:
+    """Evaluate a single conjunct against a fixed assignment."""
+    s = Solver()
+    for name, val in assignment.items():
+        var = getattr(P, name, None)
+        if var is not None:
+            s.add(var == val)
+    s.add(conjunct)
+    return s.check() == sat
+
+
+def check_person(person: Person, perceptions: Perceptions) -> CheckResult:
     """
     Check whether `person` is satisfied by the given perceptions.
 
-    Instantiates each perception variable with its measured boolean value,
-    then asks Z3 whether the person's formula is satisfiable (sat).
+    Fixes each perception variable to its measured value, then asks Z3
+    whether the person's formula is satisfiable.
 
-    Pass `reasons` (from compute_reasons()) to get per-field explanations
-    in the failure output.
+    For unsatisfied results, each top-level conjunct of the formula is
+    evaluated individually to produce human-readable failure descriptions.
     """
     assignment = dataclasses.asdict(perceptions)
-    reasons = reasons or {}
-
-    s = Solver()
 
     # Fix every perception variable to its measured value
+    s = Solver()
     for name, val in assignment.items():
         var = getattr(P, name, None)
         if var is not None:
             s.add(var == val)
 
-    # Check whether the person's formula is satisfiable under this assignment
     s.add(person.formula)
-    result = s.check()
-    satisfied = (result == sat)
+    satisfied = (s.check() == sat)
 
-    # Perception names that are False AND appear in the person's formula
-    sexpr = person.formula.sexpr()
-    failed_vars = [
-        name for name, val in assignment.items()
-        if not val and name in sexpr
-    ]
+    # Build narrative
+    pro  = person.pronoun
+    Pro  = pro.capitalize()
+    sv   = "" if pro == "they" else "s"
 
-    pro   = person.pronoun                          # he / she / they
-    Pro   = pro.capitalize()                        # He / She / They
-    his   = "their" if pro == "they" else ("his" if pro == "he" else "her")
-    # verb conjugation: "they want / they need" vs "he wants / she needs"
-    sv    = "" if pro == "they" else "s"            # plural vs singular suffix
+    failed_constraints = []   # list of (sexpr_key, description)
+
+    if not satisfied:
+        for conjunct in _conjuncts(person.formula):
+            if not _eval_conjunct(conjunct, assignment):
+                key  = conjunct.sexpr() if hasattr(conjunct, 'sexpr') else str(conjunct)
+                desc = conjunct.describe(assignment) if hasattr(conjunct, 'describe') else key
+                failed_constraints.append((key, desc))
+
+    descs = [desc for _, desc in failed_constraints]
 
     if satisfied:
         summary = f"✅  {person.name} ({person.role}) — satisfied"
     else:
         goal_lc = person.goal[0].lower() + person.goal[1:]
-        intro = (
+        lines = [
             f"❌  {person.name} ({person.role}) is unhappy. "
-            f"{Pro} want{sv} to {goal_lc}"
-        )
-        if failed_vars:
-            if len(failed_vars) == 1:
-                desc   = DESCRIPTIONS.get(failed_vars[0], failed_vars[0])
-                detail = reasons.get(failed_vars[0], "")
-                body   = f"{Pro} can't do that because {pro} need{sv} {desc}."
-                if detail:
-                    body += f" ({detail})"
+            f"{Pro} want{sv} to {goal_lc}",
+        ]
+        if descs:
+            if len(descs) == 1:
+                lines.append(
+                    f"    {Pro} can't do that because {pro} need{sv} {descs[0]}."
+                )
             else:
-                need_lines = []
-                for field in failed_vars:
-                    desc   = DESCRIPTIONS.get(field, field)
-                    detail = reasons.get(field, "")
-                    line   = f"  • {desc}"
-                    if detail:
-                        line += f" ({detail})"
-                    need_lines.append(line)
-                needs_block = "\n".join(need_lines)
-                body = f"{Pro} can't do that because {pro} need{sv}:\n{needs_block}"
+                lines.append(
+                    f"    {Pro} can't do that because {pro} need{sv}:"
+                )
+                for desc in descs:
+                    lines.append(f"      • {desc}")
         else:
-            body = f"{Pro} can't do that. (formula unsatisfied — check {his} formula for complex conditions)"
-        summary = f"{intro}\n{body}"
+            lines.append(
+                f"    {Pro} can't do that. "
+                f"(formula unsatisfied — check {pro} formula for complex conditions)"
+            )
+        summary = "\n".join(lines)
 
     return CheckResult(
         person=person,
         satisfied=satisfied,
-        failed_vars=failed_vars,
-        reasons=reasons,
+        failed_constraints=failed_constraints,
         summary=summary,
     )
 
 
-def check_all(
-    people: list[Person],
-    perceptions: Perceptions,
-    reasons: dict[str, str] | None = None,
-) -> list[CheckResult]:
-    return [check_person(p, perceptions, reasons) for p in people]
+def check_all(people: list, perceptions: Perceptions) -> list:
+    return [check_person(p, perceptions) for p in people]

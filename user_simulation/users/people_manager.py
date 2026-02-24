@@ -1,9 +1,9 @@
 from ..judgement import P, Person
-from ..z3_compat import And
+from ..z3_compat import And, Implies
 
-# People manager (non-technical or lightly technical) planning a hire.
-# Uses the graph to understand the shape of the codebase: how many areas,
-# where the complexity is concentrated, what skills seem needed.
+# People manager (lightly technical) planning a hire or team restructure.
+# Uses the graph to understand the shape of the codebase: how many distinct
+# areas, where the complexity is concentrated, what skills are likely needed.
 # Does not trace call chains. Cares about structure and relative complexity.
 
 PEOPLE_MANAGER = Person(
@@ -13,8 +13,9 @@ PEOPLE_MANAGER = Person(
     goal    = "Understand the structure and complexity distribution of the "
               "codebase to make informed hiring decisions.",
     formula = And(
-        P.modules_distinguishable,   # can count and name the distinct areas
-        P.node_importance_apparent,  # bigger = more complex; can spot heavyweight areas
-        P.graph_is_navigable,        # not too overwhelming to make sense of
+        P.node_size_cv   >= 0.25,   # node sizes encode complexity — all same = useless
+        P.node_overlap   <= 0.02,   # not so overwhelming that nothing can be parsed
+        # Multi-module systems must show where the teams start and end
+        Implies(P.module_count >= 2, P.module_separation >= 15.0),
     ),
 )
