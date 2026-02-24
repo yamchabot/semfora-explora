@@ -1,4 +1,6 @@
 {
+  "moduleCount": 3,
+  "crossEdgeRatio": 0.14285714285714285,
   "edgeVisibility": {
     "ratio": 1,
     "avgGap": 120.0828562215087,

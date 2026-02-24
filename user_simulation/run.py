@@ -81,19 +81,17 @@ def load_facts() -> dict[str, dict]:
 
 def run_pipeline(facts_by_scenario: dict[str, dict]):
     """
-    For each scenario: compute perceptions + reasons, check all people.
+    For each scenario: compute perceptions, check all people.
     Returns {scenario_name: [CheckResult, ...]}
     """
-    from user_simulation.perceptions import compute_perceptions, compute_reasons
+    from user_simulation.perceptions import compute_perceptions
     from user_simulation.judgement   import check_all
     from user_simulation.users       import ALL
 
-    results = {}
-    for name, facts in facts_by_scenario.items():
-        perceptions = compute_perceptions(facts)
-        reasons     = compute_reasons(facts, perceptions)
-        results[name] = check_all(ALL, perceptions, reasons)
-    return results
+    return {
+        name: check_all(ALL, compute_perceptions(facts))
+        for name, facts in facts_by_scenario.items()
+    }
 
 
 # ── Reporting ─────────────────────────────────────────────────────────────────
@@ -102,26 +100,21 @@ def print_report(results_by_scenario: dict):
     """
     Print results grouped by person, not by scenario.
     Satisfied people get one line. Unhappy people get a narrative block
-    with deduplicated unmet needs and a list of which scenarios they failed.
+    with deduplicated failing constraint descriptions and which scenarios failed.
     """
-    from user_simulation.perceptions import DESCRIPTIONS
     from user_simulation.users import ALL
 
     scenarios = list(results_by_scenario.keys())
 
     # Transpose: one dict per person, keyed by scenario name
-    # results_by_scenario[scenario] is a list in ALL order
-    by_person: list[dict[str, object]] = [
+    by_person = [
         {s: results_by_scenario[s][i] for s in scenarios}
         for i in range(len(ALL))
     ]
 
     # Header
     total_checks = len(ALL) * len(scenarios)
-    total_happy  = sum(
-        1 for pr in by_person
-        for r in pr.values() if r.satisfied
-    )
+    total_happy  = sum(1 for pr in by_person for r in pr.values() if r.satisfied)
     print(f"\n{'─' * 60}")
     print(f"  {total_happy}/{total_checks} person×scenario checks satisfied")
     print(f"  scenarios: {', '.join(scenarios)}")
@@ -139,40 +132,32 @@ def print_report(results_by_scenario: dict):
             print(f"✅  {person.name} ({person.role}) — satisfied in all scenarios\n")
             continue
 
-        # Deduplicate failed_vars across all failing scenarios, preserving first-seen order
-        seen   = set()
-        fields = []
+        # Deduplicate failing constraints across scenarios by constraint key
+        # (the sexpr of the conjunct). Keep the worst-case description — the
+        # one where the measured value is furthest from the threshold, which
+        # corresponds to the longest description string as a simple heuristic.
+        best: dict[str, str] = {}
         for r in failing.values():
-            for f in r.failed_vars:
-                if f not in seen:
-                    seen.add(f)
-                    fields.append(f)
+            for key, desc in r.failed_constraints:
+                if key not in best or len(desc) > len(best[key]):
+                    best[key] = desc
+        descs = list(best.values())
 
-        # For each field, pick the reason with the worst measurement
-        # (longest detail string is a reasonable proxy for most informative)
-        best_reasons: dict[str, str] = {}
-        for r in failing.values():
-            for field, detail in r.reasons.items():
-                if field not in best_reasons or len(detail) > len(best_reasons[field]):
-                    best_reasons[field] = detail
-
-        goal_lc = person.goal[0].lower() + person.goal[1:]
+        goal_lc      = person.goal[0].lower() + person.goal[1:]
         failing_names = ", ".join(failing.keys())
 
         print(f"❌  {person.name} ({person.role}) is unhappy. "
               f"{Pro} want{sv} to {goal_lc}")
 
-        if fields:
-            print(f"    {Pro} can't do that because {pro} need{sv}:")
-            for field in fields:
-                desc   = DESCRIPTIONS.get(field, field)
-                detail = best_reasons.get(field, "")
-                line   = f"      • {desc}"
-                if detail:
-                    line += f"\n        ({detail})"
-                print(line)
+        if descs:
+            if len(descs) == 1:
+                print(f"    {Pro} can't do that because {pro} need{sv} {descs[0]}.")
+            else:
+                print(f"    {Pro} can't do that because {pro} need{sv}:")
+                for d in descs:
+                    print(f"      • {d}")
         else:
-            print(f"    {Pro} can't do that. (check {pro} formula for complex conditions)")
+            print(f"    {Pro} can't do that. (check formula for complex conditions)")
 
         print(f"    Unhappy in: {failing_names}\n")
 

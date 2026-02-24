@@ -1,9 +1,10 @@
 from ..judgement import P, Person
-from ..z3_compat import And
+from ..z3_compat import And, Implies
 
-# Staff engineer looking for architectural problems and refactoring opportunities.
-# Technically sophisticated; uses the graph to find over-coupled modules,
-# identify blast radius, and build the case for structural changes.
+# Staff engineer hunting for architectural problems and refactoring opportunities.
+# Technically sophisticated — uses the graph to find over-coupled modules,
+# assess blast radius, and build the case for structural changes.
+# His constraint: tightly coupled systems demand greater visual clarity.
 
 STAFF_ENGINEER = Person(
     name    = "Kenji",
@@ -12,9 +13,11 @@ STAFF_ENGINEER = Person(
     goal    = "Identify tightly coupled modules, trace cross-boundary dependencies, "
               "and find nodes worth refactoring.",
     formula = And(
-        P.module_boundaries_clear,   # can identify module scope precisely
-        P.coupling_clearly_visible,  # can count and classify all cross-module calls
-        P.hotspots_identifiable,     # over-connected nodes are visually prominent
-        P.layout_is_trustworthy,     # spatial proximity reflects actual coupling
+        P.blob_integrity         >= 0.92,  # precise module scopes
+        P.cross_edge_visibility  >= 0.80,  # can count all cross-module calls
+        P.hub_centrality_error   <= 0.35,  # over-connected nodes are visually prominent
+        P.layout_stress          <= 1.50,  # spatial distance reflects actual coupling
+        # Heavy cross-module coupling → modules must be pushed further apart to read
+        Implies(P.cross_edge_count >= 3, P.module_separation >= 50.0),
     ),
 )

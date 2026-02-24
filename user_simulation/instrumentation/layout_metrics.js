@@ -764,7 +764,20 @@ export function computeFacts(nodes, links, opts = {}) {
     ? chainLinearities.reduce((s, c) => s + c.straightness, 0) / chainLinearities.length
     : 1;
 
+  // Module-level summary stats
+  const moduleCount = new Set(nodes.map(groupKeyFn)).size;
+  const nMap = new Map(nodes.map(n => [n.id, n]));
+  const crossEdgeCount = links.filter(l => {
+    const srcId = typeof l.source === 'object' ? l.source.id : l.source;
+    const tgtId = typeof l.target === 'object' ? l.target.id : l.target;
+    const s = nMap.get(srcId), t = nMap.get(tgtId);
+    return s && t && groupKeyFn(s) !== groupKeyFn(t);
+  }).length;
+  const crossEdgeRatio = links.length > 0 ? crossEdgeCount / links.length : 0;
+
   return {
+    moduleCount,
+    crossEdgeRatio,
     edgeVisibility:             edgeVisibility(nodes, links),
     nodeOverlap:                nodeOverlap(nodes),
     edgeCrossings:              edgeCrossings(nodes, links),
