@@ -1,0 +1,280 @@
+{
+  "moduleCount": 4,
+  "crossEdgeRatio": 0.2,
+  "edgeVisibility": {
+    "ratio": 1,
+    "avgGap": 121.8129576346228,
+    "minGap": 112.70004426738936,
+    "invisible": []
+  },
+  "nodeOverlap": {
+    "ratio": 0,
+    "maxOverlap": 0,
+    "overlapping": []
+  },
+  "edgeCrossings": {
+    "count": 0,
+    "ratio": 0,
+    "normalised": 0
+  },
+  "layoutStress": {
+    "stress": 4.477510878032614,
+    "perEdge": 0.03731259065027179
+  },
+  "hubCentrality": {
+    "hubs": [
+      {
+        "nodeId": "dhub",
+        "error": 35.83216101301925,
+        "normalised": 0.2629247254282991
+      }
+    ],
+    "avgNormalised": 0.2629247254282991
+  },
+  "chainLinearity": {
+    "ratio": 17.827438562623893,
+    "straightness": 0.8333333333333334,
+    "chains": [
+      {
+        "ratio": 17.75892850558933,
+        "major": 408.9534923709919,
+        "minor": 23.0280499323076,
+        "stepAngles": [
+          7.195159320432414,
+          10.484468743690162
+        ],
+        "straightness": 1
+      },
+      {
+        "ratio": 32.2023517293891,
+        "major": 405.1332261761029,
+        "minor": 12.580858366513734,
+        "stepAngles": [
+          6.9196327146805325,
+          1.9181648057002874
+        ],
+        "straightness": 1
+      },
+      {
+        "ratio": 3.5210354528932464,
+        "major": 347.40476025079846,
+        "minor": 98.66551044390502,
+        "stepAngles": [
+          59.76907492113666,
+          13.714981617231212
+        ],
+        "straightness": 0.5
+      }
+    ]
+  },
+  "blobIntegrity": {
+    "ratio": 0.875,
+    "violations": [
+      {
+        "id": "a3",
+        "group": "A",
+        "groupPath": [
+          "A"
+        ],
+        "val": 6,
+        "x": 134.69881634926224,
+        "y": -84.75419179966651,
+        "vx": 2.635859559821964e-7,
+        "vy": 6.262112344021105e-7,
+        "index": 3
+      },
+      {
+        "id": "c3",
+        "group": "C",
+        "groupPath": [
+          "C"
+        ],
+        "val": 6,
+        "x": -151.52634904442138,
+        "y": -91.03331703532565,
+        "vx": -6.00803184988661e-8,
+        "vy": 4.5087712158916177e-7,
+        "index": 11
+      }
+    ],
+    "blobRadii": {}
+  },
+  "blobSeparation": {
+    "minClearance": 40.466555338088824,
+    "avgClearance": 109.9365574894993,
+    "separationRatio": 0.09766371866658265,
+    "overlapping": []
+  },
+  "gestaltProximity": {
+    "withinAvg": 194.881430856227,
+    "betweenAvg": 468.33872594030885,
+    "ratio": 0.41611214290458914,
+    "cohesion": 0.5838878570954109
+  },
+  "angularResolution": {
+    "minAngle": 34.462501001960376,
+    "avgMinAngle": 154.58323900091096,
+    "poorNodes": []
+  },
+  "edgeLengthUniformity": {
+    "mean": 136.21295763462277,
+    "stddev": 5.869089434821819,
+    "cv": 0.04308760001060286,
+    "min": 128.2010946584706,
+    "max": 145.61064624366549
+  },
+  "crossModuleEdgeVisibility": {
+    "ratio": 1,
+    "count": 3,
+    "visible": 3
+  },
+  "nodeSizeVariation": {
+    "cv": 0.22782254977690686,
+    "mean": 6.375,
+    "stddev": 1.4523687548277813,
+    "min": 6,
+    "max": 12
+  },
+  "prominentNodeVisibility": {
+    "ratio": 1,
+    "topN": [
+      {
+        "id": "dhub",
+        "group": "D",
+        "groupPath": [
+          "D"
+        ],
+        "val": 12,
+        "x": -8.805365337304675,
+        "y": -84.87245557150392,
+        "vx": 1.2726232440363153e-7,
+        "vy": 8.073712731667767e-7,
+        "index": 12
+      },
+      {
+        "id": "a0",
+        "group": "A",
+        "groupPath": [
+          "A"
+        ],
+        "val": 6,
+        "x": 532.2635354262457,
+        "y": 11.086057836900135,
+        "vx": 6.974584543408097e-7,
+        "vy": -0.0000011177052669673603,
+        "index": 0
+      },
+      {
+        "id": "a1",
+        "group": "A",
+        "groupPath": [
+          "A"
+        ],
+        "val": 6,
+        "x": 411.78897286037255,
+        "y": -38.02520966264249,
+        "vx": 6.599662489639518e-7,
+        "vy": -9.811359658363948e-7,
+        "index": 1
+      },
+      {
+        "id": "a2",
+        "group": "A",
+        "groupPath": [
+          "A"
+        ],
+        "val": 6,
+        "x": 279.8608804491358,
+        "y": -73.33335795260864,
+        "vx": 3.916349214071333e-7,
+        "vy": -3.537126323983027e-8,
+        "index": 2
+      },
+      {
+        "id": "a3",
+        "group": "A",
+        "groupPath": [
+          "A"
+        ],
+        "val": 6,
+        "x": 134.69881634926224,
+        "y": -84.75419179966651,
+        "vx": 2.635859559821964e-7,
+        "vy": 6.262112344021105e-7,
+        "index": 3
+      }
+    ],
+    "obscured": []
+  },
+  "qualityScore": {
+    "score": 94.2,
+    "components": {
+      "edgeVisibility": 1,
+      "noOverlap": 1,
+      "fewCrossings": 1,
+      "lowStress": 0.9813437046748641,
+      "gestaltCohesion": 0.5838878570954109,
+      "blobIntegrity": 0.875
+    },
+    "raw": {
+      "vis": {
+        "ratio": 1,
+        "avgGap": 121.8129576346228,
+        "minGap": 112.70004426738936,
+        "invisible": []
+      },
+      "ovlp": {
+        "ratio": 0,
+        "maxOverlap": 0,
+        "overlapping": []
+      },
+      "cross": {
+        "count": 0,
+        "ratio": 0,
+        "normalised": 0
+      },
+      "stress": {
+        "stress": 4.477510878032614,
+        "perEdge": 0.03731259065027179
+      },
+      "prox": {
+        "withinAvg": 194.881430856227,
+        "betweenAvg": 468.33872594030885,
+        "ratio": 0.41611214290458914,
+        "cohesion": 0.5838878570954109
+      },
+      "integ": {
+        "ratio": 0.875,
+        "violations": [
+          {
+            "id": "a3",
+            "group": "A",
+            "groupPath": [
+              "A"
+            ],
+            "val": 6,
+            "x": 134.69881634926224,
+            "y": -84.75419179966651,
+            "vx": 2.635859559821964e-7,
+            "vy": 6.262112344021105e-7,
+            "index": 3
+          },
+          {
+            "id": "c3",
+            "group": "C",
+            "groupPath": [
+              "C"
+            ],
+            "val": 6,
+            "x": -151.52634904442138,
+            "y": -91.03331703532565,
+            "vx": -6.00803184988661e-8,
+            "vy": 4.5087712158916177e-7,
+            "index": 11
+          }
+        ],
+        "blobRadii": {}
+      }
+    }
+  }
+}

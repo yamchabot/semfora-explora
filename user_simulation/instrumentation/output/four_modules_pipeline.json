@@ -1,0 +1,212 @@
+{
+  "moduleCount": 4,
+  "crossEdgeRatio": 0.2,
+  "edgeVisibility": {
+    "ratio": 1,
+    "avgGap": 123.75263602221342,
+    "minGap": 115.60404278826665,
+    "invisible": []
+  },
+  "nodeOverlap": {
+    "ratio": 0,
+    "maxOverlap": 0,
+    "overlapping": []
+  },
+  "edgeCrossings": {
+    "count": 0,
+    "ratio": 0,
+    "normalised": 0
+  },
+  "layoutStress": {
+    "stress": 4.192936447172199,
+    "perEdge": 0.034941137059768326
+  },
+  "hubCentrality": {
+    "hubs": [],
+    "avgNormalised": 0
+  },
+  "chainLinearity": {
+    "ratio": 1.194980947940499,
+    "straightness": 1,
+    "chains": [
+      {
+        "ratio": 1.194980947940499,
+        "major": 927.8971226376019,
+        "minor": 776.4953275922891,
+        "stepAngles": [
+          6.794447237090772,
+          13.549838688018141,
+          5.3718086357623696,
+          19.305271176355575,
+          25.11772096566755,
+          21.90759147223418,
+          17.31035053470249,
+          17.747464657581066,
+          22.770405309496144,
+          25.112891459240608,
+          18.304309370335297,
+          4.47200103671168,
+          13.454514345411459,
+          4.300856679990276
+        ],
+        "straightness": 1
+      }
+    ]
+  },
+  "blobIntegrity": {
+    "ratio": 1,
+    "violations": [],
+    "blobRadii": {}
+  },
+  "blobSeparation": {
+    "minClearance": 77.21145809133782,
+    "avgClearance": 260.83313172997964,
+    "separationRatio": 0.19382442288208757,
+    "overlapping": []
+  },
+  "gestaltProximity": {
+    "withinAvg": 221.7233126278592,
+    "betweenAvg": 672.4978114750435,
+    "ratio": 0.3297011660774563,
+    "cohesion": 0.6702988339225437
+  },
+  "angularResolution": {
+    "minAngle": 154.88227903433244,
+    "avgMinAngle": 164.60575203081447,
+    "poorNodes": []
+  },
+  "edgeLengthUniformity": {
+    "mean": 135.7526360222134,
+    "stddev": 4.157558170532837,
+    "cv": 0.03062598482325256,
+    "min": 127.60404278826665,
+    "max": 140.0296935547824
+  },
+  "crossModuleEdgeVisibility": {
+    "ratio": 1,
+    "count": 3,
+    "visible": 3
+  },
+  "nodeSizeVariation": {
+    "cv": 0,
+    "mean": 6,
+    "stddev": 0,
+    "min": 6,
+    "max": 6
+  },
+  "prominentNodeVisibility": {
+    "ratio": 1,
+    "topN": [
+      {
+        "id": "a0",
+        "group": "A",
+        "groupPath": [
+          "A"
+        ],
+        "val": 6,
+        "x": 629.4826486814585,
+        "y": 27.587096287120378,
+        "vx": 0.0000011346306134493083,
+        "vy": 4.883626792434478e-7,
+        "index": 0
+      },
+      {
+        "id": "a1",
+        "group": "A",
+        "groupPath": [
+          "A"
+        ],
+        "val": 6,
+        "x": 512.5793713791669,
+        "y": 79.25931872530452,
+        "vx": 0.0000012981527117764804,
+        "vy": 9.732120593044578e-7,
+        "index": 1
+      },
+      {
+        "id": "a2",
+        "group": "A",
+        "groupPath": [
+          "A"
+        ],
+        "val": 6,
+        "x": 399.6920233390542,
+        "y": 146.1278609428368,
+        "vx": 0.000001839940544708594,
+        "vy": 0.0000021734218552685776,
+        "index": 2
+      },
+      {
+        "id": "a3",
+        "group": "A",
+        "groupPath": [
+          "A"
+        ],
+        "val": 6,
+        "x": 302.7944929468866,
+        "y": 240.32406720739482,
+        "vx": 0.0000010110843861702257,
+        "vy": 0.00000156790086672618,
+        "index": 3
+      },
+      {
+        "id": "b0",
+        "group": "B",
+        "groupPath": [
+          "B"
+        ],
+        "val": 6,
+        "x": 195.8244700873698,
+        "y": 326.3864564492576,
+        "vx": 7.84315399282194e-8,
+        "vy": 8.709460483204128e-7,
+        "index": 4
+      }
+    ],
+    "obscured": []
+  },
+  "qualityScore": {
+    "score": 96.4,
+    "components": {
+      "edgeVisibility": 1,
+      "noOverlap": 1,
+      "fewCrossings": 1,
+      "lowStress": 0.9825294314701158,
+      "gestaltCohesion": 0.6702988339225437,
+      "blobIntegrity": 1
+    },
+    "raw": {
+      "vis": {
+        "ratio": 1,
+        "avgGap": 123.75263602221342,
+        "minGap": 115.60404278826665,
+        "invisible": []
+      },
+      "ovlp": {
+        "ratio": 0,
+        "maxOverlap": 0,
+        "overlapping": []
+      },
+      "cross": {
+        "count": 0,
+        "ratio": 0,
+        "normalised": 0
+      },
+      "stress": {
+        "stress": 4.192936447172199,
+        "perEdge": 0.034941137059768326
+      },
+      "prox": {
+        "withinAvg": 221.7233126278592,
+        "betweenAvg": 672.4978114750435,
+        "ratio": 0.3297011660774563,
+        "cohesion": 0.6702988339225437
+      },
+      "integ": {
+        "ratio": 1,
+        "violations": [],
+        "blobRadii": {}
+      }
+    }
+  }
+}

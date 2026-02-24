@@ -1,0 +1,291 @@
+{
+  "moduleCount": 6,
+  "crossEdgeRatio": 0.29411764705882354,
+  "edgeVisibility": {
+    "ratio": 1,
+    "avgGap": 126.25548186576228,
+    "minGap": 116.98708434154474,
+    "invisible": []
+  },
+  "nodeOverlap": {
+    "ratio": 0,
+    "maxOverlap": 0,
+    "overlapping": []
+  },
+  "edgeCrossings": {
+    "count": 1,
+    "ratio": 0.007352941176470588,
+    "normalised": 0.058823529411764705
+  },
+  "layoutStress": {
+    "stress": 17.478748217855085,
+    "perEdge": 0.11424018443042538
+  },
+  "hubCentrality": {
+    "hubs": [
+      {
+        "nodeId": "d2",
+        "error": 22.84450515142839,
+        "normalised": 0.16595994462206812
+      },
+      {
+        "nodeId": "f2",
+        "error": 22.729233890561986,
+        "normalised": 0.16335346658276198
+      }
+    ],
+    "avgNormalised": 0.16465670560241505
+  },
+  "chainLinearity": {
+    "ratio": 39.38803695502468,
+    "straightness": 1,
+    "chains": [
+      {
+        "ratio": 14.43663346959634,
+        "major": 260.9308089876291,
+        "minor": 18.074214430750175,
+        "stepAngles": [
+          15.674922853211442
+        ],
+        "straightness": 1
+      },
+      {
+        "ratio": 40.977264341844275,
+        "major": 282.32301473493084,
+        "minor": 6.88974774840287,
+        "stepAngles": [
+          5.524592183149013
+        ],
+        "straightness": 1
+      },
+      {
+        "ratio": 62.75021305363343,
+        "major": 263.87494058463903,
+        "minor": 4.205164058313263,
+        "stepAngles": [
+          3.627486795918223
+        ],
+        "straightness": 1
+      }
+    ]
+  },
+  "blobIntegrity": {
+    "ratio": 0.8888888888888888,
+    "violations": [
+      {
+        "id": "b0",
+        "group": "Billing",
+        "groupPath": [
+          "Billing"
+        ],
+        "val": 6,
+        "x": -152.0687805469434,
+        "y": 111.79140078692684,
+        "vx": -0.000002183878320450389,
+        "vy": -3.3961930630175193e-7,
+        "index": 3
+      },
+      {
+        "id": "c2",
+        "group": "Catalog",
+        "groupPath": [
+          "Catalog"
+        ],
+        "val": 6,
+        "x": -179.5247323255824,
+        "y": 201.50945171802448,
+        "vx": 0.0000010829922269036512,
+        "vy": -1.6621121214200693e-7,
+        "index": 8
+      }
+    ],
+    "blobRadii": {}
+  },
+  "blobSeparation": {
+    "minClearance": -198.66394388477727,
+    "avgClearance": 206.9155776315323,
+    "separationRatio": -0.6684853071546742,
+    "overlapping": [
+      [
+        "Auth",
+        "Frontend"
+      ],
+      [
+        "Billing",
+        "Catalog"
+      ]
+    ]
+  },
+  "gestaltProximity": {
+    "withinAvg": 179.99988236183842,
+    "betweenAvg": 492.57545825488074,
+    "ratio": 0.3654260059962191,
+    "cohesion": 0.6345739940037809
+  },
+  "angularResolution": {
+    "minAngle": 76.70874848732025,
+    "avgMinAngle": 150.79485813185224,
+    "poorNodes": []
+  },
+  "edgeLengthUniformity": {
+    "mean": 138.25548186576228,
+    "stddev": 7.793546450866392,
+    "cv": 0.05637061435606188,
+    "min": 128.98708434154474,
+    "max": 154.93609949362147
+  },
+  "crossModuleEdgeVisibility": {
+    "ratio": 1,
+    "count": 5,
+    "visible": 5
+  },
+  "nodeSizeVariation": {
+    "cv": 0,
+    "mean": 6,
+    "stddev": 0,
+    "min": 6,
+    "max": 6
+  },
+  "prominentNodeVisibility": {
+    "ratio": 1,
+    "topN": [
+      {
+        "id": "a0",
+        "group": "Auth",
+        "groupPath": [
+          "Auth"
+        ],
+        "val": 6,
+        "x": 351.2082010874277,
+        "y": -24.13927678963435,
+        "vx": 0.0000015185311624481775,
+        "vy": 7.460965816256472e-7,
+        "index": 0
+      },
+      {
+        "id": "a1",
+        "group": "Auth",
+        "groupPath": [
+          "Auth"
+        ],
+        "val": 6,
+        "x": 485.17848217128375,
+        "y": -34.91761234856846,
+        "vx": 0.0000014630823347882746,
+        "vy": 3.6949969483516106e-7,
+        "index": 1
+      },
+      {
+        "id": "a2",
+        "group": "Auth",
+        "groupPath": [
+          "Auth"
+        ],
+        "val": 6,
+        "x": 606.1738338103002,
+        "y": -79.61428793729146,
+        "vx": 0.0000017113303328776212,
+        "vy": 8.242120496495979e-7,
+        "index": 2
+      },
+      {
+        "id": "b0",
+        "group": "Billing",
+        "groupPath": [
+          "Billing"
+        ],
+        "val": 6,
+        "x": -152.0687805469434,
+        "y": 111.79140078692684,
+        "vx": -0.000002183878320450389,
+        "vy": -3.3961930630175193e-7,
+        "index": 3
+      },
+      {
+        "id": "b1",
+        "group": "Billing",
+        "groupPath": [
+          "Billing"
+        ],
+        "val": 6,
+        "x": -68.90624385914703,
+        "y": 233.2709229803195,
+        "vx": -0.000002700322405429947,
+        "vy": -7.870596991781936e-8,
+        "index": 4
+      }
+    ],
+    "obscured": []
+  },
+  "qualityScore": {
+    "score": 93.2,
+    "components": {
+      "edgeVisibility": 1,
+      "noOverlap": 1,
+      "fewCrossings": 0.9411764705882353,
+      "lowStress": 0.9428799077847874,
+      "gestaltCohesion": 0.6345739940037809,
+      "blobIntegrity": 0.8888888888888888
+    },
+    "raw": {
+      "vis": {
+        "ratio": 1,
+        "avgGap": 126.25548186576228,
+        "minGap": 116.98708434154474,
+        "invisible": []
+      },
+      "ovlp": {
+        "ratio": 0,
+        "maxOverlap": 0,
+        "overlapping": []
+      },
+      "cross": {
+        "count": 1,
+        "ratio": 0.007352941176470588,
+        "normalised": 0.058823529411764705
+      },
+      "stress": {
+        "stress": 17.478748217855085,
+        "perEdge": 0.11424018443042538
+      },
+      "prox": {
+        "withinAvg": 179.99988236183842,
+        "betweenAvg": 492.57545825488074,
+        "ratio": 0.3654260059962191,
+        "cohesion": 0.6345739940037809
+      },
+      "integ": {
+        "ratio": 0.8888888888888888,
+        "violations": [
+          {
+            "id": "b0",
+            "group": "Billing",
+            "groupPath": [
+              "Billing"
+            ],
+            "val": 6,
+            "x": -152.0687805469434,
+            "y": 111.79140078692684,
+            "vx": -0.000002183878320450389,
+            "vy": -3.3961930630175193e-7,
+            "index": 3
+          },
+          {
+            "id": "c2",
+            "group": "Catalog",
+            "groupPath": [
+              "Catalog"
+            ],
+            "val": 6,
+            "x": -179.5247323255824,
+            "y": 201.50945171802448,
+            "vx": 0.0000010829922269036512,
+            "vy": -1.6621121214200693e-7,
+            "index": 8
+          }
+        ],
+        "blobRadii": {}
+      }
+    }
+  }
+}
