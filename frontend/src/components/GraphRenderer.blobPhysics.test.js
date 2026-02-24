@@ -38,6 +38,7 @@
 
 import { describe, it, expect } from "vitest";
 import { makeVoronoiContainmentForce } from "./GraphRenderer.jsx";
+import { forceCollide } from "d3-force-3d";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -540,5 +541,153 @@ describe("[INVARIANT] Core correctness — holds with and without margin fix", (
       const dB = Math.sqrt((n.x - cB.x) ** 2 + (n.y - cB.y) ** 2);
       expect(dA).toBeLessThan(dB);
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// [REGRESSION] Blob collapse prevention
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// THE BUG
+// ───────
+// Previous fixes to the ring-accumulation problem (centripetal alpha floor,
+// soft radial wall) both caused nodes to collapse into a single tightly-
+// overlapping cluster.  The user saw a blob that appeared as one large dot.
+//
+// ROOT CAUSE
+// ──────────
+// Any inward force that outweighs the outward charge collapses nodes.  The
+// alpha-floor set centripetal >> charge at low alpha; the soft radial wall
+// pushed all perimeter nodes inward every tick, converging to a point.
+//
+// THE FIX
+// ───────
+// Replace long-range charge (strength -350, causes ring) with:
+//   1. Tiny charge (-5): barely enough to maintain coarse inter-blob spacing.
+//   2. forceCollide(7): short-range repulsion.  Prevents overlap without
+//      any boundary-seeking behaviour.  Nodes pack into a disc; centripetal
+//      keeps the disc together; collision keeps nodes apart.
+//
+// TESTS
+// ─────
+//   [CURRENT]  documents the collapse (centripetal alone → nodes stack)
+//   [FIX]      verifies forceCollide prevents the collapse
+//   [INVARIANT] holds before and after: blobs stay separated
+
+describe("[REGRESSION] Blob collapse prevention (forceCollide fix)", () => {
+  /** Start N nodes clustered near origin — worst case for collapse testing. */
+  function makeBlobNodes(N, group, spread = 5) {
+    let i = 0;
+    return Array.from({ length: N }, () =>
+      node(`${group}${i++}`, group,
+        (Math.random() - 0.5) * spread,
+        (Math.random() - 0.5) * spread)
+    );
+  }
+
+  /** RMS distance of nodes from their own centroid (overall spread). */
+  function rmsSpread(nodes) {
+    const c   = centroid(nodes);
+    const sum = nodes.reduce((s, n) => s + (n.x - c.x) ** 2 + (n.y - c.y) ** 2, 0);
+    return Math.sqrt(sum / nodes.length);
+  }
+
+  /** Smallest pairwise distance between any two nodes. */
+  function minPairDist(nodes) {
+    let min = Infinity;
+    for (let i = 0; i < nodes.length; i++)
+      for (let j = i + 1; j < nodes.length; j++) {
+        const d = Math.sqrt((nodes[i].x - nodes[j].x) ** 2 + (nodes[i].y - nodes[j].y) ** 2);
+        if (d < min) min = d;
+      }
+    return min;
+  }
+
+  /**
+   * Simple O(N²) collision: push overlapping pairs apart by direct position
+   * adjustment.  More predictable in jsdom/vitest than d3's quadtree-based
+   * forceCollide (which has issues initialising outside a browser context).
+   */
+  function makeCollideForce(nodes, radius = 7) {
+    return function() {
+      const minDist = radius * 2;
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+          const a = nodes[i], b = nodes[j];
+          const dx = b.x - a.x, dy = b.y - a.y;
+          const d  = Math.sqrt(dx * dx + dy * dy) || 1e-6;
+          if (d < minDist) {
+            const push = (minDist - d) / d * 0.5;
+            a.x -= dx * push;  a.y -= dy * push;
+            b.x += dx * push;  b.y += dy * push;
+          }
+        }
+      }
+    };
+  }
+
+  it("[CURRENT] centripetal alone collapses nodes to a point (documents the bug)", () => {
+    const nodes   = makeBlobNodes(20, "A");
+    const contain = makeVoronoiContainmentForce(0.5, 0.35, 60, 0, 0); // strong centripetal
+    contain.initialize(nodes);
+    runSim(nodes, [contain], { ticks: 300 });
+    // No repulsion → centripetal pulls everything to centroid → all nodes at same spot.
+    expect(rmsSpread(nodes)).toBeLessThan(3);
+  });
+
+  it("[FIX] forceCollide prevents collapse — rmsSpread > collision radius", () => {
+    const nodes   = makeBlobNodes(20, "A");
+    const contain = makeVoronoiContainmentForce(0.5, 0.35, 60, 0, 0);
+    contain.initialize(nodes);
+    const collide = makeCollideForce(nodes, 7);
+    runSim(nodes, [contain, collide], { ticks: 300 });
+    // Collision keeps nodes separated: spread must exceed at least one collision radius.
+    expect(rmsSpread(nodes)).toBeGreaterThan(7);
+  });
+
+  it("[FIX] minimum inter-node gap stays above 80% of collision radius", () => {
+    const RADIUS  = 7;
+    const nodes   = makeBlobNodes(20, "A");
+    const contain = makeVoronoiContainmentForce(0.3, 0.35, 60, 0, 0);
+    contain.initialize(nodes);
+    const collide = makeCollideForce(nodes, RADIUS);
+    runSim(nodes, [contain, collide], { ticks: 400 });
+    // forceCollide(7) should keep every pair > ~5.6 px apart.
+    expect(minPairDist(nodes)).toBeGreaterThan(RADIUS * 0.8);
+  });
+
+  it("[FIX] nodes fill blob interior — not all bunched at perimeter (no ring)", () => {
+    // Start in worst-case ring layout to ensure convergence is tested.
+    const nodes = Array.from({ length: 20 }, (_, i) => {
+      const a = (i / 20) * 2 * Math.PI;
+      return node(`A${i}`, "A", 80 * Math.cos(a), 80 * Math.sin(a));
+    });
+    const contain = makeVoronoiContainmentForce(0.10, 0.35, 60, 0, 0);
+    contain.initialize(nodes);
+    const collide = makeCollideForce(nodes, 7);
+    runSim(nodes, [contain, collide], { ticks: 400 });
+
+    const c       = centroid(nodes);
+    const dists   = nodes.map(n => Math.sqrt((n.x - c.x) ** 2 + (n.y - c.y) ** 2));
+    const maxDist = Math.max(...dists);
+    // A perfect ring would have 0 nodes inside the inner 60% of max radius.
+    // A uniform disc would have ~36%.  We require ≥ 25%.
+    const innerFrac = dists.filter(d => d < maxDist * 0.6).length / nodes.length;
+    expect(innerFrac).toBeGreaterThan(0.25);
+  });
+
+  it("[INVARIANT] two blobs with collision force remain separated", () => {
+    const nodesA = makeBlobNodes(15, "A"); nodesA.forEach(n => { n.x -= 100; });
+    const nodesB = makeBlobNodes(15, "B"); nodesB.forEach(n => { n.x += 100; });
+    const all    = [...nodesA, ...nodesB];
+    const contain = makeVoronoiContainmentForce(0.10, 0.35, 60, 0, 35);
+    contain.initialize(all);
+    const collide = makeCollideForce(all, 7);
+    runSim(all, [contain, collide], { ticks: 300 });
+
+    const cA = centroid(all.filter(n => n.group === "A"));
+    const cB = centroid(all.filter(n => n.group === "B"));
+    const d  = Math.sqrt((cA.x - cB.x) ** 2 + (cA.y - cB.y) ** 2);
+    expect(d).toBeGreaterThan(30);
   });
 });
