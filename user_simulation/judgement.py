@@ -62,6 +62,25 @@ class P:
     edge_crossings        = Real("edge_crossings")
     layout_stress         = Real("layout_stress")
 
+    # Statistical: degree distribution
+    degree_gini           = Real("degree_gini")
+    hub_degree_ratio      = Real("hub_degree_ratio")
+    degree_entropy        = Real("degree_entropy")
+
+    # Statistical: edge geometry
+    edge_angle_entropy    = Real("edge_angle_entropy")
+
+    # Geometric
+    graph_aspect_ratio    = Real("graph_aspect_ratio")
+    spatial_compactness   = Real("spatial_compactness")
+
+    # sklearn cluster quality
+    silhouette_by_module  = Real("silhouette_by_module")
+    spatial_cluster_purity= Real("spatial_cluster_purity")
+
+    # sklearn regression
+    chain_r2              = Real("chain_r2")
+
 
 # ── Person ─────────────────────────────────────────────────────────────────────
 
