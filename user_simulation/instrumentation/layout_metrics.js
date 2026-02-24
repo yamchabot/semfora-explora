@@ -775,9 +775,51 @@ export function computeFacts(nodes, links, opts = {}) {
   }).length;
   const crossEdgeRatio = links.length > 0 ? crossEdgeCount / links.length : 0;
 
+  // ── Raw data for Python spatial/statistical analysis ─────────────────────
+
+  // Compact node list: positions + module label (Python uses for sklearn)
+  const nodeList = nodes.map(n => ({ x: n.x, y: n.y, g: groupKeyFn(n) }));
+
+  // Degree distribution
+  const degMap = new Map(nodes.map(n => [n.id, 0]));
+  for (const l of links) {
+    const srcId = typeof l.source === 'object' ? l.source.id : l.source;
+    const tgtId = typeof l.target === 'object' ? l.target.id : l.target;
+    if (degMap.has(srcId)) degMap.set(srcId, degMap.get(srcId) + 1);
+    if (degMap.has(tgtId)) degMap.set(tgtId, degMap.get(tgtId) + 1);
+  }
+  const degVals  = [...degMap.values()];
+  const degSum   = degVals.reduce((s, d) => s + d, 0);
+  const degMean  = degVals.length ? degSum / degVals.length : 0;
+  const degMax   = degVals.length ? Math.max(...degVals) : 0;
+  // Gini coefficient of degree distribution
+  const sortedDeg = [...degVals].sort((a, b) => a - b);
+  const giniNum   = sortedDeg.reduce((s, d, i) => s + (2 * i - degVals.length + 1) * d, 0);
+  const degGini   = degSum > 0 ? Math.abs(giniNum / (degVals.length * degSum)) : 0;
+
+  // Chain node positions (for sklearn R² in Python — only chains ≥ 3 nodes)
+  const chainNodePos = chains
+    .filter(ch => ch.length >= 3)
+    .map(ch => ch.map(id => {
+      const nd = nMap.get(id);
+      return nd ? { x: nd.x, y: nd.y } : null;
+    }).filter(Boolean));
+
+  // All edge direction angles in degrees (for angle entropy)
+  const edgeAngles = links.map(l => {
+    const srcId = typeof l.source === 'object' ? l.source.id : l.source;
+    const tgtId = typeof l.target === 'object' ? l.target.id : l.target;
+    const s = nMap.get(srcId), t = nMap.get(tgtId);
+    return s && t ? Math.atan2(t.y - s.y, t.x - s.x) * 180 / Math.PI : null;
+  }).filter(a => a !== null);
+
   return {
     moduleCount,
     crossEdgeRatio,
+    nodeList,
+    degreeDist:   { values: degVals, mean: degMean, max: degMax, gini: degGini },
+    chainNodePos,
+    edgeAngles,
     edgeVisibility:             edgeVisibility(nodes, links),
     nodeOverlap:                nodeOverlap(nodes),
     edgeCrossings:              edgeCrossings(nodes, links),

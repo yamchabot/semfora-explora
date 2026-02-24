@@ -16,5 +16,6 @@ ENGINEERING_VP = Person(
         P.blob_integrity          >= 0.92,  # nodes visibly inside their team's region
         P.module_separation       >= 40.0,  # can draw ownership lines with confidence
         P.cross_edge_visibility   >= 0.80,  # can count all cross-team dependencies
+        P.silhouette_by_module    >= 0.40,  # sklearn confirms teams are spatially distinct
     ),
 )
