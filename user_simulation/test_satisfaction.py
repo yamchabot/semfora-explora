@@ -27,143 +27,158 @@ from .z3_compat import And, Or, Not, Real, Int, Solver, sat, unsat
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
+def _make_perceptions(**kw) -> Perceptions:
+    """
+    Construct a Perceptions object with sensible defaults for all 52 fields,
+    overriding with any kwargs supplied.  Tier 2/3/4 defaults represent a
+    reasonable mid-quality graph so tests can specify only what matters.
+    """
+    defaults = dict(
+        # ── Tier 1: Raw ───────────────────────────────────────────────────────
+        module_count=2, module_separation=50.0, blob_integrity=0.90,
+        gestalt_cohesion=0.60, cross_edge_visibility=0.82, cross_edge_count=2,
+        cross_edge_ratio=0.15, edge_visibility=0.85, chain_elongation=2.00,
+        chain_straightness=0.68, hub_centrality_error=0.22, node_size_cv=0.35,
+        node_overlap=0.02, edge_crossings=0.20, layout_stress=1.10,
+        degree_gini=0.28, hub_degree_ratio=2.50, degree_entropy=0.72,
+        edge_angle_entropy=0.75, graph_aspect_ratio=1.80, spatial_compactness=0.68,
+        silhouette_by_module=0.55, spatial_cluster_purity=0.72, chain_r2=0.90,
+        # ── Tier 2: Composed ─────────────────────────────────────────────────
+        chain_quality=0.50, hub_clarity=0.20, module_clarity=0.45,
+        readability=0.65, layout_efficiency=0.52, structural_complexity=0.58,
+        coupling_tension=0.08, isolation_risk=0.40, visual_entropy=0.74,
+        degree_imbalance=0.10, hub_prominence=0.35, chain_hub_conflict=0.10,
+        blob_health=0.72, spatial_disorder=0.22, information_density=0.90,
+        # ── Tier 3: Z3 Archetypes ────────────────────────────────────────────
+        archetype_chain=0.0, archetype_hub=0.0, archetype_modular=1.0,
+        archetype_hairball=0.0, archetype_spaghetti=0.0,
+        # ── Tier 4: Z3 Solver ────────────────────────────────────────────────
+        required_silhouette=0.25, required_chain_r2=0.70,
+        module_clarity_ceiling=0.75, chain_quality_ceiling=0.72,
+        worst_violation=0.0, violation_count=0.0, violation_score=0.0,
+        layout_conformance=0.90,
+    )
+    defaults.update(kw)
+    return Perceptions(**defaults)
+
+
 @pytest.fixture
 def good_layout():
     """Three well-separated modules, readable chains, clear hotspots, varied node sizes."""
-    return Perceptions(
-        module_count           = 3,
-        module_separation      = 80.0,
-        blob_integrity         = 0.95,
-        gestalt_cohesion       = 0.68,
-        cross_edge_visibility  = 0.85,
-        cross_edge_count       = 4,
-        cross_edge_ratio       = 0.20,
-        edge_visibility        = 0.90,
-        chain_elongation       = 2.10,
-        chain_straightness     = 0.72,
-        hub_centrality_error   = 0.20,
-        node_size_cv           = 0.38,
-        node_overlap           = 0.01,
-        edge_crossings         = 0.22,
-        layout_stress          = 1.05,
-        # Statistical
-        degree_gini            = 0.28,   # moderate inequality — a few nodes more connected
-        hub_degree_ratio       = 2.50,   # busiest node has 2.5× the average connections
-        degree_entropy         = 0.72,   # reasonably diverse degree distribution
-        edge_angle_entropy     = 0.75,   # edges point in various directions
-        # Geometric
-        graph_aspect_ratio     = 1.80,   # slightly elongated overall layout
-        spatial_compactness    = 0.72,   # nodes fill most of the convex hull
-        # sklearn cluster
-        silhouette_by_module   = 0.65,   # modules are well-separated spatially
-        spatial_cluster_purity = 0.80,   # KMeans on positions recovers module structure
-        # sklearn regression
-        chain_r2               = 0.92,   # chain node positions fit a line well
+    return _make_perceptions(
+        # ── Tier 1: Raw ───────────────────────────────────────────────────────
+        module_count=3, module_separation=80.0, blob_integrity=0.95,
+        gestalt_cohesion=0.68, cross_edge_visibility=0.85, cross_edge_count=4,
+        cross_edge_ratio=0.20, edge_visibility=0.90, chain_elongation=2.10,
+        chain_straightness=0.72, hub_centrality_error=0.20, node_size_cv=0.38,
+        node_overlap=0.01, edge_crossings=0.22, layout_stress=1.05,
+        degree_gini=0.28, hub_degree_ratio=2.50, degree_entropy=0.72,
+        edge_angle_entropy=0.75, graph_aspect_ratio=1.80, spatial_compactness=0.72,
+        silhouette_by_module=0.65, spatial_cluster_purity=0.80, chain_r2=0.92,
+        # ── Tier 2: Composed ─────────────────────────────────────────────────
+        chain_quality=0.52, hub_clarity=0.22, module_clarity=0.56,
+        readability=0.69, layout_efficiency=0.57, structural_complexity=0.74,
+        coupling_tension=0.04, isolation_risk=0.32, visual_entropy=0.74,
+        degree_imbalance=0.10, hub_prominence=0.36, chain_hub_conflict=0.08,
+        blob_health=0.87, spatial_disorder=0.18, information_density=0.76,
+        # ── Tier 3: Z3 Archetypes ────────────────────────────────────────────
+        archetype_chain=0.0, archetype_hub=0.0, archetype_modular=1.0,
+        archetype_hairball=0.0, archetype_spaghetti=0.0,
+        # ── Tier 4: Z3 Solver ────────────────────────────────────────────────
+        required_silhouette=0.10, required_chain_r2=0.80,
+        module_clarity_ceiling=0.60, chain_quality_ceiling=0.73,
+        worst_violation=0.0, violation_count=0.0, violation_score=0.0,
+        layout_conformance=1.00,
     )
 
 
 @pytest.fixture
 def merged_modules():
     """Two modules almost touching — structural users can't tell them apart."""
-    return Perceptions(
-        module_count           = 2,
-        module_separation      = 5.0,    # barely any gap — looks like one blob
-        blob_integrity         = 0.62,   # nodes leaking across the boundary
-        gestalt_cohesion       = 0.32,
-        cross_edge_visibility  = 0.52,
-        cross_edge_count       = 3,
-        cross_edge_ratio       = 0.25,
-        edge_visibility        = 0.85,   # individual edges still visible within chains
-        chain_elongation       = 2.10,
-        chain_straightness     = 0.70,
-        hub_centrality_error   = 0.22,
-        node_size_cv           = 0.36,
-        node_overlap           = 0.01,
-        edge_crossings         = 0.28,
-        layout_stress          = 1.15,
-        # Statistical
-        degree_gini            = 0.25,
-        hub_degree_ratio       = 2.20,
-        degree_entropy         = 0.70,
-        edge_angle_entropy     = 0.78,
-        # Geometric
-        graph_aspect_ratio     = 1.50,
-        spatial_compactness    = 0.55,   # blobs touching → poor hull fill
-        # sklearn cluster (blobs merged → poor silhouette and purity)
-        silhouette_by_module   = 0.10,   # modules barely distinguishable
-        spatial_cluster_purity = 0.15,   # KMeans can't recover modules
-        # sklearn regression
-        chain_r2               = 0.91,   # chains themselves are still linear
+    return _make_perceptions(
+        # ── Tier 1: Raw ───────────────────────────────────────────────────────
+        module_count=2, module_separation=5.0, blob_integrity=0.62,
+        gestalt_cohesion=0.32, cross_edge_visibility=0.52, cross_edge_count=3,
+        cross_edge_ratio=0.25, edge_visibility=0.85, chain_elongation=2.10,
+        chain_straightness=0.70, hub_centrality_error=0.22, node_size_cv=0.36,
+        node_overlap=0.01, edge_crossings=0.28, layout_stress=1.15,
+        degree_gini=0.25, hub_degree_ratio=2.20, degree_entropy=0.70,
+        edge_angle_entropy=0.78, graph_aspect_ratio=1.50, spatial_compactness=0.55,
+        silhouette_by_module=0.10, spatial_cluster_purity=0.15, chain_r2=0.91,
+        # ── Tier 2: Composed ─────────────────────────────────────────────────
+        chain_quality=0.50, hub_clarity=0.19, module_clarity=0.31,
+        readability=0.60, layout_efficiency=0.44, structural_complexity=0.46,
+        coupling_tension=0.23, isolation_risk=0.68, visual_entropy=0.74,
+        degree_imbalance=0.09, hub_prominence=0.27, chain_hub_conflict=0.08,
+        blob_health=0.10, spatial_disorder=0.45, information_density=0.52,
+        # ── Tier 3: Z3 Archetypes ────────────────────────────────────────────
+        archetype_chain=0.0, archetype_hub=0.0, archetype_modular=0.0,
+        archetype_hairball=0.0, archetype_spaghetti=1.0,
+        # ── Tier 4: Z3 Solver ────────────────────────────────────────────────
+        required_silhouette=0.60, required_chain_r2=0.85,
+        module_clarity_ceiling=0.35, chain_quality_ceiling=0.73,
+        worst_violation=0.12, violation_count=3.0, violation_score=0.35,
+        layout_conformance=0.70,
     )
 
 
 @pytest.fixture
 def hairball():
     """Dense edge crossings and node overlap — nobody can work with this."""
-    return Perceptions(
-        module_count           = 2,
-        module_separation      = 20.0,
-        blob_integrity         = 0.80,
-        gestalt_cohesion       = 0.35,
-        cross_edge_visibility  = 0.40,
-        cross_edge_count       = 5,
-        cross_edge_ratio       = 0.40,
-        edge_visibility        = 0.40,
-        chain_elongation       = 1.10,
-        chain_straightness     = 0.35,
-        hub_centrality_error   = 0.60,
-        node_size_cv           = 0.30,
-        node_overlap           = 0.20,
-        edge_crossings         = 0.85,
-        layout_stress          = 2.50,
-        # Statistical
-        degree_gini            = 0.45,
-        hub_degree_ratio       = 4.50,
-        degree_entropy         = 0.40,
-        edge_angle_entropy     = 0.95,   # isotropic chaos
-        # Geometric
-        graph_aspect_ratio     = 1.10,
-        spatial_compactness    = 0.30,
-        # sklearn cluster
-        silhouette_by_module   = -0.10,  # modules badly separated
-        spatial_cluster_purity = 0.05,
-        # sklearn regression
-        chain_r2               = 0.42,   # chains are blobs
+    return _make_perceptions(
+        # ── Tier 1: Raw ───────────────────────────────────────────────────────
+        module_count=2, module_separation=20.0, blob_integrity=0.80,
+        gestalt_cohesion=0.35, cross_edge_visibility=0.40, cross_edge_count=5,
+        cross_edge_ratio=0.40, edge_visibility=0.40, chain_elongation=1.10,
+        chain_straightness=0.35, hub_centrality_error=0.60, node_size_cv=0.30,
+        node_overlap=0.20, edge_crossings=0.85, layout_stress=2.50,
+        degree_gini=0.45, hub_degree_ratio=4.50, degree_entropy=0.40,
+        edge_angle_entropy=0.95, graph_aspect_ratio=1.10, spatial_compactness=0.30,
+        silhouette_by_module=-0.10, spatial_cluster_purity=0.05, chain_r2=0.42,
+        # ── Tier 2: Composed ─────────────────────────────────────────────────
+        chain_quality=0.06, hub_clarity=0.18, module_clarity=0.14,
+        readability=0.10, layout_efficiency=0.10, structural_complexity=1.22,
+        coupling_tension=0.35, isolation_risk=0.65, visual_entropy=0.68,
+        degree_imbalance=0.20, hub_prominence=1.62, chain_hub_conflict=0.12,
+        blob_health=0.38, spatial_disorder=0.55, information_density=3.00,
+        # ── Tier 3: Z3 Archetypes ────────────────────────────────────────────
+        archetype_chain=0.0, archetype_hub=0.0, archetype_modular=0.0,
+        archetype_hairball=1.0, archetype_spaghetti=1.0,
+        # ── Tier 4: Z3 Solver ────────────────────────────────────────────────
+        required_silhouette=0.80, required_chain_r2=float('inf'),
+        module_clarity_ceiling=0.36, chain_quality_ceiling=0.13,
+        worst_violation=0.55, violation_count=7.0, violation_score=1.20,
+        layout_conformance=0.40,
     )
 
 
 @pytest.fixture
 def clean_single_module():
     """One module, clear linear chains, excellent navigability."""
-    return Perceptions(
-        module_count           = 1,
-        module_separation      = 0.0,    # single module — no separation to measure
-        blob_integrity         = 1.0,
-        gestalt_cohesion       = 0.72,
-        cross_edge_visibility  = 1.0,    # no cross-module edges — trivially satisfied
-        cross_edge_count       = 0,
-        cross_edge_ratio       = 0.0,
-        edge_visibility        = 0.90,
-        chain_elongation       = 2.20,
-        chain_straightness     = 0.75,
-        hub_centrality_error   = 0.15,
-        node_size_cv           = 0.38,
-        node_overlap           = 0.01,
-        edge_crossings         = 0.10,
-        layout_stress          = 0.80,
-        # Statistical
-        degree_gini            = 0.22,
-        hub_degree_ratio       = 2.00,
-        degree_entropy         = 0.78,
-        edge_angle_entropy     = 0.35,   # edges mostly point in one direction (pipeline)
-        # Geometric
-        graph_aspect_ratio     = 3.50,   # very elongated — it's a chain
-        spatial_compactness    = 0.68,
-        # sklearn cluster (single module → trivially perfect)
-        silhouette_by_module   = 1.0,
-        spatial_cluster_purity = 1.0,
-        # sklearn regression
-        chain_r2               = 0.96,   # beautiful linear chain
+    return _make_perceptions(
+        # ── Tier 1: Raw ───────────────────────────────────────────────────────
+        module_count=1, module_separation=0.0, blob_integrity=1.0,
+        gestalt_cohesion=0.72, cross_edge_visibility=1.0, cross_edge_count=0,
+        cross_edge_ratio=0.0, edge_visibility=0.90, chain_elongation=2.20,
+        chain_straightness=0.75, hub_centrality_error=0.15, node_size_cv=0.38,
+        node_overlap=0.01, edge_crossings=0.10, layout_stress=0.80,
+        degree_gini=0.22, hub_degree_ratio=2.00, degree_entropy=0.78,
+        edge_angle_entropy=0.35, graph_aspect_ratio=3.50, spatial_compactness=0.68,
+        silhouette_by_module=1.0, spatial_cluster_purity=1.0, chain_r2=0.96,
+        # ── Tier 2: Composed ─────────────────────────────────────────────────
+        chain_quality=0.66, hub_clarity=0.19, module_clarity=0.90,
+        readability=0.78, layout_efficiency=0.60, structural_complexity=0.0,
+        coupling_tension=0.0, isolation_risk=0.28, visual_entropy=0.57,
+        degree_imbalance=0.07, hub_prominence=0.33, chain_hub_conflict=0.22,
+        blob_health=1.0, spatial_disorder=0.0, information_density=0.0,
+        # ── Tier 3: Z3 Archetypes ────────────────────────────────────────────
+        archetype_chain=1.0, archetype_hub=0.0, archetype_modular=0.0,
+        archetype_hairball=0.0, archetype_spaghetti=0.0,
+        # ── Tier 4: Z3 Solver ────────────────────────────────────────────────
+        required_silhouette=float('inf'), required_chain_r2=0.60,
+        module_clarity_ceiling=1.0, chain_quality_ceiling=0.74,
+        worst_violation=0.0, violation_count=0.0, violation_score=0.0,
+        layout_conformance=1.00,
     )
 
 
@@ -342,7 +357,7 @@ class TestZ3ArithLayer:
         assert s.check() == unsat
 
     def _base_perceptions(self, **overrides):
-        """Base good-layout perceptions with specific fields overridden."""
+        """Good-layout baseline with specific fields overridden."""
         base = dict(
             module_count=3, module_separation=80.0, blob_integrity=0.95,
             gestalt_cohesion=0.68, cross_edge_visibility=0.85,
@@ -356,7 +371,7 @@ class TestZ3ArithLayer:
             spatial_cluster_purity=0.80, chain_r2=0.92,
         )
         base.update(overrides)
-        return Perceptions(**base)
+        return _make_perceptions(**base)
 
     def test_failed_descriptions_populated(self, good_layout=None):
         """Unsatisfied check populates failed_descriptions with readable strings."""

@@ -63,23 +63,57 @@ class P:
     layout_stress         = Real("layout_stress")
 
     # Statistical: degree distribution
-    degree_gini           = Real("degree_gini")
-    hub_degree_ratio      = Real("hub_degree_ratio")
-    degree_entropy        = Real("degree_entropy")
+    degree_gini            = Real("degree_gini")
+    hub_degree_ratio       = Real("hub_degree_ratio")
+    degree_entropy         = Real("degree_entropy")
 
     # Statistical: edge geometry
-    edge_angle_entropy    = Real("edge_angle_entropy")
+    edge_angle_entropy     = Real("edge_angle_entropy")
 
     # Geometric
-    graph_aspect_ratio    = Real("graph_aspect_ratio")
-    spatial_compactness   = Real("spatial_compactness")
+    graph_aspect_ratio     = Real("graph_aspect_ratio")
+    spatial_compactness    = Real("spatial_compactness")
 
     # sklearn cluster quality
-    silhouette_by_module  = Real("silhouette_by_module")
-    spatial_cluster_purity= Real("spatial_cluster_purity")
+    silhouette_by_module   = Real("silhouette_by_module")
+    spatial_cluster_purity = Real("spatial_cluster_purity")
 
     # sklearn regression
-    chain_r2              = Real("chain_r2")
+    chain_r2               = Real("chain_r2")
+
+    # ── Tier 2: Composed ─────────────────────────────────────────────────────
+    chain_quality          = Real("chain_quality")
+    hub_clarity            = Real("hub_clarity")
+    module_clarity         = Real("module_clarity")
+    readability            = Real("readability")
+    layout_efficiency      = Real("layout_efficiency")
+    structural_complexity  = Real("structural_complexity")
+    coupling_tension       = Real("coupling_tension")
+    isolation_risk         = Real("isolation_risk")
+    visual_entropy         = Real("visual_entropy")
+    degree_imbalance       = Real("degree_imbalance")
+    hub_prominence         = Real("hub_prominence")
+    chain_hub_conflict     = Real("chain_hub_conflict")
+    blob_health            = Real("blob_health")
+    spatial_disorder       = Real("spatial_disorder")
+    information_density    = Real("information_density")
+
+    # ── Tier 3: Z3 Archetype ─────────────────────────────────────────────────
+    archetype_chain        = Real("archetype_chain")
+    archetype_hub          = Real("archetype_hub")
+    archetype_modular      = Real("archetype_modular")
+    archetype_hairball     = Real("archetype_hairball")
+    archetype_spaghetti    = Real("archetype_spaghetti")
+
+    # ── Tier 4: Z3 Solver ────────────────────────────────────────────────────
+    required_silhouette    = Real("required_silhouette")
+    required_chain_r2      = Real("required_chain_r2")
+    module_clarity_ceiling = Real("module_clarity_ceiling")
+    chain_quality_ceiling  = Real("chain_quality_ceiling")
+    worst_violation        = Real("worst_violation")
+    violation_count        = Real("violation_count")
+    violation_score        = Real("violation_score")
+    layout_conformance     = Real("layout_conformance")
 
 
 # ── Person ─────────────────────────────────────────────────────────────────────
