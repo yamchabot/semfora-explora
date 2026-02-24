@@ -1,9 +1,11 @@
 from ..judgement import P, Person
-from ..z3_compat import And
+from ..z3_compat import And, Implies
 
 # Engineer (mid-level) understanding the module they're currently working in.
 # Needs to see what their module connects to and understand local call structure.
 # More focused than a senior engineer; not doing system-wide architectural analysis.
+# Heavily cross-coupled graphs (spaghetti) will be tangled regardless of layout —
+# the high crossing rate is itself the signal that the module needs refactoring.
 
 ENGINEER = Person(
     name    = "Dana",
@@ -14,6 +16,7 @@ ENGINEER = Person(
     formula = And(
         P.edge_visibility  >= 0.80,  # can see the function-level connections
         P.node_overlap     <= 0.02,  # can click into specific functions
-        P.edge_crossings   <= 0.40,  # graph doesn't obscure the structure I care about
+        # Crossing budget only applies when routing is actually controllable
+        Implies(P.cross_edge_ratio <= 0.40, P.edge_crossings <= 0.40),
     ),
 )

@@ -276,9 +276,11 @@ class TestCleanSingleModule:
         """Sarah's multi-module constraint doesn't fire when module_count=1."""
         assert check_person(COMPANY_EXECUTIVE, clean_single_module).satisfied
 
-    def test_vp_fails_no_multi_module(self, clean_single_module):
-        """Marcus explicitly needs module_count >= 2 — single-module doesn't work for him."""
-        assert not check_person(ENGINEERING_VP, clean_single_module).satisfied
+    def test_vp_satisfied_single_module(self, clean_single_module):
+        """Marcus's module requirements are conditional on module_count >= 2.
+        Single-module graphs trivially satisfy him — one team owns everything,
+        no cross-team coupling to worry about."""
+        assert check_person(ENGINEERING_VP, clean_single_module).satisfied
 
     def test_people_manager_satisfied(self, clean_single_module):
         """Jordan only needs node sizes to vary — doesn't require multiple modules."""

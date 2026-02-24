@@ -121,6 +121,100 @@ function makeBlobRepulsion(nodes, targetClearance = 80) {
   };
 }
 
+// ── Fix 5: Per-module chain straightening ────────────────────────────────────
+// For multi-module graphs, chains within each module curl into arcs because
+// the charge force spreads them radially and there's no alignment constraint.
+// This force detects linear chains per module and nudges their nodes toward a
+// straight horizontal line through the module centroid each tick.
+function makePerModuleChainForce(nodes, links, strength = 0.30) {
+  const nodeGroup = {};
+  const nodeById  = {};
+  nodes.forEach(n => { nodeGroup[n.id] = n.group; nodeById[n.id] = n; });
+
+  // Build intra-module links list (string IDs)
+  const intraLinks = [];
+  links.forEach(l => {
+    const s = typeof l.source === "object" ? l.source.id : l.source;
+    const t = typeof l.target === "object" ? l.target.id : l.target;
+    if (nodeGroup[s] === nodeGroup[t]) intraLinks.push({ source: s, target: t });
+  });
+
+  // Detect chain order per module
+  const groups = [...new Set(nodes.map(n => n.group))];
+  const chainsByGroup = {};
+  for (const g of groups) {
+    const modNodes = nodes.filter(n => n.group === g);
+    const modLinks = intraLinks.filter(l =>
+      nodeGroup[l.source] === g && nodeGroup[l.target] === g);
+    const order = detectLinearChain(modNodes, modLinks);
+    if (order && order.length >= 3) chainsByGroup[g] = order;
+  }
+  if (Object.keys(chainsByGroup).length === 0) return null;
+
+  return function perModuleChainAlign() {
+    for (const [g, order] of Object.entries(chainsByGroup)) {
+      const chainNodes = order.map(id => nodeById[id]).filter(Boolean);
+      const n = chainNodes.length;
+      if (n < 2) continue;
+
+      // Dynamic centroid of this module's chain nodes
+      const cx = chainNodes.reduce((s, nd) => s + nd.x, 0) / n;
+      const cy = chainNodes.reduce((s, nd) => s + nd.y, 0) / n;
+
+      // Target: spread nodes horizontally by L per step around centroid
+      chainNodes.forEach((nd, i) => {
+        const targetX = cx + (i / (n - 1) - 0.5) * L * (n - 1);
+        const targetY = cy;
+        nd.vx = (nd.vx || 0) + (targetX - nd.x) * strength;
+        nd.vy = (nd.vy || 0) + (targetY - nd.y) * (strength * 0.5);
+      });
+    }
+  };
+}
+
+// ── Fix 4: Hub centering force ────────────────────────────────────────────────
+// Pulls each hub node (degree ≥ minDegree) toward the centroid of its direct
+// neighbours each tick. This counteracts charge repulsion pushing the hub to the
+// periphery of its own neighbourhood and keeps hub_centrality_error low.
+function makeHubCenteringForce(nodes, links, minDegree = 3, strength = 0.20) {
+  const nodeById = {};
+  nodes.forEach(n => { nodeById[n.id] = n; });
+
+  // Build INTRA-MODULE adjacency only — never pull hub toward cross-module neighbours.
+  // Cross-module neighbours are deliberately separated by blob repulsion; pulling
+  // hubs toward them would collapse that separation.
+  const adj = {};
+  nodes.forEach(n => { adj[n.id] = []; });
+  links.forEach(l => {
+    const s  = typeof l.source === "object" ? l.source.id : l.source;
+    const t  = typeof l.target === "object" ? l.target.id : l.target;
+    const ns = nodeById[s], nt = nodeById[t];
+    if (!ns || !nt) return;
+    if (ns.group !== nt.group) return;   // skip cross-module links
+    adj[s].push(t);
+    adj[t].push(s);
+  });
+
+  // Only nodes with ≥ minDegree intra-module neighbours qualify as hubs
+  const hubs = nodes.filter(n => (adj[n.id] || []).length >= minDegree);
+
+  return function hubCentering() {
+    for (const hub of hubs) {
+      const nbIds = adj[hub.id] || [];
+      if (!nbIds.length) continue;
+      let cx = 0, cy = 0, cnt = 0;
+      for (const id of nbIds) {
+        const nb = nodeById[id];
+        if (nb) { cx += nb.x; cy += nb.y; cnt++; }
+      }
+      if (!cnt) continue;
+      cx /= cnt; cy /= cnt;
+      hub.x += (cx - hub.x) * strength;
+      hub.y += (cy - hub.y) * strength;
+    }
+  };
+}
+
 function settle(nodes, links, ticks = 800) {
   const groups = [...new Set(nodes.map(n => n.group))];
 
@@ -192,6 +286,11 @@ function settle(nodes, links, ticks = 800) {
   if (groups.length >= 2) {
     sim.force("blobRepulsion", makeBlobRepulsion(nodes, 80));
   }
+
+  // Fix 4: hub centering — pull hubs to centroid of their neighbourhood
+  sim.force("hubCenter", makeHubCenteringForce(nodes, links, 3, 0.25));
+
+  // Fix 5: per-module chain pre-positioning only (no ongoing force — avoids crossing regressions)
 
   for (let i = 0; i < ticks; i++) sim.tick();
   return nodes;

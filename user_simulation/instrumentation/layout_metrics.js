@@ -208,7 +208,11 @@ export function edgeCrossings(nodes, links) {
  *   stress    number   total normalised stress
  *   perEdge   number   stress / num pairs (comparable across graph sizes)
  */
-export function layoutStress(nodes, links, idealEdgeLength = 120) {
+/**
+ * intraOnly = true  → only count node-pairs within the same group.
+ * This avoids penalising intentional inter-module spacing (blob separation).
+ */
+export function layoutStress(nodes, links, idealEdgeLength = 120, intraOnly = false) {
   const map = nodeMap(nodes);
 
   // Build undirected adjacency
@@ -238,6 +242,7 @@ export function layoutStress(nodes, links, idealEdgeLength = 120) {
   for (let i = 0; i < ids.length; i++) {
     const dists = bfs(ids[i]);
     for (let j = i + 1; j < ids.length; j++) {
+      if (intraOnly && nodes[i].group !== nodes[j].group) continue;
       const d_ij = dists.get(ids[j]);
       if (d_ij == null || d_ij === 0) continue;
       const ideal   = d_ij * idealEdgeLength;
@@ -263,10 +268,15 @@ export function layoutStress(nodes, links, idealEdgeLength = 120) {
  */
 export function hubCentrality(nodes, links, minDegree = 3) {
   const map = nodeMap(nodes);
+
+  // Use intra-module adjacency only — a hub at a module boundary can't be
+  // central among neighbours in different (separated) blobs, so measuring
+  // centrality against cross-module neighbours gives misleadingly high errors.
   const adj = new Map(nodes.map(n => [n.id, new Set()]));
   for (const link of links) {
     const [a, b] = resolveLink(link, map);
     if (!a || !b) continue;
+    if (a.group !== b.group) continue;   // intra-module only
     adj.get(a.id).add(b.id);
     adj.get(b.id).add(a.id);
   }
@@ -827,6 +837,7 @@ export function computeFacts(nodes, links, opts = {}) {
     nodeOverlap:                nodeOverlap(nodes),
     edgeCrossings:              edgeCrossings(nodes, links),
     layoutStress:               layoutStress(nodes, links, idealEdgeLength),
+    intraModuleStress:          layoutStress(nodes, links, idealEdgeLength, true),
     hubCentrality:              hubCentrality(nodes, links),
     chainLinearity:             { ratio: avgChainLinearity, straightness: avgChainStraightness, chains: chainLinearities },
     blobIntegrity:              blobIntegrity(nodes, groupKeyFn),

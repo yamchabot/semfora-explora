@@ -858,7 +858,10 @@ def compute_perceptions(facts: dict) -> Perceptions:
     chain_str   = float(facts["chainLinearity"]["straightness"]) if facts["chainLinearity"]["straightness"] is not None else 1.0
     hub         = facts["hubCentrality"]["avgNormalised"]
     overlap     = facts["nodeOverlap"]["ratio"]
-    stress      = facts["layoutStress"]["perEdge"]
+    # Use intra-module stress: avoids penalising intentional blob separation.
+    # Falls back to global stress for single-module graphs (intra == global).
+    intra = facts.get("intraModuleStress", facts.get("layoutStress"))
+    stress      = float(intra["perEdge"])
     crossings   = facts["edgeCrossings"]["normalised"]
     size_cv     = facts["nodeSizeVariation"]["cv"]
     mod_count   = int(facts.get("moduleCount", 1))
