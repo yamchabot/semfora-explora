@@ -113,7 +113,9 @@ function drawBlob(ctx, hull, padding, lineWidth, color) {
 export function makeNestedBlobForce(level, blobCount = 1) {
   // Inner levels need stronger containment; outer levels are gentler.
   const levelFactor = Math.max(0.4, 1 - level * 0.25);
-  const padding     = Math.max(15, 60 - level * 15);
+  // Outer gap 80 graph-units (was 60) to give hull rendering room.
+  // hullCapGU at L=0 is 36, so 2×36=72 ≤ 80 → hulls never visually overlap.
+  const padding     = Math.max(15, 80 - level * 15);
   return makeVoronoiContainmentForce(
     // Centripetal attraction is near-zero: the link force should form the
     // program shape (call chains, hubs, trees) within the blob freely.
@@ -1101,7 +1103,13 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                 for (let L = 0; L < numLevels; L++) {
                   // Styling: outer = large/faint, inner = tight/brighter
                   const isOuter   = L === 0;
-                  const padding   = Math.max(12, (32 - L * 10)) / gs;
+                  // Cap hull padding in graph-unit terms so hulls don't visually overlap
+                  // when zoomed out.  Physics guarantees blobPadding (80 at L=0, 50 at L=1)
+                  // between blob edges, so padding must be ≤ blobPadding/2 per side.
+                  // 32/gs gives a constant 32 screen-px at normal zoom; the cap prevents
+                  // it from expanding beyond the physics gap when gs < 1 (zoomed out).
+                  const hullCapGU = Math.max(10, 36 - L * 13); // 36 / 23 / 10 graph-units
+                  const padding   = Math.min(Math.max(10, (32 - L * 10)) / gs, hullCapGU);
                   const lineWidth = (isOuter ? 1.5 : 1.0) / gs;
                   const labelSize = Math.max(9, 15 - L * 3) / gs;
 
