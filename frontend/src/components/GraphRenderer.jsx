@@ -589,10 +589,10 @@ export default function GraphRenderer({ data, measures, onNodeClick,
     const charge = fg.d3Force("charge");
     if (charge) {
       // In blob mode, long-range charge (default -350) causes nodes to drift to
-      // the blob perimeter and park there (ring pattern). Replace with a tiny
-      // charge (-5) just enough to maintain some global structure between blobs,
-      // while forceCollide handles local node spacing instead.
-      const effectiveCharge = graphData?.isBlobMode ? -5 : -forceSpread;
+      // the blob perimeter and park there (ring pattern). Use a reduced charge
+      // (-30) that's 12× weaker than the ring-causing default, combined with
+      // forceCollide for local node spacing to keep nodes visible and edges clear.
+      const effectiveCharge = graphData?.isBlobMode ? -30 : -forceSpread;
       charge.strength(effectiveCharge).distanceMax(Math.round(400 * forceSpread / SPREAD_DEFAULT));
     }
 
@@ -694,7 +694,9 @@ export default function GraphRenderer({ data, measures, onNodeClick,
       }
       // Short-range collision: keeps nodes spread inside the blob without
       // long-range charge pushing everything to the perimeter.
-      fg.d3Force("blobCollide", forceCollide(7).strength(0.85));
+      // Dynamic radius = visual radius + 4px gap, so edges remain visible
+      // between nodes of any size (val ranges from ~4 to ~22).
+      fg.d3Force("blobCollide", forceCollide(n => (n.val ?? 6) + 4).strength(0.85));
     } else {
       fg.d3Force("groupCentroid", null);
       for (let L = 1; L < 6; L++) fg.d3Force(`groupCentroid_${L}`, null);
