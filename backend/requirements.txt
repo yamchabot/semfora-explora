@@ -1,3 +1,4 @@
 fastapi>=0.115
 uvicorn[standard]>=0.30
 networkx>=3.3
+z3-solver>=4.12           # user satisfaction constraint solver (see user_simulation/)
