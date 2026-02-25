@@ -65,4 +65,6 @@ export const api = {
   // Lightweight: just {status_map: {"module::name": "added"|"removed"|"modified"}}
   diffStatus: (repoId, compareTo) =>
     get(`/repos/${encodeURIComponent(repoId)}/diff-status?compare_to=${encodeURIComponent(compareTo)}`),
+  patterns: (repoId, minConfidence = 0.60) =>
+    get(`/repos/${encodeURIComponent(repoId)}/patterns?min_confidence=${minConfidence}`),
 };

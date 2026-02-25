@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from routers import (
     repos, dead_code, cycles, coupling, building,
     triage, centrality, communities, module_graph,
-    load_bearing, graph, search, explore, import_repo,
+    load_bearing, graph, search, explore, import_repo, patterns,
 )
 
 app = FastAPI(title="Semfora Explora API", version="0.2.0")
@@ -62,6 +62,7 @@ app.include_router(graph.router)
 app.include_router(search.router)
 app.include_router(explore.router)
 app.include_router(import_repo.router)
+app.include_router(patterns.router)
 
 # ── User simulation report ───────────────────────────────────────────────────
 REPO_ROOT   = Path(__file__).parent.parent

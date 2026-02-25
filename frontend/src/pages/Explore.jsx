@@ -41,6 +41,7 @@ import { KindFilter }                     from "../components/explore/KindFilter
 import { PivotTable }                     from "../components/explore/PivotTable.jsx";
 import { GraphNodeDetails }               from "../components/explore/GraphNodeDetails.jsx";
 import { NodeTable }                      from "../components/explore/NodeTable.jsx";
+import { PatternPanel }                   from "../components/explore/PatternPanel.jsx";
 import GraphRenderer                      from "../components/GraphRenderer.jsx";
 
 // parseMeasuresParam → measureUtils.js  |  parseFiltersParam → dimUtils.js
@@ -80,6 +81,20 @@ export default function Explore() {
   const [nodeDot,      setNodeDot]      = useState(() => searchParams.get("nd") === "1");
   const [invertFlow,   setInvertFlow]   = useState(() => searchParams.get("rf") === "1");
   const [hideTests,    setHideTests]    = useState(() => searchParams.get("ht") === "1");
+
+  // ── Pattern detection panel ───────────────────────────────────────────────
+  const [showPatterns,     setShowPatterns]     = useState(false);
+  const [patternNodeColors, setPatternNodeColors] = useState(null); // Map<id,color> | null
+  const [activePatternKey, setActivePatternKey] = useState(null);
+
+  function handlePatternHighlight(patternKey, overridesObj, color, inst) {
+    setActivePatternKey(patternKey);
+    if (!patternKey || Object.keys(overridesObj).length === 0) {
+      setPatternNodeColors(null);
+      return;
+    }
+    setPatternNodeColors(new Map(Object.entries(overridesObj)));
+  }
 
   // ── Dim toggle: disabled dims stay in the list but are excluded from queries ─
   const [disabledDims, setDisabledDims] = useState(() => {
@@ -387,6 +402,14 @@ export default function Explore() {
       {[{key:"pivot",label:"📊 Pivot"},{key:"graph",label:"🕸 Graph"},{key:"nodes",label:"🔬 Nodes"}].map(({key,label})=>(
         <button key={key} className={`btn btn-sm ${renderer===key?"":"btn-ghost"}`} onClick={()=>setRenderer(key)}>{label}</button>
       ))}
+      {renderer === "graph" && (
+        <button
+          className={`btn btn-sm ${showPatterns ? "" : "btn-ghost"}`}
+          onClick={() => setShowPatterns(s => !s)}
+          title="Detect programming patterns"
+          style={{ marginLeft: 4 }}
+        >🧩 Patterns</button>
+      )}
     </div>
     {/* Compare / diff row */}
     <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:14, flexWrap:"wrap" }}>
@@ -545,10 +568,21 @@ export default function Explore() {
           invertFlow={invertFlow}             setInvertFlow={setInvertFlow}
           highlightSet={highlightSet}
           edgeColorOverrides={diffEdgeOverrides}
+          nodeColorOverrides={patternNodeColors}
           controlsH={0} fillViewport={true}
           onAddFilter={handleAddFilter}
         />
       )}
+
+      {/* Pattern panel — overlaid top-right of graph view */}
+      {showPatterns && (
+        <PatternPanel
+          repoId={repoId}
+          onHighlight={handlePatternHighlight}
+          activePatternKey={activePatternKey}
+        />
+      )}
+
       {/* Diff legend — bottom-right, only shown when compare is active */}
       {compareRepo && diffStats && (
         <div style={{ position:"absolute", bottom:16, right:16, zIndex:10,
