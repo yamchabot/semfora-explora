@@ -353,6 +353,17 @@ export default function GraphRenderer({ data, measures, onNodeClick, onAddFilter
   const [selectedBlob, setSelectedBlob] = useState(null);
   const selectedBlobRef = useRef(null); // mirrors selectedBlob for use in event handlers
   useEffect(() => { selectedBlobRef.current = selectedBlob; }, [selectedBlob]);
+
+  // Track Alt key state reliably via keydown/keyup — D3-wrapped click events
+  // sometimes lose modifier keys, so we don't rely on event.altKey alone.
+  const altKeyHeldRef = useRef(false);
+  useEffect(() => {
+    const dn = e => { if (e.key === "Alt") altKeyHeldRef.current = true;  };
+    const up = e => { if (e.key === "Alt") altKeyHeldRef.current = false; };
+    window.addEventListener("keydown", dn);
+    window.addEventListener("keyup",   up);
+    return () => { window.removeEventListener("keydown", dn); window.removeEventListener("keyup", up); };
+  }, []);
   // nodeDot and setNodeDot come in as props (URL-persisted in Explore.jsx)
   // Spread: scales charge repulsion and link distance together.
   // 350 = default; higher = more spread; lower = tighter.
@@ -1523,13 +1534,22 @@ export default function GraphRenderer({ data, measures, onNodeClick, onAddFilter
                 onNodeClick?.(node);
               }}
               onBackgroundClick={(event) => {
-                // Alt+click on blob area (not a node) → select/deselect that blob
-                if (event?.altKey && graphData.isBlobMode) {
-                  // Convert screen → graph coordinates using the stored zoom transform
-                  const { k, x: tx, y: ty } = zoomTransformRef.current;
-                  const rect = event.target?.getBoundingClientRect?.() ?? { left: 0, top: 0 };
-                  const gx = (event.clientX - rect.left - tx) / k;
-                  const gy = (event.clientY - rect.top  - ty) / k;
+                // Alt+click on blob area (not a node) → select/deselect that blob.
+                // Use altKeyHeldRef (keydown/keyup tracker) rather than event.altKey
+                // because D3-wrapped events sometimes lose modifier key state.
+                // Use fgRef.current.screen2GraphCoords for reliable coord conversion.
+                if ((altKeyHeldRef.current || event?.altKey) && graphData.isBlobMode) {
+                  const fg = fgRef.current;
+                  const coords = fg?.screen2GraphCoords
+                    ? fg.screen2GraphCoords(event.clientX, event.clientY)
+                    : (() => {
+                        // Fallback: manual conversion using stored zoom transform
+                        const { k, x: tx, y: ty } = zoomTransformRef.current;
+                        const rect = event.target?.getBoundingClientRect?.() ?? { left:0, top:0 };
+                        return { x: (event.clientX - rect.left - tx) / k,
+                                 y: (event.clientY - rect.top  - ty) / k };
+                      })();
+                  const gx = coords.x, gy = coords.y;
 
                   // Test outer blobs (level 0) — group nodes by node.group
                   const HIT_PAD = 40; // generous hit area in graph units
