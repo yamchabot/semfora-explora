@@ -31,7 +31,7 @@ const BLOB_PALETTE = ["#58a6ff","#3fb950","#e3b341","#f85149","#a371f7","#39c5cf
  * Fill and stroke are drawn with the same unclipped blob path so the shape is
  * always a complete smooth oval (no flat edge at adjacent-blob boundaries).
  */
-function drawBlob(ctx, hull, padding, lineWidth, color) {
+function drawBlob(ctx, hull, padding, lineWidth, color, highlight = false) {
   if (!hull?.length) return;
   // Expand each point outward from centroid
   const cx = hull.reduce((s,p)=>s+p[0],0) / hull.length;
@@ -77,11 +77,17 @@ function drawBlob(ctx, hull, padding, lineWidth, color) {
     }
   }
   ctx.closePath();
-  ctx.fillStyle   = color + "1e";   // ~12% opacity fill
+  ctx.fillStyle   = color + (highlight ? "2d" : "1e");  // ~18% / ~12% fill
   ctx.fill();
-  ctx.strokeStyle = color + "99";   // ~60% opacity stroke
-  ctx.lineWidth   = lineWidth;
+  ctx.strokeStyle = highlight ? color + "ee" : color + "99"; // bright / ~60% stroke
+  ctx.lineWidth   = highlight ? lineWidth * 2.5 : lineWidth;
   ctx.stroke();
+  if (highlight) {
+    // Outer glow ring
+    ctx.strokeStyle = color + "33";
+    ctx.lineWidth   = lineWidth * 7;
+    ctx.stroke();
+  }
 }
 
 // ── Group forces ─────────────────────────────────────────────────────────────
@@ -341,6 +347,9 @@ export default function GraphRenderer({ data, measures, onNodeClick,
   const [couplingIds, setCouplingIds] = useState(new Set());
   // When true, the graph only shows cross-boundary nodes + edges (no non-coupling nodes).
   const [couplingOnly, setCouplingOnly] = useState(false);
+  // Blob selection: alt+click a node to select its containing blob (outer or inner).
+  // { key: string (getGroupKey result), level: number } | null
+  const [selectedBlob, setSelectedBlob] = useState(null);
   // nodeDot and setNodeDot come in as props (URL-persisted in Explore.jsx)
   // Spread: scales charge repulsion and link distance together.
   // 350 = default; higher = more spread; lower = tighter.
@@ -576,6 +585,30 @@ export default function GraphRenderer({ data, measures, onNodeClick,
     });
     return { ...graphData, nodes, links };
   }, [couplingOnly, couplingEndpoints, graphData, crossEdgeSet]);
+
+  // Nodes inside the currently selected blob (all levels up to selectedBlob.level)
+  const blobSelectedNodeIds = useMemo(() => {
+    if (!selectedBlob || !graphData.isBlobMode) return new Set();
+    return new Set(
+      graphData.nodes
+        .filter(n => getGroupKey(n, selectedBlob.level) === selectedBlob.key)
+        .map(n => n.id)
+    );
+  }, [selectedBlob, graphData]);
+
+  // Edges that cross the selected blob's boundary (exactly one endpoint inside)
+  const blobCrossEdges = useMemo(() => {
+    if (!selectedBlob || blobSelectedNodeIds.size === 0) return new Set();
+    const set = new Set();
+    for (const link of graphData.links) {
+      const src = typeof link.source === "object" ? link.source.id : link.source;
+      const tgt = typeof link.target === "object" ? link.target.id : link.target;
+      const srcIn = blobSelectedNodeIds.has(src);
+      const tgtIn = blobSelectedNodeIds.has(tgt);
+      if (srcIn !== tgtIn) set.add(`${src}|${tgt}`);
+    }
+    return set;
+  }, [selectedBlob, blobSelectedNodeIds, graphData.links]);
 
   function handleCouplingToggle() {
     if (couplingIds.size > 0) {
@@ -955,6 +988,21 @@ export default function GraphRenderer({ data, measures, onNodeClick,
             >clear</button>
           </span>
         )}
+        {selectedBlob && (
+          <span style={{ display:"flex", alignItems:"center", gap:6 }}>
+            <span style={{ fontSize:11, color:"#a371f7", fontWeight:600 }}>
+              🫧 {selectedBlob.key.split("::").at(-1)}
+              {selectedBlob.level > 0 && <span style={{ color:"var(--text3)", fontWeight:400 }}> (inner)</span>}
+              {" — "}{blobCrossEdges.size} cross-boundary edge{blobCrossEdges.size !== 1 ? "s" : ""}
+            </span>
+            <button
+              onClick={() => setSelectedBlob(null)}
+              style={{ fontSize:11, padding:"2px 7px", background:"var(--bg3)",
+                border:"1px solid var(--border2)", borderRadius:4,
+                color:"var(--text2)", cursor:"pointer" }}
+            >clear</button>
+          </span>
+        )}
         {/* ── Icon-only quick toggles ─────────────────────────────────────── */}
         {/* Each button is a single icon; full description lives in the tooltip. */}
         <Tooltip tip={hideIsolated ? "Show all nodes (isolated nodes hidden)" : "Hide isolated nodes — no edges in or out"}>
@@ -1118,8 +1166,12 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                     const outerKey = gk.split("::")[0];
                     const base     = groupColorMap.get(outerKey) || "#888888";
 
-                    const hull     = pts.length >= 3 ? convexHull(pts) : pts.map(p => [...p]);
-                    drawBlob(ctx, hull, padding, lineWidth, base);
+                    const hull = pts.length >= 3 ? convexHull(pts) : pts.map(p => [...p]);
+                    const isBlobSelected  = selectedBlob?.level === L && gk === selectedBlob?.key;
+                    const blobDimmed      = selectedBlob != null && !isBlobSelected;
+                    ctx.globalAlpha = blobDimmed ? 0.25 : 1.0;
+                    drawBlob(ctx, hull, padding, lineWidth, base, isBlobSelected);
+                    ctx.globalAlpha = 1.0;
 
                     // Label: only at outermost level, or all levels when N > 2
                     if (isOuter || numLevels >= 2) {
@@ -1145,16 +1197,21 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                   : chainNodeIds.has(node.id);
                 const isCoupling  = couplingIds.has(node.id);
                 const hasCoupling = couplingIds.size > 0;
+                const hasBlobSel  = selectedBlob != null;
+                const isInBlob    = hasBlobSel && blobSelectedNodeIds.has(node.id);
 
-                // Dimming priority:
-                //  coupling-only  → all nodes full (non-coupling were already removed)
-                //  coupling mode  → coupling nodes full, others 18% (selection can rescue)
+                // Dimming priority (highest → lowest):
+                //  blob selection → blob nodes full, others 15%
+                //  coupling-only  → all nodes full (non-coupling already removed)
+                //  coupling mode  → coupling nodes full, others 18%
                 //  selection mode → reachable nodes full, others 18%
                 //  neither        → all full
-                const isVisible = (hasCoupling && !couplingOnly)
-                  ? (isCoupling || (anySelected && isReachable))
-                  : anySelected ? isReachable : true;
-                ctx.globalAlpha = isVisible ? 1.0 : 0.18;
+                const isVisible = hasBlobSel
+                  ? isInBlob
+                  : (hasCoupling && !couplingOnly)
+                    ? (isCoupling || (anySelected && isReachable))
+                    : anySelected ? isReachable : true;
+                ctx.globalAlpha = isVisible ? 1.0 : 0.15;
 
                 const baseColor = nodeColorOverrides?.get(node.id) ?? node.color;
                 const isDiffHighlight = nodeColorOverrides?.has(node.id) || highlightSet?.has(node.id);
@@ -1250,6 +1307,9 @@ export default function GraphRenderer({ data, measures, onNodeClick,
               linkWidth={link => {
                 const src = typeof link.source === "object" ? link.source.id : link.source;
                 const tgt = typeof link.target === "object" ? link.target.id : link.target;
+                if (selectedBlob) {
+                  return blobCrossEdges.has(`${src}|${tgt}`) ? 2.5 : 0.3;
+                }
                 if (selectedNodeIds.size === 0) {
                   if (couplingIds.size > 0) {
                     // Cross-boundary edges slightly thicker so they stand out
@@ -1275,6 +1335,10 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                 // Diff overlay: always use diff edge color when provided
                 const edgeOverride = edgeColorOverrides?.get(`${src}|${tgt}`);
                 if (edgeOverride) return edgeOverride;
+                if (selectedBlob) {
+                  // Cyan for cross-boundary; ghosted for internal
+                  return blobCrossEdges.has(`${src}|${tgt}`) ? "#39c5cf" : "rgba(48,54,61,0.05)";
+                }
                 if (selectedNodeIds.size === 0) {
                   if (couplingIds.size > 0) {
                     // Cyan for cross-boundary; nearly invisible for within-group
@@ -1296,6 +1360,9 @@ export default function GraphRenderer({ data, measures, onNodeClick,
               linkDirectionalArrowLength={link => {
                 const src = typeof link.source === "object" ? link.source.id : link.source;
                 const tgt = typeof link.target === "object" ? link.target.id : link.target;
+                if (selectedBlob) {
+                  return blobCrossEdges.has(`${src}|${tgt}`) ? 7 : 2;
+                }
                 if (selectedNodeIds.size === 0) {
                   if (couplingIds.size > 0) {
                     return crossEdgeSet.has(`${src}|${tgt}`) ? 7 : 2;
@@ -1324,6 +1391,9 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                   if (ec && ec !== "#30363d" && ec !== "#484f58") return 2;
                   return 0;
                 }
+                if (selectedBlob) {
+                  return blobCrossEdges.has(`${u}|${v}`) ? 3 : 0;
+                }
                 if (selectedNodeIds.size === 0) {
                   if (couplingIds.size > 0) return crossEdgeSet.has(`${u}|${v}`) ? 3 : 0;
                   return 2;
@@ -1334,16 +1404,17 @@ export default function GraphRenderer({ data, measures, onNodeClick,
               }}
               linkDirectionalParticleSpeed={invertFlow ? -0.004 : 0.004}
               linkDirectionalParticleWidth={link => {
+                const u = typeof link.source === "object" ? link.source.id : link.source;
+                const v = typeof link.target === "object" ? link.target.id : link.target;
+                if (selectedBlob) {
+                  return blobCrossEdges.has(`${u}|${v}`) ? 4 : 0;
+                }
                 if (selectedNodeIds.size === 0) {
                   if (couplingIds.size > 0) {
-                    const u = typeof link.source === "object" ? link.source.id : link.source;
-                    const v = typeof link.target === "object" ? link.target.id : link.target;
                     return crossEdgeSet.has(`${u}|${v}`) ? 4 : 0;
                   }
                   return 3;
                 }
-                const u = typeof link.source === "object" ? link.source.id : link.source;
-                const v = typeof link.target === "object" ? link.target.id : link.target;
                 if (selectedNodeIds.size === 1) return (fwdDistances.has(u) || bwdDistances.has(v)) ? 5 : 0;
                 return chainEdgeMap.has(`${u}|${v}`) ? 5 : 0;
               }}
@@ -1352,6 +1423,9 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                 const v = typeof link.target === "object" ? link.target.id : link.target;
                 const edgeOverride = edgeColorOverrides?.get(`${u}|${v}`);
                 if (edgeOverride) return edgeOverride;
+                if (selectedBlob) {
+                  return blobCrossEdges.has(`${u}|${v}`) ? "#39c5cf" : "#ffffff";
+                }
                 if (selectedNodeIds.size === 0 && couplingIds.size > 0) {
                   return crossEdgeSet.has(`${u}|${v}`) ? "#39c5cf" : "#ffffff";
                 }
@@ -1381,6 +1455,24 @@ export default function GraphRenderer({ data, measures, onNodeClick,
               onNodeClick={(node, event) => {
                 const id = node?.id ?? null;
                 if (!id) return;
+
+                if (event?.altKey && graphData.isBlobMode) {
+                  // Alt+click → select outer blob; Shift+Alt+click → innermost sub-blob
+                  const maxLevel = Math.max(0, blobLevelCount - 1);
+                  const level    = (event?.shiftKey && maxLevel > 0) ? maxLevel : 0;
+                  const key      = getGroupKey(node, level);
+                  if (key) {
+                    // Toggle: alt+clicking the already-selected blob deselects it
+                    setSelectedBlob(prev =>
+                      prev?.key === key && prev?.level === level ? null : { key, level }
+                    );
+                    setSelectedNodeIds(new Set()); // blob selection clears node selection
+                    return;
+                  }
+                }
+
+                // Normal click — clear any blob selection
+                setSelectedBlob(null);
                 setSelectedNodeIds(prev => {
                   if (event?.shiftKey) {
                     // Shift+click: toggle node in multi-select set
@@ -1392,6 +1484,10 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                   return prev.size === 1 && prev.has(id) ? new Set() : new Set([id]);
                 });
                 onNodeClick?.(node);
+              }}
+              onBackgroundClick={() => {
+                setSelectedNodeIds(new Set());
+                setSelectedBlob(null);
               }}
               backgroundColor="#0d1117"
             />
