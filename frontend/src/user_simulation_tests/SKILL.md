@@ -227,7 +227,7 @@ if (!result.satisfied) console.log("  Repair:", repairPlan(result.violations));
 ## Running Tests
 
 ```bash
-# From /workspace/semfora-explorer/frontend
+# From /workspace/semfora-explora/frontend
 PATH="/workspace/node-v22.13.0-linux-arm64/bin:$PATH" npx vitest run src/user_simulation_tests/scenarios.test.js
 ```
 

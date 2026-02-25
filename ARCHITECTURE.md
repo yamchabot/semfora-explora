@@ -7,7 +7,7 @@ Developer reference. ~5 min read.
 ## Overview
 
 ```
-semfora-explorer/
+semfora-explora/
 ├── backend/          FastAPI (Python)
 │   ├── analytics/    Pure analysis functions — no DB, fully testable
 │   ├── queries/      DB I/O — returns plain Python dicts/lists

@@ -1,4 +1,4 @@
-# Semfora Explorer — Critical Feature Review
+# Semfora Explora — Critical Feature Review
 
 **Perspective:** Software Engineer (IC), Staff Engineer, Engineering Manager  
 **Date:** 2026-02-22  

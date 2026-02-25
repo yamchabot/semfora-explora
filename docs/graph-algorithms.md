@@ -71,7 +71,7 @@ Semfora produces a directed graph where nodes are symbols (functions, methods, c
 
 ---
 
-## Priority for Semfora Explorer
+## Priority for Semfora Explora
 
 For a first release, the highest-value algorithms are:
 
