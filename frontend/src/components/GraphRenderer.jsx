@@ -363,12 +363,20 @@ export default function GraphRenderer({ data, measures, onNodeClick, onAddFilter
   const dataRef = useRef(data);
   dataRef.current = data;
 
-  // Track Alt key state reliably via keydown/keyup — D3-wrapped click events
-  // sometimes lose modifier keys, so we don't rely on event.altKey alone.
-  const altKeyHeldRef = useRef(false);
+  // Track Alt and Shift key states reliably via keydown/keyup.
+  // D3-wrapped click events sometimes lose modifier keys, so we don't rely
+  // on event.altKey / event.shiftKey alone.
+  const altKeyHeldRef   = useRef(false);
+  const shiftKeyHeldRef = useRef(false);
   useEffect(() => {
-    const dn = e => { if (e.key === "Alt") altKeyHeldRef.current = true;  };
-    const up = e => { if (e.key === "Alt") altKeyHeldRef.current = false; };
+    const dn = e => {
+      if (e.key === "Alt")   altKeyHeldRef.current   = true;
+      if (e.key === "Shift") shiftKeyHeldRef.current = true;
+    };
+    const up = e => {
+      if (e.key === "Alt")   altKeyHeldRef.current   = false;
+      if (e.key === "Shift") shiftKeyHeldRef.current = false;
+    };
     window.addEventListener("keydown", dn);
     window.addEventListener("keyup",   up);
     return () => { window.removeEventListener("keydown", dn); window.removeEventListener("keyup", up); };
@@ -1581,30 +1589,41 @@ export default function GraphRenderer({ data, measures, onNodeClick, onAddFilter
                       })();
                   const gx = coords.x, gy = coords.y;
 
-                  // Test outer blobs (level 0) — group nodes by node.group
-                  const HIT_PAD = 40; // generous hit area in graph units
+                  // Determine target level:
+                  //   Plain Alt+click         → level 0 (outermost blob)
+                  //   Shift+Alt+click         → maxLevel (innermost sub-blob)
+                  // Mirrors the behaviour of Alt+click / Shift+Alt+click on a node.
+                  const maxLevel  = Math.max(0, blobLevelCount - 1);
+                  const shiftHeld = shiftKeyHeldRef.current || event?.shiftKey;
+                  const level     = (shiftHeld && maxLevel > 0) ? maxLevel : 0;
+
+                  // Group node positions by their group key at the target level.
+                  const HIT_PAD = 40;
                   const groups  = new Map();
                   for (const node of graphData.nodes) {
-                    if (node.x == null || !node.group) continue;
-                    if (!groups.has(node.group)) groups.set(node.group, []);
-                    groups.get(node.group).push([node.x, node.y]);
+                    if (node.x == null) continue;
+                    const gk = getGroupKey(node, level);
+                    if (!gk) continue;
+                    if (!groups.has(gk)) groups.set(gk, []);
+                    groups.get(gk).push([node.x, node.y]);
                   }
+
                   for (const [gk, pts] of groups) {
                     const hull     = pts.length >= 3 ? convexHull(pts) : pts.map(p => [...p]);
                     const expanded = expandHullPts(hull, HIT_PAD);
                     if (pointInPolygon(gx, gy, expanded)) {
                       setSelectedBlob(prev => {
-                        if (!prev || prev.level !== 0) return { keys: new Set([gk]), level: 0 };
+                        if (!prev || prev.level !== level) return { keys: new Set([gk]), level };
                         const next = new Set(prev.keys);
-                        if (next.has(gk)) { next.delete(gk); return next.size === 0 ? null : { keys: next, level: 0 }; }
+                        if (next.has(gk)) { next.delete(gk); return next.size === 0 ? null : { keys: next, level }; }
                         next.add(gk);
-                        return { keys: next, level: 0 };
+                        return { keys: next, level };
                       });
                       setSelectedNodeIds(new Set());
                       return; // handled — don't fall through to clear
                     }
                   }
-                  // Alt+click outside all blobs: do nothing (don't clear)
+                  // Alt+click outside all blobs at this level: do nothing (don't clear)
                   return;
                 }
 
