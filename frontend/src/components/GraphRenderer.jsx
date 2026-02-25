@@ -8,6 +8,40 @@ import { buildGraphData, flattenLeafRows, getGroupKey } from "../utils/graphData
 import { Tooltip } from "./Tooltip.jsx";
 import { computeTopologyAwareGroupPos } from "../utils/topologyLayout.js";
 
+// ── Geometry helpers ─────────────────────────────────────────────────────────────
+
+/** Ray-casting point-in-polygon. Works for any simple polygon. */
+function pointInPolygon(px, py, polygon) {
+  if (!polygon || polygon.length < 3) {
+    // 1-2 point hull: test distance from the point(s) instead
+    if (!polygon?.length) return false;
+    const [cx, cy] = polygon.length === 1
+      ? polygon[0]
+      : [(polygon[0][0]+polygon[1][0])/2, (polygon[0][1]+polygon[1][1])/2];
+    const r = 30; // fallback radius
+    return (px-cx)**2 + (py-cy)**2 < r*r;
+  }
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const [xi, yi] = polygon[i];
+    const [xj, yj] = polygon[j];
+    if (((yi > py) !== (yj > py)) && px < (xj - xi) * (py - yi) / (yj - yi) + xi)
+      inside = !inside;
+  }
+  return inside;
+}
+
+/** Expand each hull vertex outward from the hull's centroid by `padding` units. */
+function expandHullPts(hull, padding) {
+  if (!hull?.length) return hull;
+  const cx = hull.reduce((s, p) => s + p[0], 0) / hull.length;
+  const cy = hull.reduce((s, p) => s + p[1], 0) / hull.length;
+  return hull.map(([x, y]) => {
+    const dx = x - cx, dy = y - cy, len = Math.sqrt(dx*dx + dy*dy) || 1;
+    return [x + dx/len * padding, y + dy/len * padding];
+  });
+}
+
 // ── Canvas helpers ──────────────────────────────────────────────────────────────
 
 function drawPill(ctx, cx, cy, w, h) {
@@ -1522,7 +1556,43 @@ export default function GraphRenderer({ data, measures, onNodeClick, onAddFilter
                 });
                 onNodeClick?.(node);
               }}
-              onBackgroundClick={() => {
+              onBackgroundClick={(event) => {
+                // Alt+click on blob area (not a node) → select/deselect that blob
+                if (event?.altKey && graphData.isBlobMode) {
+                  // Convert screen → graph coordinates using the stored zoom transform
+                  const { k, x: tx, y: ty } = zoomTransformRef.current;
+                  const rect = event.target?.getBoundingClientRect?.() ?? { left: 0, top: 0 };
+                  const gx = (event.clientX - rect.left - tx) / k;
+                  const gy = (event.clientY - rect.top  - ty) / k;
+
+                  // Test outer blobs (level 0) — group nodes by node.group
+                  const HIT_PAD = 40; // generous hit area in graph units
+                  const groups  = new Map();
+                  for (const node of graphData.nodes) {
+                    if (node.x == null || !node.group) continue;
+                    if (!groups.has(node.group)) groups.set(node.group, []);
+                    groups.get(node.group).push([node.x, node.y]);
+                  }
+                  for (const [gk, pts] of groups) {
+                    const hull     = pts.length >= 3 ? convexHull(pts) : pts.map(p => [...p]);
+                    const expanded = expandHullPts(hull, HIT_PAD);
+                    if (pointInPolygon(gx, gy, expanded)) {
+                      setSelectedBlob(prev => {
+                        if (!prev || prev.level !== 0) return { keys: new Set([gk]), level: 0 };
+                        const next = new Set(prev.keys);
+                        if (next.has(gk)) { next.delete(gk); return next.size === 0 ? null : { keys: next, level: 0 }; }
+                        next.add(gk);
+                        return { keys: next, level: 0 };
+                      });
+                      setSelectedNodeIds(new Set());
+                      return; // handled — don't fall through to clear
+                    }
+                  }
+                  // Alt+click outside all blobs: do nothing (don't clear)
+                  return;
+                }
+
+                // Plain background click → clear everything
                 setSelectedNodeIds(new Set());
                 setSelectedBlob(null);
               }}
