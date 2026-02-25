@@ -670,7 +670,8 @@ export default function Explore() {
           {selectedNode && <>
             <div style={{ borderTop:"1px solid var(--border)", margin:"12px 0 8px" }}/>
             <GraphNodeDetails node={selectedNode} measures={measures}
-              types={stableFilteredData?.measure_types || {}}/>
+              types={stableFilteredData?.measure_types || {}}
+              dims={stableFilteredData?.dimensions ?? []}/>
           </>}
         </div>
       </div>
