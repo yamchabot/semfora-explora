@@ -1,8 +1,9 @@
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
-import { useContext } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useContext, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { RepoContext } from "../App";
 import { api } from "../api";
+import ImportRepoModal from "./ImportRepoModal";
 
 const NAV = [
   { to: "/dashboard",    icon: "📊",  label: "Dashboard",          section: "Analysis" },
@@ -23,6 +24,9 @@ const NAV = [
 export default function Layout() {
   const { repoId, setRepoId } = useContext(RepoContext);
   const { data } = useQuery({ queryKey: ["repos"], queryFn: api.repos });
+  const queryClient = useQueryClient();
+  const navigate    = useNavigate();
+  const [showImport, setShowImport] = useState(false);
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "220px 1fr", minHeight: "100vh" }}>
@@ -60,6 +64,15 @@ export default function Layout() {
               </optgroup>
             ))}
           </select>
+          <button
+            onClick={() => setShowImport(true)}
+            style={{ marginTop: 6, width: "100%", fontSize: 11, padding: "4px 8px",
+              background: "var(--bg3)", border: "1px solid var(--border2)",
+              borderRadius: 4, color: "var(--text2)", cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}
+          >
+            + Import GitHub repo
+          </button>
         </div>
 
         {/* Nav */}
@@ -102,6 +115,18 @@ export default function Layout() {
       <main style={{ padding: "28px 32px", overflowY: "auto" }}>
         <Outlet />
       </main>
+
+      {showImport && (
+        <ImportRepoModal
+          onClose={() => setShowImport(false)}
+          onImported={(newRepoId) => {
+            queryClient.invalidateQueries({ queryKey: ["repos"] });
+            setRepoId(newRepoId);
+            setShowImport(false);
+            navigate("/explore");
+          }}
+        />
+      )}
     </div>
   );
 }
