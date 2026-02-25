@@ -3,44 +3,10 @@ import ForceGraph2D from "react-force-graph-2d";
 import { forceCollide } from "d3-force-3d";
 import { measureKey, measureLabel } from "../utils/measureUtils.js";
 import { lerpColor, makeStepColors, makeStepWidths, makeStepArrows } from "../utils/colorUtils.js";
-import { bfsFromNode, buildAdjacencyMaps, convexHull, findChainEdges, collectChainNodeIds } from "../utils/graphAlgo.js";
+import { bfsFromNode, buildAdjacencyMaps, convexHull, expandHullPts, pointInPolygon, findChainEdges, collectChainNodeIds } from "../utils/graphAlgo.js";
 import { buildGraphData, flattenLeafRows, getGroupKey } from "../utils/graphData.js";
 import { Tooltip } from "./Tooltip.jsx";
 import { computeTopologyAwareGroupPos } from "../utils/topologyLayout.js";
-
-// ── Geometry helpers ─────────────────────────────────────────────────────────────
-
-/** Ray-casting point-in-polygon. Works for any simple polygon. */
-function pointInPolygon(px, py, polygon) {
-  if (!polygon || polygon.length < 3) {
-    // 1-2 point hull: test distance from the point(s) instead
-    if (!polygon?.length) return false;
-    const [cx, cy] = polygon.length === 1
-      ? polygon[0]
-      : [(polygon[0][0]+polygon[1][0])/2, (polygon[0][1]+polygon[1][1])/2];
-    const r = 30; // fallback radius
-    return (px-cx)**2 + (py-cy)**2 < r*r;
-  }
-  let inside = false;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const [xi, yi] = polygon[i];
-    const [xj, yj] = polygon[j];
-    if (((yi > py) !== (yj > py)) && px < (xj - xi) * (py - yi) / (yj - yi) + xi)
-      inside = !inside;
-  }
-  return inside;
-}
-
-/** Expand each hull vertex outward from the hull's centroid by `padding` units. */
-function expandHullPts(hull, padding) {
-  if (!hull?.length) return hull;
-  const cx = hull.reduce((s, p) => s + p[0], 0) / hull.length;
-  const cy = hull.reduce((s, p) => s + p[1], 0) / hull.length;
-  return hull.map(([x, y]) => {
-    const dx = x - cx, dy = y - cy, len = Math.sqrt(dx*dx + dy*dy) || 1;
-    return [x + dx/len * padding, y + dy/len * padding];
-  });
-}
 
 // ── Canvas helpers ──────────────────────────────────────────────────────────────
 
