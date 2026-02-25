@@ -621,21 +621,24 @@ export default function Explore() {
           ⚙ Config <span style={{ opacity:0.6, fontSize:10 }}>{configOpen ? "▴" : "▾"}</span>
         </button>
 
-        {/* Dropdown panel */}
-        {configOpen && (
-          <div ref={configCardRef} className="card" style={{
-            position:"absolute", top:"calc(100% + 6px)", left:0, zIndex:20,
-            width:360, maxHeight:"calc(100vh - 100px)", overflowY:"auto",
-            padding:"16px 20px", boxShadow:"0 4px 24px rgba(0,0,0,0.6)",
-          }}>
-            {configContent}
-            {selectedNode && <>
-              <div style={{ borderTop:"1px solid var(--border)", margin:"12px 0 8px" }}/>
-              <GraphNodeDetails node={selectedNode} measures={measures}
-                types={stableFilteredData?.measure_types || {}}/>
-            </>}
-          </div>
-        )}
+        {/* Dropdown panel — always in DOM; fades in/out via opacity so CSS
+            transitions work on both open and close. pointer-events:none while
+            invisible prevents accidental interaction. */}
+        <div ref={configCardRef} className="card" style={{
+          position:"absolute", top:"calc(100% + 6px)", left:0, zIndex:20,
+          width:360, maxHeight:"calc(100vh - 100px)", overflowY:"auto",
+          padding:"16px 20px", boxShadow:"0 4px 24px rgba(0,0,0,0.6)",
+          opacity:         configOpen ? 1 : 0,
+          pointerEvents:   configOpen ? "auto" : "none",
+          transition:      "opacity 0.35s ease",
+        }}>
+          {configContent}
+          {selectedNode && <>
+            <div style={{ borderTop:"1px solid var(--border)", margin:"12px 0 8px" }}/>
+            <GraphNodeDetails node={selectedNode} measures={measures}
+              types={stableFilteredData?.measure_types || {}}/>
+          </>}
+        </div>
       </div>
     </div>
   );
