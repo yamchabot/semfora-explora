@@ -6,7 +6,7 @@ import { parseBucketedDim, dimDisplayLabel } from "../../utils/dimUtils.js";
 
 // ── DimChip ────────────────────────────────────────────────────────────────────
 
-export function DimChip({ label, index, onRemove, onChangeMode, dragHandleProps }) {
+export function DimChip({ label, index, onRemove, onChangeMode, dragHandleProps, enabled = true, onToggle }) {
   const [open, setOpen] = useState(false);
   const ref             = useRef(null);
   const bucketed        = parseBucketedDim(label);
@@ -21,17 +21,34 @@ export function DimChip({ label, index, onRemove, onChangeMode, dragHandleProps 
     ? (BUCKET_FIELDS_META[bucketed.field] ?? bucketed.field)
     : dimDisplayLabel(label);
 
+  const chipBg     = enabled ? "var(--blue-bg)"    : "var(--bg3)";
+  const chipBorder = enabled ? "var(--blue)"        : "var(--border2)";
+  const badgeBg    = enabled ? "var(--blue)"        : "var(--text3)";
+  const textColor  = enabled ? "var(--text)"        : "var(--text3)";
+
   return (
-    <div ref={ref} style={{ display:"flex", alignItems:"center", gap:0, background:"var(--blue-bg)", border:"1px solid var(--blue)", borderRadius:6, position:"relative" }}>
+    <div ref={ref} style={{ display:"flex", alignItems:"center", gap:0,
+      background:chipBg, border:`1px solid ${chipBorder}`, borderRadius:6,
+      position:"relative", opacity: enabled ? 1 : 0.65 }}>
       <span
         {...dragHandleProps}
-        style={{ color:"var(--blue)", fontSize:11, cursor:"grab", lineHeight:1, padding:"3px 3px 3px 4px", touchAction:"none" }}
+        style={{ color: enabled ? "var(--blue)" : "var(--text3)", fontSize:11,
+          cursor:"grab", lineHeight:1, padding:"3px 3px 3px 4px", touchAction:"none" }}
         title="Drag to reorder"
       >⠿</span>
 
-      <span style={{ background:"var(--blue)", color:"#fff", borderRadius:"50%", width:16, height:16, display:"flex", alignItems:"center", justifyContent:"center", fontSize:9, fontWeight:700, flexShrink:0, margin:"0 4px" }}>{index+1}</span>
+      <span style={{ background:badgeBg, color:"#fff", borderRadius:"50%", width:16, height:16,
+        display:"flex", alignItems:"center", justifyContent:"center",
+        fontSize:9, fontWeight:700, flexShrink:0, margin:"0 4px" }}>{index+1}</span>
 
-      <span style={{ fontFamily:"monospace", fontSize:12, color:"var(--text)", padding:"3px 0" }}>{displayLabel}</span>
+      {/* Click the label to toggle enabled/disabled */}
+      <span
+        onClick={onToggle}
+        title={onToggle ? (enabled ? "Click to disable (keeps dim in list)" : "Click to enable") : undefined}
+        style={{ fontFamily:"monospace", fontSize:12, color:textColor, padding:"3px 0",
+          cursor: onToggle ? "pointer" : "default",
+          textDecoration: enabled ? "none" : "line-through" }}
+      >{displayLabel}</span>
 
       {bucketed && (
         <button
@@ -75,7 +92,7 @@ export function DimChip({ label, index, onRemove, onChangeMode, dragHandleProps 
 
 // ── SortableDimChip ────────────────────────────────────────────────────────────
 
-export function SortableDimChip({ id, label, index, onRemove, onChangeMode }) {
+export function SortableDimChip({ id, label, index, onRemove, onChangeMode, enabled = true, onToggle }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id });
   return (
@@ -95,6 +112,8 @@ export function SortableDimChip({ id, label, index, onRemove, onChangeMode }) {
         onRemove={onRemove}
         onChangeMode={onChangeMode}
         dragHandleProps={{ ...attributes, ...listeners }}
+        enabled={enabled}
+        onToggle={onToggle}
       />
     </div>
   );

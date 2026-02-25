@@ -36,6 +36,7 @@ import {
 import { FilterChip, AddFilterMenu }      from "../components/explore/FilterControls.jsx";
 import { SortableMeasureChip, AddMeasureMenu } from "../components/explore/MeasureControls.jsx";
 import { SortableDimChip, AddDimMenu }    from "../components/explore/DimControls.jsx";
+import { FilterWizard }                   from "../components/explore/FilterWizard.jsx";
 import { KindFilter }                     from "../components/explore/KindFilter.jsx";
 import { PivotTable }                     from "../components/explore/PivotTable.jsx";
 import { GraphNodeDetails }               from "../components/explore/GraphNodeDetails.jsx";
@@ -78,6 +79,24 @@ export default function Explore() {
   const [hideIsolated, setHideIsolated] = useState(() => searchParams.get("hi") === "1");
   const [nodeDot,      setNodeDot]      = useState(() => searchParams.get("nd") === "1");
   const [invertFlow,   setInvertFlow]   = useState(() => searchParams.get("rf") === "1");
+
+  // ── Dim toggle: disabled dims stay in the list but are excluded from queries ─
+  const [disabledDims, setDisabledDims] = useState(() => {
+    const dd = searchParams.get("dd");
+    return dd ? new Set(dd.split(",").filter(Boolean)) : new Set();
+  });
+  function toggleDisableDim(d) {
+    setDisabledDims(prev => {
+      const next = new Set(prev);
+      if (next.has(d)) next.delete(d); else next.add(d);
+      return next;
+    });
+  }
+
+  // ── Size guard + filter wizard ────────────────────────────────────────────
+  const GRAPH_HARD_LIMIT  = 500;  // block rendering above this
+  const [renderAnyway, setRenderAnyway] = useState(false);
+  const [wizardOpen,   setWizardOpen]   = useState(false);
 
   // ── Compare / diff overlay ───────────────────────────────────────────────
   const [compareRepo, setCompareRepo] = useState(() => searchParams.get("cmp") || "");
@@ -141,6 +160,7 @@ export default function Explore() {
     p.set("r", repoId);
     p.set("v", renderer);
     if (dims.length)                p.set("d", dims.join(","));
+    if (disabledDims.size > 0)      p.set("dd", [...disabledDims].join(","));
     p.set("m", measures.map(measureStr).join(","));
     if (kinds.length)               p.set("k", kinds.join(","));
     if (filters.length)             p.set("f", JSON.stringify(filters));
@@ -155,7 +175,7 @@ export default function Explore() {
     if (invertFlow)                 p.set("rf",   "1");
     if (compareRepo)                p.set("cmp",  compareRepo);
     setSearchParams(p, { replace: true });
-  }, [repoId, renderer, dims, measures, kinds, filters, // eslint-disable-line react-hooks/exhaustive-deps
+  }, [repoId, renderer, dims, disabledDims, measures, kinds, filters, // eslint-disable-line react-hooks/exhaustive-deps
       minWeight, topK, colorKeyOverride, fanOutDepth, selectedNodeIds, hideIsolated,
       nodeDot, invertFlow, compareRepo]);
 
@@ -174,10 +194,11 @@ export default function Explore() {
   });
   const serverDimValues = dimValuesQuery.data?.dims || {};
 
-  // When no dims selected, fall back to symbol grain (one row per node)
-  const effectiveDims = dims.length === 0 ? ["symbol"] : dims;
+  // When no dims selected (or all disabled), fall back to symbol grain
+  const activeDimsList = dims.filter(d => !disabledDims.has(d));
+  const effectiveDims  = activeDimsList.length === 0 ? ["symbol"] : activeDimsList;
   // symbolMode: zero-dim fallback OR explicit single symbol dim — both use the grain path
-  const symbolMode    = effectiveDims.length === 1 && effectiveDims[0] === "symbol";
+  const symbolMode     = effectiveDims.length === 1 && effectiveDims[0] === "symbol";
 
   const measuresStr = measures.map(measureStr).join(",");
   const kindsStr    = kinds.join(",");
@@ -296,11 +317,35 @@ export default function Explore() {
     return out;
   }, [serverDimValues, pivotQuery.data, dims]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Estimated node count — leaf rows in the pivot tree = graph nodes.
+  const estimatedNodeCount = useMemo(() => {
+    if (!filteredData) return 0;
+    return flattenLeafRows(filteredData.rows ?? []).length;
+  }, [filteredData]);
+
+  // When data changes to a bigger set, revoke "render anyway" so the guard fires again.
+  useEffect(() => {
+    if (estimatedNodeCount <= GRAPH_HARD_LIMIT) setRenderAnyway(false);
+  }, [estimatedNodeCount]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Escape: close wizard / clear wizard-forced state
+  useEffect(() => {
+    function handler(e) {
+      if (e.key === "Escape") setWizardOpen(false);
+    }
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, []);
+
   // Keep GraphRenderer mounted through loading cycles so local selection state
   // (selectedNodeIds) survives measure/kind changes that temporarily null filteredData.
   const lastFilteredDataRef = useRef(null);
   if (filteredData) lastFilteredDataRef.current = filteredData;
   const stableFilteredData = lastFilteredDataRef.current; // non-null after first successful fetch
+
+  function newId() { return Math.random().toString(36).slice(2, 9); }
+
+  function handleAddFilter(f) { setFilters(p => [...p, { ...f, id: f.id ?? newId() }]); }
 
   function addMeasure(m) {
     if (m.special && measures.find(x => x.special === m.special)) return; // no duplicate specials
@@ -363,8 +408,10 @@ export default function Explore() {
           <SortableContext items={dims} strategy={horizontalListSortingStrategy}>
             {dims.map((d,i) => (
               <SortableDimChip key={d} id={d} label={d} index={i}
-                onRemove={() => setDims(p => p.filter(x => x !== d))}
-                onChangeMode={newDim => changeDimMode(d, newDim)}/>
+                onRemove={() => { setDims(p => p.filter(x => x !== d)); setDisabledDims(p => { const n = new Set(p); n.delete(d); return n; }); }}
+                onChangeMode={newDim => changeDimMode(d, newDim)}
+                enabled={!disabledDims.has(d)}
+                onToggle={() => toggleDisableDim(d)}/>
             ))}
           </SortableContext>
         </DndContext>
@@ -408,7 +455,13 @@ export default function Explore() {
             onRemove={() => setFilters(p => p.filter(x => x.id !== f.id))}/>
         ))}
         <AddFilterMenu dims={allDims} measures={renderer !== "nodes" ? measures : []}
-          onAdd={f => setFilters(p => [...p, f])}/>
+          onAdd={handleAddFilter}/>
+        <button
+          className="btn btn-sm btn-ghost"
+          onClick={() => setWizardOpen(true)}
+          title="Open filter wizard — quickly focus on a subset of the graph"
+          style={{ fontSize:12 }}
+        >✦ Wizard</button>
       </div>
     </div>
   </>);
@@ -428,8 +481,38 @@ export default function Explore() {
       {pivotQuery.error && (
         <div className="error" style={{ margin:40 }}>{pivotQuery.error.message}</div>
       )}
+      {/* Size guard — shown instead of graph when node count exceeds the limit */}
+      {stableFilteredData && estimatedNodeCount > GRAPH_HARD_LIMIT && !renderAnyway && (
+        <div style={{ position:"absolute", inset:0, zIndex:15, display:"flex",
+          alignItems:"center", justifyContent:"center",
+          background:"rgba(13,17,23,0.92)" }}>
+          <div className="card" style={{ padding:"28px 32px", maxWidth:400, textAlign:"center" }}>
+            <div style={{ fontSize:32, marginBottom:8 }}>⚠</div>
+            <div style={{ fontSize:16, fontWeight:700, marginBottom:8 }}>
+              Large graph: {estimatedNodeCount.toLocaleString()} nodes
+            </div>
+            <div style={{ fontSize:13, color:"var(--text3)", marginBottom:20, lineHeight:1.6 }}>
+              Rendering this many nodes may be slow or unresponsive.
+              Use the wizard to focus on the part you&apos;re interested in.
+            </div>
+            <div style={{ display:"flex", gap:10, justifyContent:"center" }}>
+              <button className="btn btn-sm" onClick={() => setWizardOpen(true)}>
+                ✦ Open Filter Wizard
+              </button>
+              <button
+                className="btn btn-sm btn-ghost"
+                onClick={() => setRenderAnyway(true)}
+                title="Render without filtering — may be slow"
+              >
+                Render anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Graph renderer — always uses explore data; diff status overlaid as node colors */}
-      {stableFilteredData && (
+      {stableFilteredData && (estimatedNodeCount <= GRAPH_HARD_LIMIT || renderAnyway) && (
         <GraphRenderer
           data={stableFilteredData} measures={measures} onNodeClick={setSelectedNode}
           minWeight={minWeight}               setMinWeight={setMinWeight}
@@ -443,6 +526,7 @@ export default function Explore() {
           highlightSet={highlightSet}
           edgeColorOverrides={diffEdgeOverrides}
           controlsH={0} fillViewport={true}
+          onAddFilter={handleAddFilter}
         />
       )}
       {/* Diff legend — bottom-right, only shown when compare is active */}
@@ -477,6 +561,27 @@ export default function Explore() {
           </div>
         </div>
       )}
+
+      {/* Filter Wizard modal */}
+      <FilterWizard
+        isOpen={wizardOpen}
+        onClose={() => setWizardOpen(false)}
+        forced={false}
+        nodeCount={estimatedNodeCount}
+        allDims={allDims}
+        activeDims={dims}
+        disabledDims={disabledDims}
+        dimValues={dimValues}
+        availableKinds={availableKinds}
+        activeKinds={kinds}
+        filters={filters}
+        onToggleDim={d => setDims(p => p.includes(d) ? p.filter(x => x !== d) : [...p, d])}
+        onToggleDisableDim={toggleDisableDim}
+        onAddFilter={handleAddFilter}
+        onUpdateFilter={updated => setFilters(p => p.map(x => x.id === updated.id ? updated : x))}
+        onRemoveFilter={id => setFilters(p => p.filter(x => x.id !== id))}
+        onSetKinds={setKinds}
+      />
 
       {/* Collapsible config dropdown — top-left, opens on hover, auto-closes 5s after mouse leaves */}
       <div

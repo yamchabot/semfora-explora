@@ -323,7 +323,7 @@ export function makeChainCentroidForce(selectedIds, chainIds) {
 
 // ── GraphRenderer ──────────────────────────────────────────────────────────────
 
-export default function GraphRenderer({ data, measures, onNodeClick,
+export default function GraphRenderer({ data, measures, onNodeClick, onAddFilter,
   minWeight, setMinWeight, topK, setTopK,
   colorKeyOverride, setColorKeyOverride, fanOutDepth, setFanOutDepth,
   selectedNodeIds, setSelectedNodeIds, hideIsolated, setHideIsolated,
@@ -872,6 +872,11 @@ export default function GraphRenderer({ data, measures, onNodeClick,
       // Ignore keystrokes when focus is inside an input/textarea/select
       const tag = document.activeElement?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (e.key === "Escape") {
+        setSelectedNodeIds(new Set());
+        setSelectedBlob(null);
+        setShowSearch(false);
+      }
       if (e.key === "/" ) { e.preventDefault(); setShowSearch(true); }
       if ((e.metaKey || e.ctrlKey) && e.key === "k") { e.preventDefault(); setShowSearch(true); }
     };
@@ -995,6 +1000,24 @@ export default function GraphRenderer({ data, measures, onNodeClick,
               {selectedBlob.level > 0 && <span style={{ color:"var(--text3)", fontWeight:400 }}> (inner)</span>}
               {" — "}{blobCrossEdges.size} cross-boundary edge{blobCrossEdges.size !== 1 ? "s" : ""}
             </span>
+            {onAddFilter && data?.dimensions?.[selectedBlob.level] && (
+              <button
+                title={`Exclude ${selectedBlob.key.split("::").at(-1)} from graph`}
+                onClick={() => {
+                  onAddFilter({
+                    kind: "dim",
+                    field: data.dimensions[selectedBlob.level],
+                    mode: "exclude",
+                    values: [selectedBlob.key.split("::").at(-1)],
+                    pattern: "",
+                  });
+                  setSelectedBlob(null);
+                }}
+                style={{ fontSize:11, padding:"2px 7px", background:"#f8514922",
+                  border:"1px solid #f85149", borderRadius:4,
+                  color:"#f85149", cursor:"pointer" }}
+              >− exclude</button>
+            )}
             <button
               onClick={() => setSelectedBlob(null)}
               style={{ fontSize:11, padding:"2px 7px", background:"var(--bg3)",
