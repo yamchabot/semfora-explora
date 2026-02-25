@@ -1563,15 +1563,21 @@ export default function GraphRenderer({ data, measures, onNodeClick, onAddFilter
                 // because D3-wrapped events sometimes lose modifier key state.
                 // Use fgRef.current.screen2GraphCoords for reliable coord conversion.
                 if ((altKeyHeldRef.current || event?.altKey) && graphData.isBlobMode) {
-                  const fg = fgRef.current;
+                  const fg   = fgRef.current;
+                  // screen2GraphCoords expects CANVAS-relative coordinates (not viewport).
+                  // event.clientX/Y are viewport coords; subtract the canvas element's
+                  // bounding rect to get canvas-relative coords first.
+                  // Without this subtraction the error is canvasRect.left / k, which
+                  // scales up as the user zooms out — producing the "wrong blob to the
+                  // right" symptom.
+                  const rect   = event.target?.getBoundingClientRect?.() ?? { left:0, top:0 };
+                  const canvasX = event.clientX - rect.left;
+                  const canvasY = event.clientY - rect.top;
                   const coords = fg?.screen2GraphCoords
-                    ? fg.screen2GraphCoords(event.clientX, event.clientY)
+                    ? fg.screen2GraphCoords(canvasX, canvasY)
                     : (() => {
-                        // Fallback: manual conversion using stored zoom transform
                         const { k, x: tx, y: ty } = zoomTransformRef.current;
-                        const rect = event.target?.getBoundingClientRect?.() ?? { left:0, top:0 };
-                        return { x: (event.clientX - rect.left - tx) / k,
-                                 y: (event.clientY - rect.top  - ty) / k };
+                        return { x: (canvasX - tx) / k, y: (canvasY - ty) / k };
                       })();
                   const gx = coords.x, gy = coords.y;
 
