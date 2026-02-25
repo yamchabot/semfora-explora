@@ -5,7 +5,7 @@ import { KIND_PALETTE } from "../../utils/exploreConstants.js";
  * Horizontal row of kind toggle buttons.
  * kinds=[] means ALL selected (no filter). Active = included.
  */
-export function KindFilter({ availableKinds, kinds, onChange }) {
+export function KindFilter({ availableKinds, kinds, onChange, hideTests = false, onToggleHideTests }) {
   const allActive = kinds.length === 0;
   const colorMap  = useRef(new Map());
 
@@ -48,6 +48,22 @@ export function KindFilter({ availableKinds, kinds, onChange }) {
           }}>{k}</button>
         );
       })}
+      {onToggleHideTests && (
+        <>
+          <span style={{ color:"var(--border2)", fontSize:12, margin:"0 2px" }}>│</span>
+          <button
+            onClick={onToggleHideTests}
+            title="Hide nodes whose name matches test/spec/e2e/mock patterns"
+            style={{
+              padding:"3px 10px", fontSize:11, borderRadius:6, cursor:"pointer", border:"none",
+              background: hideTests ? "#e3b34122" : "var(--bg3)",
+              color:      hideTests ? "#e3b341"   : "var(--text3)",
+              outline:    hideTests ? "1px solid #e3b341" : "1px solid var(--border)",
+              transition: "all 0.1s",
+            }}
+          >🧪 {hideTests ? "tests hidden" : "hide tests"}</button>
+        </>
+      )}
     </div>
   );
 }

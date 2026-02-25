@@ -351,6 +351,8 @@ export default function GraphRenderer({ data, measures, onNodeClick, onAddFilter
   // { keys: Set<string>, level: number } | null
   // Multiple blobs at the same level can be selected; clicking a different level resets.
   const [selectedBlob, setSelectedBlob] = useState(null);
+  const selectedBlobRef = useRef(null); // mirrors selectedBlob for use in event handlers
+  useEffect(() => { selectedBlobRef.current = selectedBlob; }, [selectedBlob]);
   // nodeDot and setNodeDot come in as props (URL-persisted in Explore.jsx)
   // Spread: scales charge repulsion and link distance together.
   // 350 = default; higher = more spread; lower = tighter.
@@ -878,6 +880,15 @@ export default function GraphRenderer({ data, measures, onNodeClick, onAddFilter
         setSelectedBlob(null);
         setShowSearch(false);
       }
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedBlobRef.current) {
+        const blob     = selectedBlobRef.current;
+        const dimField = data?.dimensions?.[blob.level];
+        if (onAddFilter && dimField) {
+          const leafNames = [...blob.keys].map(k => k.split("::").at(-1));
+          onAddFilter({ kind: "dim", field: dimField, mode: "exclude", values: leafNames, pattern: "" });
+        }
+        setSelectedBlob(null);
+      }
       if (e.key === "/" ) { e.preventDefault(); setShowSearch(true); }
       if ((e.metaKey || e.ctrlKey) && e.key === "k") { e.preventDefault(); setShowSearch(true); }
     };
@@ -1007,21 +1018,8 @@ export default function GraphRenderer({ data, measures, onNodeClick, onAddFilter
                 {selectedBlob.level > 0 && <span style={{ color:"var(--text3)", fontWeight:400 }}> (inner)</span>}
                 {" — "}{blobCrossEdges.size} cross-boundary edge{blobCrossEdges.size !== 1 ? "s" : ""}
               </span>
-              {onAddFilter && dimField && (
-                <button
-                  title={`Exclude ${leafNames.join(", ")} from graph`}
-                  onClick={() => {
-                    onAddFilter({
-                      kind: "dim", field: dimField, mode: "exclude",
-                      values: leafNames, pattern: "",
-                    });
-                    setSelectedBlob(null);
-                  }}
-                  style={{ fontSize:11, padding:"2px 7px", background:"#f8514922",
-                    border:"1px solid #f85149", borderRadius:4,
-                    color:"#f85149", cursor:"pointer" }}
-                >− exclude{selectedBlob.keys.size > 1 ? ` all (${selectedBlob.keys.size})` : ""}</button>
-              )}
+              <span style={{ fontSize:10, color:"var(--text3)" }}
+                title="Press Delete or Backspace to exclude from graph">⌫ to exclude</span>
               <button
                 onClick={() => setSelectedBlob(null)}
                 style={{ fontSize:11, padding:"2px 7px", background:"var(--bg3)",

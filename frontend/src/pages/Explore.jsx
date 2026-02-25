@@ -79,6 +79,7 @@ export default function Explore() {
   const [hideIsolated, setHideIsolated] = useState(() => searchParams.get("hi") === "1");
   const [nodeDot,      setNodeDot]      = useState(() => searchParams.get("nd") === "1");
   const [invertFlow,   setInvertFlow]   = useState(() => searchParams.get("rf") === "1");
+  const [hideTests,    setHideTests]    = useState(() => searchParams.get("ht") === "1");
 
   // ── Dim toggle: disabled dims stay in the list but are excluded from queries ─
   const [disabledDims, setDisabledDims] = useState(() => {
@@ -173,11 +174,12 @@ export default function Explore() {
     if (hideIsolated)               p.set("hi",   "1");
     if (nodeDot)                    p.set("nd",   "1");
     if (invertFlow)                 p.set("rf",   "1");
+    if (hideTests)                  p.set("ht",   "1");
     if (compareRepo)                p.set("cmp",  compareRepo);
     setSearchParams(p, { replace: true });
   }, [repoId, renderer, dims, disabledDims, measures, kinds, filters, // eslint-disable-line react-hooks/exhaustive-deps
       minWeight, topK, colorKeyOverride, fanOutDepth, selectedNodeIds, hideIsolated,
-      nodeDot, invertFlow, compareRepo]);
+      nodeDot, invertFlow, hideTests, compareRepo]);
 
   // Always load available kinds for the selected repo
   const kindsQuery = useQuery({
@@ -225,13 +227,30 @@ export default function Explore() {
     return g;
   }, [allRepos]);
 
+  // Test-node pattern: catches test/spec/e2e/mock files and functions.
+  // Checked against every key value in the row so it works regardless of active dims.
+  const TEST_PATTERN = /\b(tests?|spec[s.]|e2e|mock[s]?|stub[s]?|fixture[s]?)\b|__tests__|[._/-]test[._/-]|[._/-]spec[._/-]/i;
+  function filterTestRows(rows) {
+    return rows.flatMap(row => {
+      const isTest = Object.values(row.key ?? {}).some(v => TEST_PATTERN.test(String(v)));
+      if (isTest) return [];
+      if (row.children?.length) {
+        const kept = filterTestRows(row.children);
+        return kept.length > 0 ? [{ ...row, children: kept }] : [];
+      }
+      return [row];
+    });
+  }
+
   // Apply client-side filters on top of pivot results
   // Declared here (before diff memos) to avoid TDZ in production builds.
   const filteredData = useMemo(() => {
     if (!pivotQuery.data) return null;
-    if (!filters.length)  return pivotQuery.data;
-    return { ...pivotQuery.data, rows: applyFilters(pivotQuery.data.rows, filters) };
-  }, [pivotQuery.data, filters]);
+    let data = pivotQuery.data;
+    if (filters.length) data = { ...data, rows: applyFilters(data.rows, filters) };
+    if (hideTests)      data = { ...data, rows: filterTestRows(data.rows) };
+    return data;
+  }, [pivotQuery.data, filters, hideTests]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Diff overlay — driven by diff_status_value measure in pivot rows ────────
   // When compareRepo is set, the explore endpoint annotates rows with
@@ -421,7 +440,8 @@ export default function Explore() {
     )}
     <div style={{ marginBottom:12 }}>
       {availableKinds.length > 0
-        ? <KindFilter availableKinds={availableKinds} kinds={kinds} onChange={setKinds}/>
+        ? <KindFilter availableKinds={availableKinds} kinds={kinds} onChange={setKinds}
+            hideTests={hideTests} onToggleHideTests={() => setHideTests(v => !v)}/>
         : <div style={{ display:"flex", alignItems:"center", gap:8 }}>
             <span style={{ fontSize:11, fontWeight:600, color:"var(--text3)", textTransform:"uppercase", letterSpacing:"0.08em", width:80 }}>Kind filter</span>
             <span style={{ fontSize:11, color:"var(--text3)" }}>{kindsQuery.isLoading ? "loading…" : "no kinds found"}</span>
