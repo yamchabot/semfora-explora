@@ -348,7 +348,8 @@ export default function GraphRenderer({ data, measures, onNodeClick, onAddFilter
   // When true, the graph only shows cross-boundary nodes + edges (no non-coupling nodes).
   const [couplingOnly, setCouplingOnly] = useState(false);
   // Blob selection: alt+click a node to select its containing blob (outer or inner).
-  // { key: string (getGroupKey result), level: number } | null
+  // { keys: Set<string>, level: number } | null
+  // Multiple blobs at the same level can be selected; clicking a different level resets.
   const [selectedBlob, setSelectedBlob] = useState(null);
   // nodeDot and setNodeDot come in as props (URL-persisted in Explore.jsx)
   // Spread: scales charge repulsion and link distance together.
@@ -591,7 +592,7 @@ export default function GraphRenderer({ data, measures, onNodeClick, onAddFilter
     if (!selectedBlob || !graphData.isBlobMode) return new Set();
     return new Set(
       graphData.nodes
-        .filter(n => getGroupKey(n, selectedBlob.level) === selectedBlob.key)
+        .filter(n => selectedBlob.keys.has(getGroupKey(n, selectedBlob.level)))
         .map(n => n.id)
     );
   }, [selectedBlob, graphData]);
@@ -993,39 +994,43 @@ export default function GraphRenderer({ data, measures, onNodeClick, onAddFilter
             >clear</button>
           </span>
         )}
-        {selectedBlob && (
-          <span style={{ display:"flex", alignItems:"center", gap:6 }}>
-            <span style={{ fontSize:11, color:"#a371f7", fontWeight:600 }}>
-              🫧 {selectedBlob.key.split("::").at(-1)}
-              {selectedBlob.level > 0 && <span style={{ color:"var(--text3)", fontWeight:400 }}> (inner)</span>}
-              {" — "}{blobCrossEdges.size} cross-boundary edge{blobCrossEdges.size !== 1 ? "s" : ""}
-            </span>
-            {onAddFilter && data?.dimensions?.[selectedBlob.level] && (
+        {selectedBlob && (() => {
+          const leafNames  = [...selectedBlob.keys].map(k => k.split("::").at(-1));
+          const nameLabel  = leafNames.length <= 2
+            ? leafNames.join(", ")
+            : `${leafNames.slice(0,2).join(", ")} +${leafNames.length - 2} more`;
+          const dimField   = data?.dimensions?.[selectedBlob.level];
+          return (
+            <span style={{ display:"flex", alignItems:"center", gap:6 }}>
+              <span style={{ fontSize:11, color:"#a371f7", fontWeight:600 }}>
+                🫧 {nameLabel}
+                {selectedBlob.level > 0 && <span style={{ color:"var(--text3)", fontWeight:400 }}> (inner)</span>}
+                {" — "}{blobCrossEdges.size} cross-boundary edge{blobCrossEdges.size !== 1 ? "s" : ""}
+              </span>
+              {onAddFilter && dimField && (
+                <button
+                  title={`Exclude ${leafNames.join(", ")} from graph`}
+                  onClick={() => {
+                    onAddFilter({
+                      kind: "dim", field: dimField, mode: "exclude",
+                      values: leafNames, pattern: "",
+                    });
+                    setSelectedBlob(null);
+                  }}
+                  style={{ fontSize:11, padding:"2px 7px", background:"#f8514922",
+                    border:"1px solid #f85149", borderRadius:4,
+                    color:"#f85149", cursor:"pointer" }}
+                >− exclude{selectedBlob.keys.size > 1 ? ` all (${selectedBlob.keys.size})` : ""}</button>
+              )}
               <button
-                title={`Exclude ${selectedBlob.key.split("::").at(-1)} from graph`}
-                onClick={() => {
-                  onAddFilter({
-                    kind: "dim",
-                    field: data.dimensions[selectedBlob.level],
-                    mode: "exclude",
-                    values: [selectedBlob.key.split("::").at(-1)],
-                    pattern: "",
-                  });
-                  setSelectedBlob(null);
-                }}
-                style={{ fontSize:11, padding:"2px 7px", background:"#f8514922",
-                  border:"1px solid #f85149", borderRadius:4,
-                  color:"#f85149", cursor:"pointer" }}
-              >− exclude</button>
-            )}
-            <button
-              onClick={() => setSelectedBlob(null)}
-              style={{ fontSize:11, padding:"2px 7px", background:"var(--bg3)",
-                border:"1px solid var(--border2)", borderRadius:4,
-                color:"var(--text2)", cursor:"pointer" }}
-            >clear</button>
-          </span>
-        )}
+                onClick={() => setSelectedBlob(null)}
+                style={{ fontSize:11, padding:"2px 7px", background:"var(--bg3)",
+                  border:"1px solid var(--border2)", borderRadius:4,
+                  color:"var(--text2)", cursor:"pointer" }}
+              >clear</button>
+            </span>
+          );
+        })()}
         {/* ── Icon-only quick toggles ─────────────────────────────────────── */}
         {/* Each button is a single icon; full description lives in the tooltip. */}
         <Tooltip tip={hideIsolated ? "Show all nodes (isolated nodes hidden)" : "Hide isolated nodes — no edges in or out"}>
@@ -1190,7 +1195,7 @@ export default function GraphRenderer({ data, measures, onNodeClick, onAddFilter
                     const base     = groupColorMap.get(outerKey) || "#888888";
 
                     const hull = pts.length >= 3 ? convexHull(pts) : pts.map(p => [...p]);
-                    const isBlobSelected  = selectedBlob?.level === L && gk === selectedBlob?.key;
+                    const isBlobSelected  = selectedBlob?.level === L && selectedBlob.keys.has(gk);
                     const blobDimmed      = selectedBlob != null && !isBlobSelected;
                     ctx.globalAlpha = blobDimmed ? 0.25 : 1.0;
                     drawBlob(ctx, hull, padding, lineWidth, base, isBlobSelected);
@@ -1480,15 +1485,26 @@ export default function GraphRenderer({ data, measures, onNodeClick, onAddFilter
                 if (!id) return;
 
                 if (event?.altKey && graphData.isBlobMode) {
-                  // Alt+click → select outer blob; Shift+Alt+click → innermost sub-blob
+                  // Alt+click → select outer blob; Shift+Alt+click → innermost sub-blob.
+                  // Multiple blobs at the same level can be selected by alt+clicking each.
                   const maxLevel = Math.max(0, blobLevelCount - 1);
                   const level    = (event?.shiftKey && maxLevel > 0) ? maxLevel : 0;
                   const key      = getGroupKey(node, level);
                   if (key) {
-                    // Toggle: alt+clicking the already-selected blob deselects it
-                    setSelectedBlob(prev =>
-                      prev?.key === key && prev?.level === level ? null : { key, level }
-                    );
+                    setSelectedBlob(prev => {
+                      if (!prev || prev.level !== level) {
+                        // First click or different level → start fresh with just this blob
+                        return { keys: new Set([key]), level };
+                      }
+                      // Same level → toggle this blob in/out of the selection
+                      const next = new Set(prev.keys);
+                      if (next.has(key)) {
+                        next.delete(key);
+                        return next.size === 0 ? null : { keys: next, level };
+                      }
+                      next.add(key);
+                      return { keys: next, level };
+                    });
                     setSelectedNodeIds(new Set()); // blob selection clears node selection
                     return;
                   }
