@@ -21,6 +21,25 @@ from routers import (
 
 app = FastAPI(title="Semfora Explora API", version="0.2.0")
 
+import sqlite3 as _sqlite3
+
+@app.exception_handler(_sqlite3.DatabaseError)
+async def _db_error_handler(request: Request, exc: _sqlite3.DatabaseError):
+    msg = str(exc)
+    if "malformed" in msg or "disk image" in msg:
+        detail = (
+            "This database is corrupted (SQLite B-tree integrity failure). "
+            "Re-export the repo: semfora-engine query callgraph --export data/<repo>.db"
+        )
+        status = 422
+    elif "no such table" in msg:
+        detail = f"Database is missing expected table ({msg}). The repo may need re-export or enrichment."
+        status = 422
+    else:
+        detail = f"Database error: {msg}"
+        status = 500
+    return JSONResponse(status_code=status, content={"error": "database_error", "detail": detail})
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

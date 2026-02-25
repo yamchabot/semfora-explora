@@ -61,8 +61,13 @@ export function NodeTable({ repoId, hasEnriched, kinds }) {
 
   return (
     <>
+      {data?.truncated && (
+        <div style={{ background:"var(--yellow-bg,#fffbe6)", border:"1px solid var(--yellow,#f5a623)", borderRadius:6, padding:"6px 12px", marginBottom:8, fontSize:12, color:"var(--text1)" }}>
+          ⚠️ Showing top {nodes.length} of <strong>{(data.total_count ?? total).toLocaleString()}</strong> nodes (sorted by {sortBy.replace("_", " ")}). Use Kind filter or add more dims to narrow the set.
+        </div>
+      )}
       <div style={{ fontSize:12, color:"var(--text2)", marginBottom:10 }}>
-        Showing {nodes.length} of {total} nodes
+        Showing {nodes.length} of {(data?.total_count ?? total).toLocaleString()} nodes
         {kinds.length > 0 && <span style={{ marginLeft:8, color:"var(--blue)" }}>({kinds.join(", ")} only)</span>}
       </div>
       <div className="card" style={{ overflow:"auto" }}>

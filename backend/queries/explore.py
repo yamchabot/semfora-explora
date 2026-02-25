@@ -392,6 +392,7 @@ def _fetch_symbol_grain(
         )
         graph_edges = [dict(r) for r in conn.execute(esql, hashes + hashes).fetchall()]
 
+    truncated = len(rows_raw) >= _SYMBOL_LIMIT and total > _SYMBOL_LIMIT
     return {
         "rows":          rows,
         "dimensions":    ["symbol"],
@@ -400,6 +401,9 @@ def _fetch_symbol_grain(
         "has_enriched":  has_nf,
         "graph_edges":   graph_edges,
         "symbol_total":  total,
+        "truncated":     truncated,
+        "total_count":   total,
+        "shown_count":   len(rows),
     }
 
 
@@ -718,4 +722,8 @@ def fetch_nodes(
     total_sql   = f"SELECT COUNT(*) FROM nodes n WHERE n.hash NOT LIKE 'ext:%' {kc}"
     total       = conn.execute(total_sql, kp).fetchone()[0]
 
-    return {"nodes": nodes, "has_enriched": has_nf, "total": total}
+    truncated = len(nodes) >= limit and total > limit
+    return {
+        "nodes": nodes, "has_enriched": has_nf, "total": total,
+        "truncated": truncated, "total_count": total, "shown_count": len(nodes),
+    }

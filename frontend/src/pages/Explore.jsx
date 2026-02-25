@@ -657,9 +657,14 @@ export default function Explore() {
           {pivotQuery.isLoading && <div className="loading">Computing…</div>}
           {pivotQuery.error    && <div className="error">{pivotQuery.error.message}</div>}
           {filteredData && <>
+            {pivotQuery.data?.truncated && (
+              <div style={{ background:"var(--yellow-bg,#fffbe6)", border:"1px solid var(--yellow,#f5a623)", borderRadius:6, padding:"6px 12px", marginBottom:8, fontSize:12 }}>
+                ⚠️ Showing top <strong>{pivotQuery.data.shown_count?.toLocaleString()}</strong> of <strong>{pivotQuery.data.total_count?.toLocaleString()}</strong> symbols (by caller count). Use Kind filter or add a Group By dim to see the full set.
+              </div>
+            )}
             <div style={{ fontSize:12, color:"var(--text2)", marginBottom:10 }}>
               {symbolMode
-                ? <>{filteredData.rows.length}{pivotQuery.data.symbol_total > filteredData.rows.length && ` of ${pivotQuery.data.symbol_total}`} symbols{pivotQuery.data.symbol_total > 500 && <span style={{ color:"var(--text3)", marginLeft:4 }}>(top {filteredData.rows.length} by caller count)</span>}</>
+                ? <>{filteredData.rows.length.toLocaleString()}{pivotQuery.data.total_count > filteredData.rows.length && ` of ${pivotQuery.data.total_count.toLocaleString()}`} symbols</>
                 : <>{filteredData.rows.length}{pivotQuery.data.rows.length !== filteredData.rows.length && ` of ${pivotQuery.data.rows.length}`} groups{effectiveDims.length>1&&` · click ▶ to drill into ${effectiveDims[1]}`}</>
               }
               {kinds.length>0&&<span style={{ marginLeft:6 }}>· kind: {kinds.join(", ")}</span>}

@@ -2,7 +2,11 @@ const BASE = "/api";
 
 async function get(path) {
   const res = await fetch(`${BASE}${path}`);
-  if (!res.ok) throw new Error(`API error ${res.status}: ${path}`);
+  if (!res.ok) {
+    let detail = `API error ${res.status}`;
+    try { const j = await res.json(); detail = j.detail || j.error || detail; } catch {}
+    throw new Error(detail);
+  }
   return res.json();
 }
 
@@ -12,7 +16,11 @@ async function post(path, body) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`API error ${res.status}: ${path}`);
+  if (!res.ok) {
+    let detail = `API error ${res.status}`;
+    try { const j = await res.json(); detail = j.detail || j.error || detail; } catch {}
+    throw new Error(detail);
+  }
   return res.json();
 }
 
