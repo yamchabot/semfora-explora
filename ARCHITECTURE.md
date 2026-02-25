@@ -14,7 +14,7 @@ semfora-explora/
 │   ├── routers/      Thin HTTP handlers — wire queries → analytics → response
 │   ├── db.py         Connection management + enriched-DB promotion
 │   ├── enrich.py     ML enrichment pipeline (run once per DB)
-│   └── main.py       App entry point — registers routers, serves frontend + Win98
+│   └── main.py       App entry point — registers routers, serves frontend
 ├── frontend/         React 18 + Vite
 │   └── src/
 │       ├── pages/        One file per route
@@ -24,8 +24,7 @@ semfora-explora/
 │       └── api.js        API client (fetch wrappers)
 ├── data/             *.db / *.enriched.db files (gitignored)
 ├── tests/            pytest — 282 tests, must stay green
-├── user_simulation/  3-layer Python simulation framework (see below)
-└── win98-desktop/    Retro desktop served at /win95 with live workspace FS
+└── user_simulation/  3-layer Python simulation framework (see below)
 ```
 
 ---
@@ -331,16 +330,6 @@ NODE=/workspace/node-v22.13.0-linux-arm64/bin/node python3 user_simulation/run.p
 `Sarah/CTO`, `Marcus/VP`, `Priya/EngMgr`, `Jordan/PeopleMgr`, `Kenji/Staff`, `Fatima/Architect`, `Alex/Senior`, `Dana/Engineer`, `Taylor/Junior` — each with different Z3 satisfaction formulas in `users/*.py`.
 
 **Current score: 603/603 (9 people × 67 scenarios = 100%)**
-
----
-
-## Win98 Desktop
-
-A retro Windows 98-style web desktop served at `/win95`.
-
-- Backend: `main.py` registers static file mounts + dynamic endpoints in `WINDOWS_95_AVAILABLE` block
-- Live workspace filesystem: `GET /api/win95/ls?path=` and `GET /api/win95/cat?path=` serve real files from `WORKSPACE_ROOT` with `_safe_path()` enforcement (no path traversal)
-- Frontend: `win98-desktop/` — standalone HTML/JS app using BrowserFS OverlayFS
 
 ---
 
