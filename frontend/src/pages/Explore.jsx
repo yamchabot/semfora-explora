@@ -107,7 +107,7 @@ export default function Explore() {
   const [configOpen,    setConfigOpen]    = useState(true);
   const closeTimerRef = useRef(null);
 
-  function startCloseTimer()  { closeTimerRef.current = setTimeout(() => setConfigOpen(false), 1000); }
+  function startCloseTimer()  { setConfigOpen(false); }
   function cancelCloseTimer() { clearTimeout(closeTimerRef.current); }
   const configCardRef                   = useRef(null);
   const [controlsRect, setControlsRect] = useState({ width: 0, height: 0 });
