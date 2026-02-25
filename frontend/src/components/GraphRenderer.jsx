@@ -354,6 +354,15 @@ export default function GraphRenderer({ data, measures, onNodeClick, onAddFilter
   const selectedBlobRef = useRef(null); // mirrors selectedBlob for use in event handlers
   useEffect(() => { selectedBlobRef.current = selectedBlob; }, [selectedBlob]);
 
+  // Keep these refs always current so zero-dep keyboard-handler useEffect
+  // never captures stale prop/state values.
+  const selectedNodeIdsRef = useRef(selectedNodeIds);
+  selectedNodeIdsRef.current = selectedNodeIds;
+  const onAddFilterRef = useRef(onAddFilter);
+  onAddFilterRef.current = onAddFilter;
+  const dataRef = useRef(data);
+  dataRef.current = data;
+
   // Track Alt key state reliably via keydown/keyup — D3-wrapped click events
   // sometimes lose modifier keys, so we don't rely on event.altKey alone.
   const altKeyHeldRef = useRef(false);
@@ -891,14 +900,29 @@ export default function GraphRenderer({ data, measures, onNodeClick, onAddFilter
         setSelectedBlob(null);
         setShowSearch(false);
       }
-      if ((e.key === "Delete" || e.key === "Backspace") && selectedBlobRef.current) {
+      if (e.key === "Delete" || e.key === "Backspace") {
+        const nodeIds  = selectedNodeIdsRef.current;
         const blob     = selectedBlobRef.current;
-        const dimField = data?.dimensions?.[blob.level];
-        if (onAddFilter && dimField) {
-          const leafNames = [...blob.keys].map(k => k.split("::").at(-1));
-          onAddFilter({ kind: "dim", field: dimField, mode: "exclude", values: leafNames, pattern: "" });
+        const addFn    = onAddFilterRef.current;
+        const dims     = dataRef.current?.dimensions ?? [];
+
+        if (blob) {
+          // Blob selected → exclude by the blob's dimension level
+          const dimField = dims[blob.level];
+          if (addFn && dimField) {
+            const leafNames = [...blob.keys].map(k => k.split("::").at(-1));
+            addFn({ kind: "dim", field: dimField, mode: "exclude", values: leafNames, pattern: "" });
+          }
+          setSelectedBlob(null);
+        } else if (nodeIds?.size > 0) {
+          // Node(s) selected → exclude by the deepest (leaf) dimension
+          const dimField = dims[dims.length - 1];
+          if (addFn && dimField) {
+            const leafNames = [...nodeIds].map(id => id.split("::").at(-1));
+            addFn({ kind: "dim", field: dimField, mode: "exclude", values: leafNames, pattern: "" });
+          }
+          setSelectedNodeIds(new Set());
         }
-        setSelectedBlob(null);
       }
       if (e.key === "/" ) { e.preventDefault(); setShowSearch(true); }
       if ((e.metaKey || e.ctrlKey) && e.key === "k") { e.preventDefault(); setShowSearch(true); }
