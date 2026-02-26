@@ -123,7 +123,9 @@ export default function Explore() {
   const [configOpen,    setConfigOpen]    = useState(true);
   const closeTimerRef = useRef(null);
 
-  function startCloseTimer()  { setConfigOpen(false); }
+  function startCloseTimer()  {
+    closeTimerRef.current = setTimeout(() => setConfigOpen(false), 400);
+  }
   function cancelCloseTimer() { clearTimeout(closeTimerRef.current); }
   const configCardRef                   = useRef(null);
   const [controlsRect, setControlsRect] = useState({ width: 0, height: 0 });
@@ -684,42 +686,46 @@ export default function Explore() {
         onSetKinds={setKinds}
       />
 
-      {/* Collapsible config dropdown — top-left, opens on hover, auto-closes 5s after mouse leaves */}
+      {/* Cube / OLAP config button — sits below the graph controls bar, opens on hover */}
       <div
-        style={{ position:"absolute", top:12, left:12, zIndex:20 }}
-        onMouseEnter={cancelCloseTimer}
+        style={{ position:"absolute", top:58, left:12, zIndex:20 }}
+        onMouseEnter={() => { setConfigOpen(true); cancelCloseTimer(); }}
         onMouseLeave={startCloseTimer}
       >
-        {/* Toggle button — opens on hover; click still toggles for explicit pin/close */}
+        {/* Square icon-only button — cube = dimensional analysis / OLAP */}
         <button
-          onMouseEnter={() => { setConfigOpen(true); cancelCloseTimer(); }}
-          onClick={() => { setConfigOpen(v => !v); cancelCloseTimer(); }}
-          style={{ fontSize:12, padding:"5px 12px", cursor:"pointer", borderRadius:6,
-            border:"1px solid var(--border2)", background:"var(--bg2)",
-            color:"var(--text)", boxShadow:"0 2px 8px rgba(0,0,0,0.4)",
-            display:"flex", alignItems:"center", gap:6 }}
+          style={{
+            width:34, height:34, padding:0,
+            cursor:"pointer", borderRadius:6,
+            border:"1px solid var(--border2)",
+            background: configOpen ? "var(--bg3)" : "var(--bg2)",
+            display:"flex", alignItems:"center", justifyContent:"center",
+            boxShadow:"0 2px 8px rgba(0,0,0,0.45)",
+            transition:"background 0.15s",
+            flexShrink: 0,
+          }}
+          title="Configure dimensions, measures &amp; filters"
         >
-          ⚙ Config <span style={{ opacity:0.6, fontSize:10 }}>{configOpen ? "▴" : "▾"}</span>
+          {/* Isometric cube — OLAP / hypercube metaphor */}
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <polygon points="9,1 17,5.5 9,10 1,5.5" fill="#58a6ff" opacity="0.92"/>
+            <polygon points="1,5.5 1,13 9,17.5 9,10"  fill="#1a4a8a" opacity="0.95"/>
+            <polygon points="17,5.5 17,13 9,17.5 9,10" fill="#2563b0" opacity="0.95"/>
+            <polyline points="9,1 9,10" stroke="#fff" strokeWidth="0.6" strokeOpacity="0.3"/>
+            <polyline points="1,5.5 9,10 17,5.5" stroke="#fff" strokeWidth="0.6" strokeOpacity="0.3"/>
+          </svg>
         </button>
 
-        {/* Dropdown panel — always in DOM; fades in/out via opacity so CSS
-            transitions work on both open and close. pointer-events:none while
-            invisible prevents accidental interaction. */}
+        {/* Dropdown panel — fades in/out; pointer-events:none while invisible */}
         <div ref={configCardRef} className="card" style={{
           position:"absolute", top:"calc(100% + 6px)", left:0, zIndex:20,
-          width:360, maxHeight:"calc(100vh - 100px)", overflowY:"auto",
+          width:370, maxHeight:"calc(100vh - 140px)", overflowY:"auto",
           padding:"16px 20px", boxShadow:"0 4px 24px rgba(0,0,0,0.6)",
-          opacity:         configOpen ? 1 : 0,
-          pointerEvents:   configOpen ? "auto" : "none",
-          transition:      "opacity 0.35s ease",
+          opacity:       configOpen ? 1 : 0,
+          pointerEvents: configOpen ? "auto" : "none",
+          transition:    "opacity 0.25s ease",
         }}>
           {configContent}
-          {selectedNode && <>
-            <div style={{ borderTop:"1px solid var(--border)", margin:"12px 0 8px" }}/>
-            <GraphNodeDetails node={selectedNode} measures={measures}
-              types={stableFilteredData?.measure_types || {}}
-              dims={stableFilteredData?.dimensions ?? []}/>
-          </>}
         </div>
       </div>
     </div>
