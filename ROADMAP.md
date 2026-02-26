@@ -1,4 +1,4 @@
-# Semfora Explorer — Roadmap
+# Semfora Explora — Roadmap
 
 ## Long-term vision: Unified analytic dashboard
 

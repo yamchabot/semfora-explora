@@ -3,6 +3,7 @@ Database helpers shared across queries and routers.
 No analysis logic lives here — only I/O primitives.
 """
 import json
+import os
 import sqlite3
 from pathlib import Path
 
@@ -17,6 +18,28 @@ def row_to_dict(row) -> dict:
     return dict(row)
 
 
+def _register_functions(conn: sqlite3.Connection) -> None:
+    """Register custom scalar functions used by dimension expressions."""
+
+    def _dirname(path: str | None) -> str | None:
+        """SQLite dirname(): return the parent directory of a file path."""
+        if not path:
+            return None
+        parent = os.path.dirname(path)
+        return parent or "."
+
+    # Two-level directory (grandparent/parent) — useful for monorepos
+    def _dirdir(path: str | None) -> str | None:
+        if not path:
+            return None
+        parent = os.path.dirname(path)
+        grandparent = os.path.dirname(parent) if parent else ""
+        return os.path.join(grandparent, os.path.basename(parent)) if grandparent else (parent or ".")
+
+    conn.create_function("dirname",  1, _dirname,  deterministic=True)
+    conn.create_function("dirdir",   1, _dirdir,   deterministic=True)
+
+
 def get_db(repo_id: str) -> sqlite3.Connection:
     base_path     = DATA_DIR / f"{repo_id}.db"
     enriched_path = DATA_DIR / f"{repo_id}.enriched.db"
@@ -29,6 +52,7 @@ def get_db(repo_id: str) -> sqlite3.Connection:
         )
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    _register_functions(conn)
     return conn
 
 

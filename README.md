@@ -1,8 +1,8 @@
-# Semfora Explorer
+# Semfora Explora
 
 A web UI for exploring and analyzing codebases using the [Semfora](https://github.com/Semfora-AI/semfora-engine) graph engine.
 
-Semfora indexes a codebase into a call graph — nodes are symbols (functions, methods, classes), edges are call relationships derived from the AST. Semfora Explorer makes that graph useful for staff engineers, code reviewers, and anyone maintaining a large or legacy codebase.
+Semfora indexes a codebase into a call graph — nodes are symbols (functions, methods, classes), edges are call relationships derived from the AST. Semfora Explora makes that graph useful for staff engineers, code reviewers, and anyone maintaining a large or legacy codebase.
 
 ## Quick Start
 
@@ -10,7 +10,7 @@ Semfora indexes a codebase into a call graph — nodes are symbols (functions, m
 
 ```bash
 cd /your/project
-semfora-engine query callgraph --export /path/to/semfora-explorer/data/my-project.db --limit 999999
+semfora-engine query callgraph --export /path/to/semfora-explora/data/my-project.db --limit 999999
 ```
 
 ### 2. Start the backend
@@ -64,7 +64,7 @@ chmod +x start.sh && ./start.sh
 ## Architecture
 
 ```
-semfora-explorer/
+semfora-explora/
 ├── backend/          FastAPI — serves graph analysis from SQLite DBs
 │   ├── analytics/    Pure analysis functions (no DB, fully testable)
 │   ├── queries/      DB I/O — returns plain Python dicts/lists

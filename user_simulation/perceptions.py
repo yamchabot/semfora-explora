@@ -83,6 +83,20 @@ class Perceptions:
     # Within-group proximity relative to between-group (0–1; 1 = perfectly cohesive)
     gestalt_cohesion: float
 
+    # Fraction of connected module-pair corridors that are unobstructed by other blobs
+    # (1.0 = every A→C straight-line path is clear of foreign blobs;
+    #  <1.0 = some cross-module edges visually route through an intermediate blob)
+    # Only meaningful for module_count >= 3; trivially 1.0 for ≤ 2 modules.
+    blob_edge_routing: float
+
+    # Fraction of connected corridor pairs that geometrically cross each other
+    # (0 = no corridor-corridor crossings; 1 = all corridor pairs cross).
+    # Weighted by edge count: a crossing between two heavy corridors scores higher.
+    # Distinct from blob_edge_routing: this is segment-segment intersection,
+    # not segment-passes-through-a-blob.
+    # Only meaningful for module_count >= 3.
+    inter_module_crossings: float
+
     # ── Dependencies ──────────────────────────────────────────────────────────
 
     # Fraction of cross-module edges that are visually discernible (0–1)
@@ -853,11 +867,15 @@ def compute_perceptions(facts: dict) -> Perceptions:
     cross_vis   = facts["crossModuleEdgeVisibility"]["ratio"]
     cross_count = facts["crossModuleEdgeVisibility"]["count"]
     edge_vis    = facts["edgeVisibility"]["ratio"]
-    chain_elo   = facts["chainLinearity"]["ratio"]
-    chain_str   = facts["chainLinearity"]["straightness"]
+    # ratio can be None (legacy JSON with Infinity) or absent — treat as 1.0 (no chain)
+    chain_elo   = float(facts["chainLinearity"]["ratio"]) if facts["chainLinearity"]["ratio"] is not None else 1.0
+    chain_str   = float(facts["chainLinearity"]["straightness"]) if facts["chainLinearity"]["straightness"] is not None else 1.0
     hub         = facts["hubCentrality"]["avgNormalised"]
     overlap     = facts["nodeOverlap"]["ratio"]
-    stress      = facts["layoutStress"]["perEdge"]
+    # Use intra-module stress: avoids penalising intentional blob separation.
+    # Falls back to global stress for single-module graphs (intra == global).
+    intra = facts.get("intraModuleStress", facts.get("layoutStress"))
+    stress      = float(intra["perEdge"])
     crossings   = facts["edgeCrossings"]["normalised"]
     size_cv     = facts["nodeSizeVariation"]["cv"]
     mod_count   = int(facts.get("moduleCount", 1))
@@ -872,6 +890,8 @@ def compute_perceptions(facts: dict) -> Perceptions:
     edge_angles     = facts.get("edgeAngles", [])
     node_list       = facts.get("nodeList", [])
     chain_node_pos  = facts.get("chainNodePos", [])
+    blob_routing_v     = float(facts.get("blobEdgeRouting", {}).get("ratio", 1.0))
+    inter_cross_v      = float(facts.get("interModuleCrossings", {}).get("weightedRatio", 0.0))
 
     # ── 2. sklearn metrics ────────────────────────────────────────────────────
     sil, ari = _silhouette_and_ari(node_list, mod_count)
@@ -902,6 +922,8 @@ def compute_perceptions(facts: dict) -> Perceptions:
         "silhouette_by_module":  float(sil),
         "spatial_cluster_purity": float(ari),
         "chain_r2":              _chain_r2(chain_node_pos),
+        "blob_edge_routing":      blob_routing_v,
+        "inter_module_crossings": inter_cross_v,
     }
 
     # ── 4. Tier 2: composed ───────────────────────────────────────────────────
@@ -923,6 +945,8 @@ def compute_perceptions(facts: dict) -> Perceptions:
         module_separation      = r["module_separation"],
         blob_integrity         = r["blob_integrity"],
         gestalt_cohesion       = r["gestalt_cohesion"],
+        blob_edge_routing      = r["blob_edge_routing"],
+        inter_module_crossings = r["inter_module_crossings"],
         cross_edge_visibility  = r["cross_edge_visibility"],
         cross_edge_count       = r["cross_edge_count"],
         cross_edge_ratio       = r["cross_edge_ratio"],

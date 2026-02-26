@@ -1,5 +1,5 @@
 #!/bin/bash
-# Start Semfora Explorer — backend + frontend
+# Start Semfora Explora — backend + frontend
 
 set -e
 cd "$(dirname "$0")"

@@ -6,8 +6,11 @@ venv2/
 __pycache__/
 *.pyc
 data/*.enriched.db
+data/*.db
 data/analysis_report.json
+user_simulation_report.html
 *.db-shm
 *.db-wal
 .env
 user_simulation/node_modules
+user_simulation/instrumentation/output/

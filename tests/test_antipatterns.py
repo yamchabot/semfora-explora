@@ -1,5 +1,5 @@
 """
-Anti-pattern regression tests for semfora-explorer analytics.
+Anti-pattern regression tests for semfora-explora analytics.
 
 Each test:
   1. Verifies that the expected analytic signal IS present in the anti-pattern DB.

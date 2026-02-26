@@ -3,9 +3,10 @@ import ForceGraph2D from "react-force-graph-2d";
 import { forceCollide } from "d3-force-3d";
 import { measureKey, measureLabel } from "../utils/measureUtils.js";
 import { lerpColor, makeStepColors, makeStepWidths, makeStepArrows } from "../utils/colorUtils.js";
-import { bfsFromNode, buildAdjacencyMaps, convexHull, findChainEdges, collectChainNodeIds } from "../utils/graphAlgo.js";
+import { bfsFromNode, buildAdjacencyMaps, convexHull, expandHullPts, pointInPolygon, findChainEdges, collectChainNodeIds } from "../utils/graphAlgo.js";
 import { buildGraphData, flattenLeafRows, getGroupKey } from "../utils/graphData.js";
 import { Tooltip } from "./Tooltip.jsx";
+import { computeTopologyAwareGroupPos } from "../utils/topologyLayout.js";
 
 // ── Canvas helpers ──────────────────────────────────────────────────────────────
 
@@ -30,7 +31,7 @@ const BLOB_PALETTE = ["#58a6ff","#3fb950","#e3b341","#f85149","#a371f7","#39c5cf
  * Fill and stroke are drawn with the same unclipped blob path so the shape is
  * always a complete smooth oval (no flat edge at adjacent-blob boundaries).
  */
-function drawBlob(ctx, hull, padding, lineWidth, color) {
+function drawBlob(ctx, hull, padding, lineWidth, color, highlight = false) {
   if (!hull?.length) return;
   // Expand each point outward from centroid
   const cx = hull.reduce((s,p)=>s+p[0],0) / hull.length;
@@ -76,11 +77,17 @@ function drawBlob(ctx, hull, padding, lineWidth, color) {
     }
   }
   ctx.closePath();
-  ctx.fillStyle   = color + "1e";   // ~12% opacity fill
+  ctx.fillStyle   = color + (highlight ? "2d" : "1e");  // ~18% / ~12% fill
   ctx.fill();
-  ctx.strokeStyle = color + "99";   // ~60% opacity stroke
-  ctx.lineWidth   = lineWidth;
+  ctx.strokeStyle = highlight ? color + "ee" : color + "99"; // bright / ~60% stroke
+  ctx.lineWidth   = highlight ? lineWidth * 2.5 : lineWidth;
   ctx.stroke();
+  if (highlight) {
+    // Outer glow ring
+    ctx.strokeStyle = color + "33";
+    ctx.lineWidth   = lineWidth * 7;
+    ctx.stroke();
+  }
 }
 
 // ── Group forces ─────────────────────────────────────────────────────────────
@@ -112,7 +119,9 @@ function drawBlob(ctx, hull, padding, lineWidth, color) {
 export function makeNestedBlobForce(level, blobCount = 1) {
   // Inner levels need stronger containment; outer levels are gentler.
   const levelFactor = Math.max(0.4, 1 - level * 0.25);
-  const padding     = Math.max(15, 60 - level * 15);
+  // Outer gap 80 graph-units (was 60) to give hull rendering room.
+  // hullCapGU at L=0 is 36, so 2×36=72 ≤ 80 → hulls never visually overlap.
+  const padding     = Math.max(15, 80 - level * 15);
   return makeVoronoiContainmentForce(
     // Centripetal attraction is near-zero: the link force should form the
     // program shape (call chains, hubs, trees) within the blob freely.
@@ -314,7 +323,7 @@ export function makeChainCentroidForce(selectedIds, chainIds) {
 
 // ── GraphRenderer ──────────────────────────────────────────────────────────────
 
-export default function GraphRenderer({ data, measures, onNodeClick,
+export default function GraphRenderer({ data, measures, onNodeClick, onAddFilter,
   minWeight, setMinWeight, topK, setTopK,
   colorKeyOverride, setColorKeyOverride, fanOutDepth, setFanOutDepth,
   selectedNodeIds, setSelectedNodeIds, hideIsolated, setHideIsolated,
@@ -324,6 +333,7 @@ export default function GraphRenderer({ data, measures, onNodeClick,
   nodeColorOverrides = null,   // Map<nodeId, cssColor> — bypasses metric gradient (Diff page)
   edgeColorOverrides = null,   // Map<"src|tgt", cssColor> — bypasses step/chain colors
   highlightSet = null,         // Set<nodeId> — draws glow ring; color = node's own gradient color
+  nodeFlags = null,            // {[sym]: {async,recursive,exported,test}} — badge indicators
 }) {
   const containerRef  = useRef(null);
   const fgRef         = useRef(null);
@@ -338,6 +348,40 @@ export default function GraphRenderer({ data, measures, onNodeClick,
   const [couplingIds, setCouplingIds] = useState(new Set());
   // When true, the graph only shows cross-boundary nodes + edges (no non-coupling nodes).
   const [couplingOnly, setCouplingOnly] = useState(false);
+  // Blob selection: alt+click a node to select its containing blob (outer or inner).
+  // { keys: Set<string>, level: number } | null
+  // Multiple blobs at the same level can be selected; clicking a different level resets.
+  const [selectedBlob, setSelectedBlob] = useState(null);
+  const selectedBlobRef = useRef(null); // mirrors selectedBlob for use in event handlers
+  useEffect(() => { selectedBlobRef.current = selectedBlob; }, [selectedBlob]);
+
+  // Keep these refs always current so zero-dep keyboard-handler useEffect
+  // never captures stale prop/state values.
+  const selectedNodeIdsRef = useRef(selectedNodeIds);
+  selectedNodeIdsRef.current = selectedNodeIds;
+  const onAddFilterRef = useRef(onAddFilter);
+  onAddFilterRef.current = onAddFilter;
+  const dataRef = useRef(data);
+  dataRef.current = data;
+
+  // Track Alt and Shift key states reliably via keydown/keyup.
+  // D3-wrapped click events sometimes lose modifier keys, so we don't rely
+  // on event.altKey / event.shiftKey alone.
+  const altKeyHeldRef   = useRef(false);
+  const shiftKeyHeldRef = useRef(false);
+  useEffect(() => {
+    const dn = e => {
+      if (e.key === "Alt")   altKeyHeldRef.current   = true;
+      if (e.key === "Shift") shiftKeyHeldRef.current = true;
+    };
+    const up = e => {
+      if (e.key === "Alt")   altKeyHeldRef.current   = false;
+      if (e.key === "Shift") shiftKeyHeldRef.current = false;
+    };
+    window.addEventListener("keydown", dn);
+    window.addEventListener("keyup",   up);
+    return () => { window.removeEventListener("keydown", dn); window.removeEventListener("keyup", up); };
+  }, []);
   // nodeDot and setNodeDot come in as props (URL-persisted in Explore.jsx)
   // Spread: scales charge repulsion and link distance together.
   // 350 = default; higher = more spread; lower = tighter.
@@ -574,6 +618,30 @@ export default function GraphRenderer({ data, measures, onNodeClick,
     return { ...graphData, nodes, links };
   }, [couplingOnly, couplingEndpoints, graphData, crossEdgeSet]);
 
+  // Nodes inside the currently selected blob (all levels up to selectedBlob.level)
+  const blobSelectedNodeIds = useMemo(() => {
+    if (!selectedBlob || !graphData.isBlobMode) return new Set();
+    return new Set(
+      graphData.nodes
+        .filter(n => selectedBlob.keys.has(getGroupKey(n, selectedBlob.level)))
+        .map(n => n.id)
+    );
+  }, [selectedBlob, graphData]);
+
+  // Edges that cross the selected blob's boundary (exactly one endpoint inside)
+  const blobCrossEdges = useMemo(() => {
+    if (!selectedBlob || blobSelectedNodeIds.size === 0) return new Set();
+    const set = new Set();
+    for (const link of graphData.links) {
+      const src = typeof link.source === "object" ? link.source.id : link.source;
+      const tgt = typeof link.target === "object" ? link.target.id : link.target;
+      const srcIn = blobSelectedNodeIds.has(src);
+      const tgtIn = blobSelectedNodeIds.has(tgt);
+      if (srcIn !== tgtIn) set.add(`${src}|${tgt}`);
+    }
+    return set;
+  }, [selectedBlob, blobSelectedNodeIds, graphData.links]);
+
   function handleCouplingToggle() {
     if (couplingIds.size > 0) {
       setCouplingIds(new Set());
@@ -633,10 +701,17 @@ export default function GraphRenderer({ data, measures, onNodeClick,
         }
         const maxGroupSize = Math.max(...groupNodeCounts.values(), 1);
         const outerSpread = Math.max(350, Math.sqrt(maxGroupSize) * linkDistBase * 0.8 * Math.sqrt(numOuter));
-        const outerPos    = new Map(outerGroups.map((g, i) => {
-          const angle = (2 * Math.PI * i) / numOuter;
-          return [g, { x: Math.cos(angle) * outerSpread, y: Math.sin(angle) * outerSpread }];
-        }));
+        // Topology-aware initial placement: find the circular ordering that
+        // minimises corridor-corridor crossings between strongly-coupled pairs,
+        // rather than using the arbitrary insertion order of the groups Set.
+        // For ≤ 8 groups this is exact (enumerate (n-1)! permutations).
+        // For larger counts a 2-opt heuristic is used.
+        const outerPos = computeTopologyAwareGroupPos(
+          graphData.nodes,
+          graphData.links,
+          outerGroups,
+          outerSpread
+        );
 
         // For inner levels, cluster within the outer group's region
         if (blobLevels >= 2) {
@@ -829,6 +904,35 @@ export default function GraphRenderer({ data, measures, onNodeClick,
       // Ignore keystrokes when focus is inside an input/textarea/select
       const tag = document.activeElement?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (e.key === "Escape") {
+        setSelectedNodeIds(new Set());
+        setSelectedBlob(null);
+        setShowSearch(false);
+      }
+      if (e.key === "Delete" || e.key === "Backspace") {
+        const nodeIds  = selectedNodeIdsRef.current;
+        const blob     = selectedBlobRef.current;
+        const addFn    = onAddFilterRef.current;
+        const dims     = dataRef.current?.dimensions ?? [];
+
+        if (blob) {
+          // Blob selected → exclude by the blob's dimension level
+          const dimField = dims[blob.level];
+          if (addFn && dimField) {
+            const leafNames = [...blob.keys].map(k => k.split("::").at(-1));
+            addFn({ kind: "dim", field: dimField, mode: "exclude", values: leafNames, pattern: "" });
+          }
+          setSelectedBlob(null);
+        } else if (nodeIds?.size > 0) {
+          // Node(s) selected → exclude by the deepest (leaf) dimension
+          const dimField = dims[dims.length - 1];
+          if (addFn && dimField) {
+            const leafNames = [...nodeIds].map(id => id.split("::").at(-1));
+            addFn({ kind: "dim", field: dimField, mode: "exclude", values: leafNames, pattern: "" });
+          }
+          setSelectedNodeIds(new Set());
+        }
+      }
       if (e.key === "/" ) { e.preventDefault(); setShowSearch(true); }
       if ((e.metaKey || e.ctrlKey) && e.key === "k") { e.preventDefault(); setShowSearch(true); }
     };
@@ -945,6 +1049,30 @@ export default function GraphRenderer({ data, measures, onNodeClick,
             >clear</button>
           </span>
         )}
+        {selectedBlob && (() => {
+          const leafNames  = [...selectedBlob.keys].map(k => k.split("::").at(-1));
+          const nameLabel  = leafNames.length <= 2
+            ? leafNames.join(", ")
+            : `${leafNames.slice(0,2).join(", ")} +${leafNames.length - 2} more`;
+          const dimField   = data?.dimensions?.[selectedBlob.level];
+          return (
+            <span style={{ display:"flex", alignItems:"center", gap:6 }}>
+              <span style={{ fontSize:11, color:"#a371f7", fontWeight:600 }}>
+                🫧 {nameLabel}
+                {selectedBlob.level > 0 && <span style={{ color:"var(--text3)", fontWeight:400 }}> (inner)</span>}
+                {" — "}{blobCrossEdges.size} cross-boundary edge{blobCrossEdges.size !== 1 ? "s" : ""}
+              </span>
+              <span style={{ fontSize:10, color:"var(--text3)" }}
+                title="Press Delete or Backspace to exclude from graph">⌫ to exclude</span>
+              <button
+                onClick={() => setSelectedBlob(null)}
+                style={{ fontSize:11, padding:"2px 7px", background:"var(--bg3)",
+                  border:"1px solid var(--border2)", borderRadius:4,
+                  color:"var(--text2)", cursor:"pointer" }}
+              >clear</button>
+            </span>
+          );
+        })()}
         {/* ── Icon-only quick toggles ─────────────────────────────────────── */}
         {/* Each button is a single icon; full description lives in the tooltip. */}
         <Tooltip tip={hideIsolated ? "Show all nodes (isolated nodes hidden)" : "Hide isolated nodes — no edges in or out"}>
@@ -1093,7 +1221,13 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                 for (let L = 0; L < numLevels; L++) {
                   // Styling: outer = large/faint, inner = tight/brighter
                   const isOuter   = L === 0;
-                  const padding   = Math.max(12, (32 - L * 10)) / gs;
+                  // Cap hull padding in graph-unit terms so hulls don't visually overlap
+                  // when zoomed out.  Physics guarantees blobPadding (80 at L=0, 50 at L=1)
+                  // between blob edges, so padding must be ≤ blobPadding/2 per side.
+                  // 32/gs gives a constant 32 screen-px at normal zoom; the cap prevents
+                  // it from expanding beyond the physics gap when gs < 1 (zoomed out).
+                  const hullCapGU = Math.max(10, 36 - L * 13); // 36 / 23 / 10 graph-units
+                  const padding   = Math.min(Math.max(10, (32 - L * 10)) / gs, hullCapGU);
                   const lineWidth = (isOuter ? 1.5 : 1.0) / gs;
                   const labelSize = Math.max(9, 15 - L * 3) / gs;
 
@@ -1102,8 +1236,12 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                     const outerKey = gk.split("::")[0];
                     const base     = groupColorMap.get(outerKey) || "#888888";
 
-                    const hull     = pts.length >= 3 ? convexHull(pts) : pts.map(p => [...p]);
-                    drawBlob(ctx, hull, padding, lineWidth, base);
+                    const hull = pts.length >= 3 ? convexHull(pts) : pts.map(p => [...p]);
+                    const isBlobSelected  = selectedBlob?.level === L && selectedBlob.keys.has(gk);
+                    const blobDimmed      = selectedBlob != null && !isBlobSelected;
+                    ctx.globalAlpha = blobDimmed ? 0.25 : 1.0;
+                    drawBlob(ctx, hull, padding, lineWidth, base, isBlobSelected);
+                    ctx.globalAlpha = 1.0;
 
                     // Label: only at outermost level, or all levels when N > 2
                     if (isOuter || numLevels >= 2) {
@@ -1129,16 +1267,21 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                   : chainNodeIds.has(node.id);
                 const isCoupling  = couplingIds.has(node.id);
                 const hasCoupling = couplingIds.size > 0;
+                const hasBlobSel  = selectedBlob != null;
+                const isInBlob    = hasBlobSel && blobSelectedNodeIds.has(node.id);
 
-                // Dimming priority:
-                //  coupling-only  → all nodes full (non-coupling were already removed)
-                //  coupling mode  → coupling nodes full, others 18% (selection can rescue)
+                // Dimming priority (highest → lowest):
+                //  blob selection → blob nodes full, others 15%
+                //  coupling-only  → all nodes full (non-coupling already removed)
+                //  coupling mode  → coupling nodes full, others 18%
                 //  selection mode → reachable nodes full, others 18%
                 //  neither        → all full
-                const isVisible = (hasCoupling && !couplingOnly)
-                  ? (isCoupling || (anySelected && isReachable))
-                  : anySelected ? isReachable : true;
-                ctx.globalAlpha = isVisible ? 1.0 : 0.18;
+                const isVisible = hasBlobSel
+                  ? isInBlob
+                  : (hasCoupling && !couplingOnly)
+                    ? (isCoupling || (anySelected && isReachable))
+                    : anySelected ? isReachable : true;
+                ctx.globalAlpha = isVisible ? 1.0 : 0.15;
 
                 const baseColor = nodeColorOverrides?.get(node.id) ?? node.color;
                 const isDiffHighlight = nodeColorOverrides?.has(node.id) || highlightSet?.has(node.id);
@@ -1180,7 +1323,13 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                 // ── Pill mode (default) ───────────────────────────────────────
                 const full  = node.name || "";
                 const short = full.includes("::") ? full.split("::").slice(1).join("::") : full;
-                const label = short.length > MAX_LABEL ? short.slice(0, MAX_LABEL - 1) + "…" : short;
+                const truncShort = short.length > MAX_LABEL ? short.slice(0, MAX_LABEL - 1) + "…" : short;
+                // Append flag indicators (⚡ async, ↺ recursive, ⊕ exported)
+                const flags = nodeFlags?.[node.id];
+                const indicator = flags
+                  ? (flags.async ? "⚡" : "") + (flags.recursive ? "↺" : "") + (flags.test ? "✓" : "")
+                  : "";
+                const label = truncShort + (indicator ? " " + indicator : "");
                 const fs    = 11;
                 ctx.font    = `600 ${fs}px monospace`;
                 const tw    = ctx.measureText(label).width;
@@ -1234,6 +1383,9 @@ export default function GraphRenderer({ data, measures, onNodeClick,
               linkWidth={link => {
                 const src = typeof link.source === "object" ? link.source.id : link.source;
                 const tgt = typeof link.target === "object" ? link.target.id : link.target;
+                if (selectedBlob) {
+                  return blobCrossEdges.has(`${src}|${tgt}`) ? 2.5 : 0.3;
+                }
                 if (selectedNodeIds.size === 0) {
                   if (couplingIds.size > 0) {
                     // Cross-boundary edges slightly thicker so they stand out
@@ -1259,6 +1411,10 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                 // Diff overlay: always use diff edge color when provided
                 const edgeOverride = edgeColorOverrides?.get(`${src}|${tgt}`);
                 if (edgeOverride) return edgeOverride;
+                if (selectedBlob) {
+                  // Cyan for cross-boundary; ghosted for internal
+                  return blobCrossEdges.has(`${src}|${tgt}`) ? "#39c5cf" : "rgba(48,54,61,0.05)";
+                }
                 if (selectedNodeIds.size === 0) {
                   if (couplingIds.size > 0) {
                     // Cyan for cross-boundary; nearly invisible for within-group
@@ -1280,6 +1436,9 @@ export default function GraphRenderer({ data, measures, onNodeClick,
               linkDirectionalArrowLength={link => {
                 const src = typeof link.source === "object" ? link.source.id : link.source;
                 const tgt = typeof link.target === "object" ? link.target.id : link.target;
+                if (selectedBlob) {
+                  return blobCrossEdges.has(`${src}|${tgt}`) ? 7 : 2;
+                }
                 if (selectedNodeIds.size === 0) {
                   if (couplingIds.size > 0) {
                     return crossEdgeSet.has(`${src}|${tgt}`) ? 7 : 2;
@@ -1308,6 +1467,9 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                   if (ec && ec !== "#30363d" && ec !== "#484f58") return 2;
                   return 0;
                 }
+                if (selectedBlob) {
+                  return blobCrossEdges.has(`${u}|${v}`) ? 3 : 0;
+                }
                 if (selectedNodeIds.size === 0) {
                   if (couplingIds.size > 0) return crossEdgeSet.has(`${u}|${v}`) ? 3 : 0;
                   return 2;
@@ -1318,16 +1480,17 @@ export default function GraphRenderer({ data, measures, onNodeClick,
               }}
               linkDirectionalParticleSpeed={invertFlow ? -0.004 : 0.004}
               linkDirectionalParticleWidth={link => {
+                const u = typeof link.source === "object" ? link.source.id : link.source;
+                const v = typeof link.target === "object" ? link.target.id : link.target;
+                if (selectedBlob) {
+                  return blobCrossEdges.has(`${u}|${v}`) ? 4 : 0;
+                }
                 if (selectedNodeIds.size === 0) {
                   if (couplingIds.size > 0) {
-                    const u = typeof link.source === "object" ? link.source.id : link.source;
-                    const v = typeof link.target === "object" ? link.target.id : link.target;
                     return crossEdgeSet.has(`${u}|${v}`) ? 4 : 0;
                   }
                   return 3;
                 }
-                const u = typeof link.source === "object" ? link.source.id : link.source;
-                const v = typeof link.target === "object" ? link.target.id : link.target;
                 if (selectedNodeIds.size === 1) return (fwdDistances.has(u) || bwdDistances.has(v)) ? 5 : 0;
                 return chainEdgeMap.has(`${u}|${v}`) ? 5 : 0;
               }}
@@ -1336,6 +1499,9 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                 const v = typeof link.target === "object" ? link.target.id : link.target;
                 const edgeOverride = edgeColorOverrides?.get(`${u}|${v}`);
                 if (edgeOverride) return edgeOverride;
+                if (selectedBlob) {
+                  return blobCrossEdges.has(`${u}|${v}`) ? "#39c5cf" : "#ffffff";
+                }
                 if (selectedNodeIds.size === 0 && couplingIds.size > 0) {
                   return crossEdgeSet.has(`${u}|${v}`) ? "#39c5cf" : "#ffffff";
                 }
@@ -1365,6 +1531,35 @@ export default function GraphRenderer({ data, measures, onNodeClick,
               onNodeClick={(node, event) => {
                 const id = node?.id ?? null;
                 if (!id) return;
+
+                if (event?.altKey && graphData.isBlobMode) {
+                  // Alt+click → select outer blob; Shift+Alt+click → innermost sub-blob.
+                  // Multiple blobs at the same level can be selected by alt+clicking each.
+                  const maxLevel = Math.max(0, blobLevelCount - 1);
+                  const level    = (event?.shiftKey && maxLevel > 0) ? maxLevel : 0;
+                  const key      = getGroupKey(node, level);
+                  if (key) {
+                    setSelectedBlob(prev => {
+                      if (!prev || prev.level !== level) {
+                        // First click or different level → start fresh with just this blob
+                        return { keys: new Set([key]), level };
+                      }
+                      // Same level → toggle this blob in/out of the selection
+                      const next = new Set(prev.keys);
+                      if (next.has(key)) {
+                        next.delete(key);
+                        return next.size === 0 ? null : { keys: next, level };
+                      }
+                      next.add(key);
+                      return { keys: next, level };
+                    });
+                    setSelectedNodeIds(new Set()); // blob selection clears node selection
+                    return;
+                  }
+                }
+
+                // Normal click — clear any blob selection
+                setSelectedBlob(null);
                 setSelectedNodeIds(prev => {
                   if (event?.shiftKey) {
                     // Shift+click: toggle node in multi-select set
@@ -1376,6 +1571,72 @@ export default function GraphRenderer({ data, measures, onNodeClick,
                   return prev.size === 1 && prev.has(id) ? new Set() : new Set([id]);
                 });
                 onNodeClick?.(node);
+              }}
+              onBackgroundClick={(event) => {
+                // Alt+click on blob area (not a node) → select/deselect that blob.
+                // Use altKeyHeldRef (keydown/keyup tracker) rather than event.altKey
+                // because D3-wrapped events sometimes lose modifier key state.
+                // Use fgRef.current.screen2GraphCoords for reliable coord conversion.
+                if ((altKeyHeldRef.current || event?.altKey) && graphData.isBlobMode) {
+                  const fg   = fgRef.current;
+                  // screen2GraphCoords expects CANVAS-relative coordinates (not viewport).
+                  // event.clientX/Y are viewport coords; subtract the canvas element's
+                  // bounding rect to get canvas-relative coords first.
+                  // Without this subtraction the error is canvasRect.left / k, which
+                  // scales up as the user zooms out — producing the "wrong blob to the
+                  // right" symptom.
+                  const rect   = event.target?.getBoundingClientRect?.() ?? { left:0, top:0 };
+                  const canvasX = event.clientX - rect.left;
+                  const canvasY = event.clientY - rect.top;
+                  const coords = fg?.screen2GraphCoords
+                    ? fg.screen2GraphCoords(canvasX, canvasY)
+                    : (() => {
+                        const { k, x: tx, y: ty } = zoomTransformRef.current;
+                        return { x: (canvasX - tx) / k, y: (canvasY - ty) / k };
+                      })();
+                  const gx = coords.x, gy = coords.y;
+
+                  // Determine target level:
+                  //   Plain Alt+click         → level 0 (outermost blob)
+                  //   Shift+Alt+click         → maxLevel (innermost sub-blob)
+                  // Mirrors the behaviour of Alt+click / Shift+Alt+click on a node.
+                  const maxLevel  = Math.max(0, blobLevelCount - 1);
+                  const shiftHeld = shiftKeyHeldRef.current || event?.shiftKey;
+                  const level     = (shiftHeld && maxLevel > 0) ? maxLevel : 0;
+
+                  // Group node positions by their group key at the target level.
+                  const HIT_PAD = 40;
+                  const groups  = new Map();
+                  for (const node of graphData.nodes) {
+                    if (node.x == null) continue;
+                    const gk = getGroupKey(node, level);
+                    if (!gk) continue;
+                    if (!groups.has(gk)) groups.set(gk, []);
+                    groups.get(gk).push([node.x, node.y]);
+                  }
+
+                  for (const [gk, pts] of groups) {
+                    const hull     = pts.length >= 3 ? convexHull(pts) : pts.map(p => [...p]);
+                    const expanded = expandHullPts(hull, HIT_PAD);
+                    if (pointInPolygon(gx, gy, expanded)) {
+                      setSelectedBlob(prev => {
+                        if (!prev || prev.level !== level) return { keys: new Set([gk]), level };
+                        const next = new Set(prev.keys);
+                        if (next.has(gk)) { next.delete(gk); return next.size === 0 ? null : { keys: next, level }; }
+                        next.add(gk);
+                        return { keys: next, level };
+                      });
+                      setSelectedNodeIds(new Set());
+                      return; // handled — don't fall through to clear
+                    }
+                  }
+                  // Alt+click outside all blobs at this level: do nothing (don't clear)
+                  return;
+                }
+
+                // Plain background click → clear everything
+                setSelectedNodeIds(new Set());
+                setSelectedBlob(null);
               }}
               backgroundColor="#0d1117"
             />

@@ -34,35 +34,55 @@ AVAILABLE_DIMENSIONS: dict[str, str] = {
     "risk":       "n.risk",
     "kind":       "n.kind",
     "symbol":     "n.module || '::' || n.name",
+    # File / path dims (file_path exists in all schema versions)
+    "file":       "n.file_path",
+    "directory":  "dirname(n.file_path)",     # custom SQLite fn registered in db.py
     # Derived categorical dims (CASE expressions → fixed string buckets)
     "dead":       "CASE WHEN n.caller_count = 0 THEN 'dead' ELSE 'alive' END",
     "high_risk":  "CASE WHEN n.risk IN ('high','critical') THEN 'high-risk' ELSE 'normal' END",
     "in_cycle":   "CASE WHEN COALESCE(nf.scc_size, 1) > 1 THEN 'in-cycle' ELSE 'clean' END",
     # Community dims (Louvain — stored in node_features during enrichment)
-    "community": "nf.community_dominant_mod",
+    "community":  "nf.community_dominant_mod",
+    # New-schema dims (require semfora-engine feat/schema-enrichment-v2+)
+    "framework":  "COALESCE(NULLIF(n.framework_entry_point,''), 'none')",
+    "async":      "CASE WHEN n.is_async = 1 THEN 'async' ELSE 'sync' END",
+    "exported":   "CASE WHEN n.is_exported = 1 THEN 'exported' ELSE 'internal' END",
 }
 
 # Dims that require node_features JOIN
 _ENRICHED_DIMS = {"in_cycle", "community"}
 
+# Dims that require the new schema columns (is_async, is_exported, framework_entry_point)
+_NEW_SCHEMA_DIMS = {"framework", "async", "exported"}
+
 # For graph edge queries we need the n1/n2-prefixed versions
 _DIM_SRC = {
-    "module":    "n1.module",
-    "class":     _CLASS_DIM.format(a="n1"),
-    "risk":      "n1.risk",
-    "kind":      "n1.kind",
-    "symbol":    "n1.module || '::' || n1.name",
+    "module":     "n1.module",
+    "class":      _CLASS_DIM.format(a="n1"),
+    "risk":       "n1.risk",
+    "kind":       "n1.kind",
+    "symbol":     "n1.module || '::' || n1.name",
+    "file":       "n1.file_path",
+    "directory":  "dirname(n1.file_path)",
+    "framework":  "COALESCE(NULLIF(n1.framework_entry_point,''), 'none')",
+    "async":      "CASE WHEN n1.is_async = 1 THEN 'async' ELSE 'sync' END",
+    "exported":   "CASE WHEN n1.is_exported = 1 THEN 'exported' ELSE 'internal' END",
     # Enriched dims — require LEFT JOIN node_features nf1 ON n1.hash = nf1.hash
-    "community": "nf1.community_dominant_mod",
+    "community":  "nf1.community_dominant_mod",
 }
 _DIM_TGT = {
-    "module":    "n2.module",
-    "class":     _CLASS_DIM.format(a="n2"),
-    "risk":      "n2.risk",
-    "kind":      "n2.kind",
-    "symbol":    "n2.module || '::' || n2.name",
+    "module":     "n2.module",
+    "class":      _CLASS_DIM.format(a="n2"),
+    "risk":       "n2.risk",
+    "kind":       "n2.kind",
+    "symbol":     "n2.module || '::' || n2.name",
+    "file":       "n2.file_path",
+    "directory":  "dirname(n2.file_path)",
+    "framework":  "COALESCE(NULLIF(n2.framework_entry_point,''), 'none')",
+    "async":      "CASE WHEN n2.is_async = 1 THEN 'async' ELSE 'sync' END",
+    "exported":   "CASE WHEN n2.is_exported = 1 THEN 'exported' ELSE 'internal' END",
     # Enriched dims — require LEFT JOIN node_features nf2 ON n2.hash = nf2.hash
-    "community": "nf2.community_dominant_mod",
+    "community":  "nf2.community_dominant_mod",
 }
 
 # ── Bucketed dimensions (field:mode → CASE expression) ────────────────────────
@@ -141,13 +161,17 @@ def _resolve_dims(
 ) -> list[tuple[str, str, str]]:
     """
     Return list of (key, safe_alias, sql_expr) for each valid dimension.
-    Skips unknown dims and enriched-bucket dims when has_nf=False.
+    Skips unknown dims, enriched-bucket dims when has_nf=False,
+    and new-schema dims when the DB predates schema-enrichment-v2.
     """
+    has_schema = _has_new_schema(conn)
     result = []
     for d in dimensions:
         if d in AVAILABLE_DIMENSIONS:
             if d in _ENRICHED_DIMS and not has_nf:
                 continue   # skip enriched dim when node_features unavailable
+            if d in _NEW_SCHEMA_DIMS and not has_schema:
+                continue   # skip new-schema dims on pre-enrichment DBs
             safe = d.replace(".", "_")
             result.append((d, safe, AVAILABLE_DIMENSIONS[d]))
         elif _is_bucketed_dim(d):
@@ -392,6 +416,7 @@ def _fetch_symbol_grain(
         )
         graph_edges = [dict(r) for r in conn.execute(esql, hashes + hashes).fetchall()]
 
+    truncated = len(rows_raw) >= _SYMBOL_LIMIT and total > _SYMBOL_LIMIT
     return {
         "rows":          rows,
         "dimensions":    ["symbol"],
@@ -400,6 +425,9 @@ def _fetch_symbol_grain(
         "has_enriched":  has_nf,
         "graph_edges":   graph_edges,
         "symbol_total":  total,
+        "truncated":     truncated,
+        "total_count":   total,
+        "shown_count":   len(rows),
     }
 
 
@@ -408,6 +436,29 @@ def _fetch_symbol_grain(
 def _has_node_features(conn: sqlite3.Connection) -> bool:
     row = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='node_features'"
+    ).fetchone()
+    return row is not None
+
+
+def _has_new_schema(conn: sqlite3.Connection) -> bool:
+    """True if the DB has the enriched-schema columns (is_async, arity, etc.)."""
+    try:
+        conn.execute("SELECT is_async FROM nodes LIMIT 0")
+        return True
+    except sqlite3.OperationalError:
+        return False
+
+
+def _has_imports_table(conn: sqlite3.Connection) -> bool:
+    row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='imports'"
+    ).fetchone()
+    return row is not None
+
+
+def _has_inheritance_table(conn: sqlite3.Connection) -> bool:
+    row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='inheritance'"
     ).fetchone()
     return row is not None
 
@@ -625,13 +676,21 @@ def fetch_graph_edges(
 
 # Simple dims that have bounded cardinality and are useful for value-picker filters
 _PICKER_DIMS = {
-    "module":                "n.module",
-    "risk":                  "n.risk",
-    "kind":                  "n.kind",
-    "dead":                  "CASE WHEN n.caller_count = 0 THEN 'dead' ELSE 'alive' END",
-    "high_risk":             "CASE WHEN n.risk IN ('high','critical') THEN 'high-risk' ELSE 'normal' END",
-    "community": "nf.community_dominant_mod",
+    "module":       "n.module",
+    "risk":         "n.risk",
+    "kind":         "n.kind",
+    "directory":    "dirname(n.file_path)",
+    "dead":         "CASE WHEN n.caller_count = 0 THEN 'dead' ELSE 'alive' END",
+    "high_risk":    "CASE WHEN n.risk IN ('high','critical') THEN 'high-risk' ELSE 'normal' END",
+    "community":    "nf.community_dominant_mod",
+    # New-schema dims — only present when is_async / framework_entry_point columns exist
+    "framework":    "COALESCE(NULLIF(n.framework_entry_point,''), 'none')",
+    "async":        "CASE WHEN n.is_async = 1 THEN 'async' ELSE 'sync' END",
+    "exported":     "CASE WHEN n.is_exported = 1 THEN 'exported' ELSE 'internal' END",
 }
+
+# Picker dims that require the new schema columns
+_NEW_SCHEMA_PICKER_DIMS = {"framework", "async", "exported"}
 
 
 def fetch_dim_values(
@@ -644,20 +703,27 @@ def fetch_dim_values(
     regardless of what Group By dims are currently active.
     """
     kc, kp = _kinds_clause(kinds)
-    has_nf = _has_node_features(conn)
+    has_nf     = _has_node_features(conn)
+    has_schema = _has_new_schema(conn)
     result: dict[str, list[str]] = {}
     for dim, expr in _PICKER_DIMS.items():
         # Skip enriched picker dims when node_features isn't available
         if "nf." in expr and not has_nf:
             continue
+        # Skip new-schema picker dims on pre-enrichment DBs
+        if dim in _NEW_SCHEMA_PICKER_DIMS and not has_schema:
+            continue
         nf_join = "LEFT JOIN node_features nf ON n.hash = nf.hash" if "nf." in expr else ""
-        rows = conn.execute(
-            f"SELECT DISTINCT ({expr}) AS v FROM nodes n {nf_join} "
-            f"WHERE n.hash NOT LIKE 'ext:%' AND ({expr}) IS NOT NULL {kc} "
-            f"ORDER BY v",
-            kp,
-        ).fetchall()
-        result[dim] = [r[0] for r in rows if r[0] is not None]
+        try:
+            rows = conn.execute(
+                f"SELECT DISTINCT ({expr}) AS v FROM nodes n {nf_join} "
+                f"WHERE n.hash NOT LIKE 'ext:%' AND ({expr}) IS NOT NULL {kc} "
+                f"ORDER BY v",
+                kp,
+            ).fetchall()
+            result[dim] = [r[0] for r in rows if r[0] is not None]
+        except Exception:
+            pass   # silently skip dims that fail on unexpected schema variants
     return result
 
 
@@ -674,11 +740,18 @@ def fetch_nodes(
     limit:    int = 300,
     kinds:    list[str] | None = None,
 ) -> dict:
-    has_nf = _has_node_features(conn)
+    has_nf     = _has_node_features(conn)
+    has_schema = _has_new_schema(conn)
+
+    schema_cols = (
+        ", n.is_async, n.arity, n.is_exported, n.is_self_recursive, "
+        "n.decorators, n.base_classes, n.return_type, n.framework_entry_point"
+    ) if has_schema else ""
 
     base_cols   = (
         "n.hash, n.name, n.module, n.kind, n.risk, "
         "n.complexity, n.caller_count, n.callee_count, n.file_path, n.line_start"
+        + schema_cols
     )
     enrich_cols = (
         ", nf.utility_score, nf.pagerank, nf.xmod_fan_in, nf.xmod_fan_out, "
@@ -718,4 +791,8 @@ def fetch_nodes(
     total_sql   = f"SELECT COUNT(*) FROM nodes n WHERE n.hash NOT LIKE 'ext:%' {kc}"
     total       = conn.execute(total_sql, kp).fetchone()[0]
 
-    return {"nodes": nodes, "has_enriched": has_nf, "total": total}
+    truncated = len(nodes) >= limit and total > limit
+    return {
+        "nodes": nodes, "has_enriched": has_nf, "total": total,
+        "truncated": truncated, "total_count": total, "shown_count": len(nodes),
+    }

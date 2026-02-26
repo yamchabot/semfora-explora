@@ -5,6 +5,8 @@ import {
   findChainEdges,
   collectChainNodeIds,
   convexHull,
+  pointInPolygon,
+  expandHullPts,
 } from "./graphAlgo.js";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -384,5 +386,211 @@ describe("convexHull", () => {
     expect(set.has("2,0")).toBe(true);
     expect(set.has("2,2")).toBe(true);
     expect(set.has("0,2")).toBe(true);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// pointInPolygon
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe("pointInPolygon", () => {
+  // Axis-aligned square for most tests
+  const square = [[0, 0], [10, 0], [10, 10], [0, 10]];
+
+  it("returns true for a point clearly inside a square", () => {
+    expect(pointInPolygon(5, 5, square)).toBe(true);
+  });
+
+  it("returns false for a point to the right of a square", () => {
+    expect(pointInPolygon(15, 5, square)).toBe(false);
+  });
+
+  it("returns false for a point above-left of a square", () => {
+    expect(pointInPolygon(-1, 11, square)).toBe(false);
+  });
+
+  it("returns false for a point below a square", () => {
+    expect(pointInPolygon(5, -1, square)).toBe(false);
+  });
+
+  it("works for a triangle — inside", () => {
+    const tri = [[0, 0], [10, 0], [5, 10]];
+    expect(pointInPolygon(5, 4, tri)).toBe(true);
+  });
+
+  it("works for a triangle — outside (far corner)", () => {
+    const tri = [[0, 0], [10, 0], [5, 10]];
+    expect(pointInPolygon(0, 9, tri)).toBe(false);
+  });
+
+  it("works for a 6-point polygon", () => {
+    // Regular-ish hexagon approximation
+    const hex = [[5,0],[9,2],[9,7],[5,10],[1,7],[1,2]];
+    expect(pointInPolygon(5, 5, hex)).toBe(true);   // center
+    expect(pointInPolygon(0, 0, hex)).toBe(false);  // corner outside
+  });
+
+  // ── degenerate inputs ──────────────────────────────────────────────────────
+
+  it("returns false for null hull", () => {
+    expect(pointInPolygon(0, 0, null)).toBe(false);
+  });
+
+  it("returns false for empty hull", () => {
+    expect(pointInPolygon(0, 0, [])).toBe(false);
+  });
+
+  it("falls back to radius-30 circle for a 1-point hull — inside", () => {
+    // Origin node; click at (20, 0) is within radius 30
+    expect(pointInPolygon(20, 0, [[0, 0]])).toBe(true);
+  });
+
+  it("falls back to radius-30 circle for a 1-point hull — outside", () => {
+    expect(pointInPolygon(40, 0, [[0, 0]])).toBe(false);
+  });
+
+  it("falls back to radius-30 circle for a 2-point hull — inside (midpoint)", () => {
+    // Midpoint of [0,0]-[10,0] is [5,0]; click at [5,0] is distance 0 < 30
+    expect(pointInPolygon(5, 0, [[0, 0], [10, 0]])).toBe(true);
+  });
+
+  it("falls back to radius-30 circle for a 2-point hull — outside (far away)", () => {
+    expect(pointInPolygon(100, 0, [[0, 0], [10, 0]])).toBe(false);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// expandHullPts
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe("expandHullPts", () => {
+  it("returns null/undefined hull unchanged", () => {
+    expect(expandHullPts(null, 5)).toBeNull();
+    expect(expandHullPts(undefined, 5)).toBeUndefined();
+  });
+
+  it("returns empty array unchanged", () => {
+    expect(expandHullPts([], 10)).toEqual([]);
+  });
+
+  it("preserves point count", () => {
+    const pts = [[0,0],[10,0],[10,10],[0,10]];
+    expect(expandHullPts(pts, 5)).toHaveLength(4);
+  });
+
+  it("with padding 0 returns same coordinates", () => {
+    const pts = [[1,0],[0,1],[-1,0],[0,-1]];
+    const exp = expandHullPts(pts, 0);
+    exp.forEach(([x,y], i) => {
+      expect(x).toBeCloseTo(pts[i][0], 6);
+      expect(y).toBeCloseTo(pts[i][1], 6);
+    });
+  });
+
+  it("expands a diamond (vertices at distance 1 from origin) by padding 1 → distance 2", () => {
+    // Diamond centred at origin; each vertex is exactly 1 unit from origin
+    const diamond = [[1,0],[0,1],[-1,0],[0,-1]];
+    const exp = expandHullPts(diamond, 1);
+    exp.forEach(([x, y]) => {
+      expect(Math.sqrt(x*x + y*y)).toBeCloseTo(2, 5);
+    });
+  });
+
+  it("expands a square — each corner moves further from centroid by padding", () => {
+    // Square with centroid at (5,5); each corner is sqrt(50) ≈ 7.07 from centroid
+    const sq = [[0,0],[10,0],[10,10],[0,10]];
+    const pad = 5;
+    const exp = expandHullPts(sq, pad);
+    const cx = 5, cy = 5;
+    sq.forEach(([ox, oy], i) => {
+      const origDist = Math.sqrt((ox-cx)**2 + (oy-cy)**2);
+      const [nx, ny] = exp[i];
+      const newDist  = Math.sqrt((nx-cx)**2 + (ny-cy)**2);
+      expect(newDist).toBeCloseTo(origDist + pad, 5);
+    });
+  });
+
+  it("expands outward — no point moves toward centroid", () => {
+    const pts = [[0,0],[6,0],[3,5]]; // triangle
+    const cx = pts.reduce((s,p)=>s+p[0],0)/3;
+    const cy = pts.reduce((s,p)=>s+p[1],0)/3;
+    const exp = expandHullPts(pts, 10);
+    pts.forEach(([ox,oy], i) => {
+      const origDist = Math.sqrt((ox-cx)**2+(oy-cy)**2);
+      const [nx,ny]  = exp[i];
+      const newDist  = Math.sqrt((nx-cx)**2+(ny-cy)**2);
+      expect(newDist).toBeGreaterThan(origDist);
+    });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Blob hit-test integration  (convexHull + expandHullPts + pointInPolygon)
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// These tests mirror the exact logic used in GraphRenderer's onBackgroundClick:
+//   hull     = convexHull(nodePts)
+//   expanded = expandHullPts(hull, HIT_PAD)
+//   hit      = pointInPolygon(gx, gy, expanded)
+
+describe("blob hit-test integration", () => {
+  const HIT_PAD = 40; // matches the constant in GraphRenderer
+
+  it("click at the centroid of a node cluster is a hit", () => {
+    const nodes = [[10,10],[40,10],[40,40],[10,40],[25,25]];
+    const hull  = convexHull(nodes);
+    const exp   = expandHullPts(hull, HIT_PAD);
+    expect(pointInPolygon(25, 25, exp)).toBe(true);
+  });
+
+  it("click in empty space between spread-out nodes hits (inside hull)", () => {
+    // Four corner-nodes with a large empty centre; click at centre = hit
+    const nodes = [[0,0],[100,0],[100,100],[0,100]];
+    const hull  = convexHull(nodes);
+    const exp   = expandHullPts(hull, HIT_PAD);
+    expect(pointInPolygon(50, 50, exp)).toBe(true);
+  });
+
+  it("click just outside the node hull but within HIT_PAD expansion is a hit", () => {
+    const nodes = [[0,0],[100,0],[100,100],[0,100]];
+    const hull  = convexHull(nodes);
+    // Without expansion: point to the left of the blob misses
+    expect(pointInPolygon(-10, 50, hull)).toBe(false);
+    // With expansion: same point is now inside the padded area
+    const exp = expandHullPts(hull, HIT_PAD);
+    expect(pointInPolygon(-10, 50, exp)).toBe(true);
+  });
+
+  it("click far from all nodes misses", () => {
+    const nodes = [[0,0],[50,0],[50,50],[0,50]];
+    const hull  = convexHull(nodes);
+    const exp   = expandHullPts(hull, HIT_PAD);
+    expect(pointInPolygon(300, 300, exp)).toBe(false);
+  });
+
+  it("two separate blobs — click correctly identifies which one was hit", () => {
+    // Blob A centred around (0,0); Blob B centred around (200,0)
+    const blobA = [[-20,-20],[20,-20],[20,20],[-20,20]];
+    const blobB = [[180,-20],[220,-20],[220,20],[180,20]];
+    const hullA = convexHull(blobA), expA = expandHullPts(hullA, HIT_PAD);
+    const hullB = convexHull(blobB), expB = expandHullPts(hullB, HIT_PAD);
+
+    // Click at (0,0) should hit A, miss B
+    expect(pointInPolygon(0, 0, expA)).toBe(true);
+    expect(pointInPolygon(0, 0, expB)).toBe(false);
+
+    // Click at (200,0) should hit B, miss A
+    expect(pointInPolygon(200, 0, expA)).toBe(false);
+    expect(pointInPolygon(200, 0, expB)).toBe(true);
+  });
+
+  it("single-node blob (degenerate hull) is still clickable within fallback radius", () => {
+    const nodes  = [[50, 50]];
+    const hull   = convexHull(nodes);   // returns [[50,50]] — 1 point
+    const exp    = expandHullPts(hull, HIT_PAD);
+    // Point at the node itself: hits
+    expect(pointInPolygon(50, 50, exp)).toBe(true);
+    // Point just outside fallback radius: misses
+    expect(pointInPolygon(50 + 35, 50, exp)).toBe(false);
   });
 });

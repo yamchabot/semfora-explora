@@ -10,9 +10,11 @@ from queries.explore import (
     FIELDS,
     AGGS,
     SPECIAL_MEASURES,
+    _NEW_SCHEMA_DIMS,
     fetch_pivot,
     fetch_nodes,
     fetch_dim_values,
+    _has_new_schema,
 )
 
 router = APIRouter()
@@ -182,12 +184,19 @@ def explore_pivot(
         )
         _annotate_diff(result, dims, conn, status_map, snap_a)
 
+    has_schema = _has_new_schema(conn)
     conn.close()
+
+    # Filter new-schema dims from the menu when the DB predates schema enrichment v2
+    available_dims = [
+        d for d in AVAILABLE_DIMENSIONS.keys()
+        if d not in _NEW_SCHEMA_DIMS or has_schema
+    ]
 
     return {
         **result,
         "available_kinds":      available_kinds,
-        "available_dimensions": list(AVAILABLE_DIMENSIONS.keys()),
+        "available_dimensions": available_dims,
         "available_bucket_dims": {
             field: list(BUCKET_MODES.keys())
             for field in BUCKET_FIELDS

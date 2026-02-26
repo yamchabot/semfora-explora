@@ -157,6 +157,55 @@ export function collectChainNodeIds(chainEdgeMap, selectedIds) {
 }
 
 /**
+ * Ray-casting point-in-polygon test.
+ * Works for any simple polygon (convex or concave, CW or CCW winding).
+ * Degenerate hulls (0, 1, 2 points) fall back to a distance check using a
+ * fixed radius of 30 graph-units so small single-node blobs are still clickable.
+ *
+ * @param {number}               px      - click x in graph coordinates
+ * @param {number}               py      - click y in graph coordinates
+ * @param {Array<[number,number]>} polygon - ordered polygon vertices
+ * @returns {boolean}
+ */
+export function pointInPolygon(px, py, polygon) {
+  if (!polygon?.length) return false;
+  if (polygon.length < 3) {
+    // Degenerate: treat as circle around the midpoint
+    const [cx, cy] = polygon.length === 1
+      ? polygon[0]
+      : [(polygon[0][0] + polygon[1][0]) / 2, (polygon[0][1] + polygon[1][1]) / 2];
+    const R = 30;
+    return (px - cx) ** 2 + (py - cy) ** 2 < R * R;
+  }
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const [xi, yi] = polygon[i];
+    const [xj, yj] = polygon[j];
+    if (((yi > py) !== (yj > py)) && px < (xj - xi) * (py - yi) / (yj - yi) + xi)
+      inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * Expand each hull vertex outward from the hull's centroid by `padding` units.
+ * Used to make blob click-targets larger than the tight convex hull of node positions.
+ *
+ * @param {Array<[number,number]>} hull    - convex hull vertices
+ * @param {number}                 padding - graph-unit expansion distance
+ * @returns {Array<[number,number]>}
+ */
+export function expandHullPts(hull, padding) {
+  if (!hull?.length) return hull;
+  const cx = hull.reduce((s, p) => s + p[0], 0) / hull.length;
+  const cy = hull.reduce((s, p) => s + p[1], 0) / hull.length;
+  return hull.map(([x, y]) => {
+    const dx = x - cx, dy = y - cy, len = Math.sqrt(dx * dx + dy * dy) || 1;
+    return [x + dx / len * padding, y + dy / len * padding];
+  });
+}
+
+/**
  * Andrew's monotone chain convex hull.
  * Returns hull points as [x, y] pairs. Handles degenerate cases (< 3 points).
  *

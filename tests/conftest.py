@@ -1,5 +1,5 @@
 """
-Shared fixtures and helpers for semfora-explorer analytics regression tests.
+Shared fixtures and helpers for semfora-explora analytics regression tests.
 
 All tests run against pre-generated semfora SQLite DBs in data/.
 No running server required — we query the DBs directly using the same
