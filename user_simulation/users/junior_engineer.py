@@ -1,5 +1,5 @@
-from ..judgement import P, Person
-from ..z3_compat import And, Implies
+from ..judgement import Person
+from usersim.judgement.z3_compat import Implies
 
 # Junior engineer orienting in an unfamiliar codebase.
 # Easily overwhelmed — needs the graph to be calm and navigable.

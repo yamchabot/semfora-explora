@@ -26,5 +26,5 @@ Usage:
 """
 
 from .perceptions import Perceptions, compute_perceptions
-from .judgement   import P, Person, CheckResult, check_person, check_all
+from .judgement   import Person, check_person, check_all
 from .users       import ALL

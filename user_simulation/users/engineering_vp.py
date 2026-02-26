@@ -1,5 +1,5 @@
-from ..judgement import P, Person
-from ..z3_compat import And, Implies
+from ..judgement import Person
+from usersim.judgement.z3_compat import Implies
 
 # Engineering VP responsible for org-level architecture decisions.
 # Uses the graph to assess team ownership boundaries, blast radius,

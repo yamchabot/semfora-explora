@@ -1,5 +1,5 @@
-from ..judgement import P, Person
-from ..z3_compat import And, Implies
+from ..judgement import Person
+from usersim.judgement.z3_compat import Implies
 
 # People manager (lightly technical) planning a hire or team restructure.
 # Uses the graph to understand the shape of the codebase: how many distinct

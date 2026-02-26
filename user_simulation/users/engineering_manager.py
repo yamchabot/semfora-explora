@@ -1,5 +1,4 @@
-from ..judgement import P, Person
-from ..z3_compat import And
+from ..judgement import Person
 
 # Engineering manager responsible for a specific team and module.
 # Needs to understand their team's code and see what it connects to.

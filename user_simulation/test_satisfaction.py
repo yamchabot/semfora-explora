@@ -3,6 +3,9 @@ test_satisfaction.py
 
 Tests for the three-layer user satisfaction system.
 
+Results from check_person / check_all are usersim-format dicts:
+    {"person": str, "satisfied": bool, "score": float, "violations": [str]}
+
 Uses fixture Perceptions objects — no D3 or frontend dependency.
 The instrumentation (layoutMetrics.js) is tested separately in vitest.
 
@@ -16,7 +19,7 @@ Fixture inventory:
 
 import pytest
 from .perceptions import Perceptions
-from .judgement   import check_person, check_all, P
+from .judgement   import check_person, check_all
 from .users       import (
     ALL, COMPANY_EXECUTIVE, ENGINEERING_VP, ENGINEERING_MANAGER,
     PEOPLE_MANAGER, STAFF_ENGINEER, PRINCIPAL_ARCHITECT,
@@ -187,35 +190,35 @@ def clean_single_module():
 
 class TestGoodLayout:
     def test_company_executive(self, good_layout):
-        assert check_person(COMPANY_EXECUTIVE, good_layout).satisfied
+        assert check_person(COMPANY_EXECUTIVE, good_layout)["satisfied"]
 
     def test_engineering_vp(self, good_layout):
-        assert check_person(ENGINEERING_VP, good_layout).satisfied
+        assert check_person(ENGINEERING_VP, good_layout)["satisfied"]
 
     def test_engineering_manager(self, good_layout):
-        assert check_person(ENGINEERING_MANAGER, good_layout).satisfied
+        assert check_person(ENGINEERING_MANAGER, good_layout)["satisfied"]
 
     def test_people_manager(self, good_layout):
-        assert check_person(PEOPLE_MANAGER, good_layout).satisfied
+        assert check_person(PEOPLE_MANAGER, good_layout)["satisfied"]
 
     def test_staff_engineer(self, good_layout):
-        assert check_person(STAFF_ENGINEER, good_layout).satisfied
+        assert check_person(STAFF_ENGINEER, good_layout)["satisfied"]
 
     def test_principal_architect(self, good_layout):
-        assert check_person(PRINCIPAL_ARCHITECT, good_layout).satisfied
+        assert check_person(PRINCIPAL_ARCHITECT, good_layout)["satisfied"]
 
     def test_senior_engineer(self, good_layout):
-        assert check_person(SENIOR_ENGINEER, good_layout).satisfied
+        assert check_person(SENIOR_ENGINEER, good_layout)["satisfied"]
 
     def test_engineer(self, good_layout):
-        assert check_person(ENGINEER, good_layout).satisfied
+        assert check_person(ENGINEER, good_layout)["satisfied"]
 
     def test_junior_engineer(self, good_layout):
-        assert check_person(JUNIOR_ENGINEER, good_layout).satisfied
+        assert check_person(JUNIOR_ENGINEER, good_layout)["satisfied"]
 
     def test_all_satisfied(self, good_layout):
         results = check_all(ALL, good_layout)
-        failed  = [r for r in results if not r.satisfied]
+        failed  = [r for r in results if not r["satisfied"]]
         assert failed == [], "\n".join(str(r) for r in failed)
 
 
@@ -224,35 +227,35 @@ class TestGoodLayout:
 class TestMergedModules:
     def test_executive_fails(self, merged_modules):
         """Sarah can't see module separation — Implies fires and fails."""
-        assert not check_person(COMPANY_EXECUTIVE, merged_modules).satisfied
+        assert not check_person(COMPANY_EXECUTIVE, merged_modules)["satisfied"]
 
     def test_vp_fails(self, merged_modules):
         """Marcus needs blob_integrity >= 0.92 and module_separation >= 40."""
-        assert not check_person(ENGINEERING_VP, merged_modules).satisfied
+        assert not check_person(ENGINEERING_VP, merged_modules)["satisfied"]
 
     def test_engineering_manager_fails(self, merged_modules):
         """Priya needs blob_integrity >= 0.85 to identify her team's region."""
-        assert not check_person(ENGINEERING_MANAGER, merged_modules).satisfied
+        assert not check_person(ENGINEERING_MANAGER, merged_modules)["satisfied"]
 
     def test_staff_engineer_fails(self, merged_modules):
         """Kenji needs blob_integrity >= 0.92 to do his analysis."""
-        assert not check_person(STAFF_ENGINEER, merged_modules).satisfied
+        assert not check_person(STAFF_ENGINEER, merged_modules)["satisfied"]
 
     def test_principal_architect_fails(self, merged_modules):
         """Fatima needs both high blob_integrity and clear module separation."""
-        assert not check_person(PRINCIPAL_ARCHITECT, merged_modules).satisfied
+        assert not check_person(PRINCIPAL_ARCHITECT, merged_modules)["satisfied"]
 
     def test_senior_engineer_survives(self, merged_modules):
         """Alex can still trace chains — elongation and edge_visibility are fine."""
-        assert check_person(SENIOR_ENGINEER, merged_modules).satisfied
+        assert check_person(SENIOR_ENGINEER, merged_modules)["satisfied"]
 
     def test_engineer_survives(self, merged_modules):
         """Dana just needs visible edges and low overlap — unaffected by blob merging."""
-        assert check_person(ENGINEER, merged_modules).satisfied
+        assert check_person(ENGINEER, merged_modules)["satisfied"]
 
     def test_junior_engineer_fails(self, merged_modules):
         """Taylor needs module_separation >= 10px when there are 2+ modules."""
-        assert not check_person(JUNIOR_ENGINEER, merged_modules).satisfied
+        assert not check_person(JUNIOR_ENGINEER, merged_modules)["satisfied"]
 
 
 # ── Hairball: everyone fails ──────────────────────────────────────────────────
@@ -260,32 +263,32 @@ class TestMergedModules:
 class TestHairball:
     def test_nobody_satisfied(self, hairball):
         results   = check_all(ALL, hairball)
-        satisfied = [r for r in results if r.satisfied]
-        assert satisfied == [], f"Expected all to fail: {[r.person.name for r in satisfied]}"
+        satisfied = [r for r in results if r["satisfied"]]
+        assert satisfied == [], f"Expected all to fail: {[r['person'] for r in satisfied]}"
 
 
 # ── Single module: most users satisfied; Marcus needs multi-module systems ────
 
 class TestCleanSingleModule:
     def test_senior_engineer_satisfied(self, clean_single_module):
-        assert check_person(SENIOR_ENGINEER, clean_single_module).satisfied
+        assert check_person(SENIOR_ENGINEER, clean_single_module)["satisfied"]
 
     def test_junior_engineer_satisfied(self, clean_single_module):
-        assert check_person(JUNIOR_ENGINEER, clean_single_module).satisfied
+        assert check_person(JUNIOR_ENGINEER, clean_single_module)["satisfied"]
 
     def test_executive_satisfied(self, clean_single_module):
         """Sarah's multi-module constraint doesn't fire when module_count=1."""
-        assert check_person(COMPANY_EXECUTIVE, clean_single_module).satisfied
+        assert check_person(COMPANY_EXECUTIVE, clean_single_module)["satisfied"]
 
     def test_vp_satisfied_single_module(self, clean_single_module):
         """Marcus's module requirements are conditional on module_count >= 2.
         Single-module graphs trivially satisfy him — one team owns everything,
         no cross-team coupling to worry about."""
-        assert check_person(ENGINEERING_VP, clean_single_module).satisfied
+        assert check_person(ENGINEERING_VP, clean_single_module)["satisfied"]
 
     def test_people_manager_satisfied(self, clean_single_module):
         """Jordan only needs node sizes to vary — doesn't require multiple modules."""
-        assert check_person(PEOPLE_MANAGER, clean_single_module).satisfied
+        assert check_person(PEOPLE_MANAGER, clean_single_module)["satisfied"]
 
 
 # ── check_all returns one result per person ───────────────────────────────────
@@ -293,7 +296,7 @@ class TestCleanSingleModule:
 def test_check_all_covers_all_people(good_layout):
     results = check_all(ALL, good_layout)
     assert len(results) == len(ALL)
-    names = {r.person.name for r in results}
+    names = {r["person"] for r in results}
     assert len(names) == len(ALL)
 
 
@@ -376,14 +379,14 @@ class TestZ3ArithLayer:
         base.update(overrides)
         return _make_perceptions(**base)
 
-    def test_failed_descriptions_populated(self, good_layout=None):
-        """Unsatisfied check populates failed_descriptions with readable strings."""
+    def test_failed_violations_populated(self):
+        """Unsatisfied check populates violations with readable strings."""
         p = self._base_perceptions(chain_elongation=1.50, chain_r2=0.60)
         result = check_person(SENIOR_ENGINEER, p)
-        assert not result.satisfied
-        assert len(result.failed_descriptions) >= 1
-        assert any("chain_elongation" in d or "chain_r2" in d
-                   for d in result.failed_descriptions)
+        assert not result["satisfied"]
+        assert len(result["violations"]) >= 1
+        assert any("chain_elongation" in v or "chain_r2" in v
+                   for v in result["violations"])
 
     def test_blob_routing_fail_triggers_fatima(self):
         """blob_edge_routing < 0.80 makes Fatima fail when module_count >= 3."""
@@ -391,8 +394,8 @@ class TestZ3ArithLayer:
             module_count=5, blob_edge_routing=0.40
         )
         result = check_person(PRINCIPAL_ARCHITECT, p)
-        assert not result.satisfied
-        assert any("blob_edge_routing" in d for d in result.failed_descriptions)
+        assert not result["satisfied"]
+        assert any("blob_edge_routing" in v for v in result["violations"])
 
     def test_blob_routing_fail_triggers_marcus(self):
         """blob_edge_routing < 0.75 makes Marcus fail when module_count >= 3."""
@@ -400,22 +403,22 @@ class TestZ3ArithLayer:
             module_count=5, blob_edge_routing=0.40
         )
         result = check_person(ENGINEERING_VP, p)
-        assert not result.satisfied
-        assert any("blob_edge_routing" in d for d in result.failed_descriptions)
+        assert not result["satisfied"]
+        assert any("blob_edge_routing" in v for v in result["violations"])
 
     def test_corridor_crossing_fails_fatima(self):
         """inter_module_crossings > 0.20 with 3+ modules makes Fatima fail."""
         p = self._base_perceptions(module_count=4, inter_module_crossings=0.80)
         result = check_person(PRINCIPAL_ARCHITECT, p)
-        assert not result.satisfied
-        assert any("inter_module_crossings" in d for d in result.failed_descriptions)
+        assert not result["satisfied"]
+        assert any("inter_module_crossings" in v for v in result["violations"])
 
     def test_corridor_crossing_fails_marcus(self):
         """inter_module_crossings > 0.30 with 3+ modules makes Marcus fail."""
         p = self._base_perceptions(module_count=4, inter_module_crossings=0.80)
         result = check_person(ENGINEERING_VP, p)
-        assert not result.satisfied
-        assert any("inter_module_crossings" in d for d in result.failed_descriptions)
+        assert not result["satisfied"]
+        assert any("inter_module_crossings" in v for v in result["violations"])
 
     def test_corridor_crossing_ignored_for_two_modules(self):
         """inter_module_crossings constraint doesn't fire for module_count=2."""
@@ -425,30 +428,28 @@ class TestZ3ArithLayer:
             silhouette_by_module=0.65, spatial_cluster_purity=0.80,
             blob_edge_routing=1.0,
         )
-        assert check_person(PRINCIPAL_ARCHITECT, p).satisfied
-        assert check_person(ENGINEERING_VP, p).satisfied
+        assert check_person(PRINCIPAL_ARCHITECT, p)["satisfied"]
+        assert check_person(ENGINEERING_VP, p)["satisfied"]
 
     def test_blob_routing_ignored_for_two_modules(self):
-        """blob_edge_routing doesn't trigger for module_count=2 (no foreign blobs to route through)."""
+        """blob_edge_routing doesn't trigger for module_count=2."""
         p = self._base_perceptions(
             module_count=2, blob_edge_routing=0.0,
             module_separation=80.0, blob_integrity=0.95,
             silhouette_by_module=0.65, spatial_cluster_purity=0.80,
         )
-        result_fatima = check_person(PRINCIPAL_ARCHITECT, p)
-        assert result_fatima.satisfied
-        result_marcus = check_person(ENGINEERING_VP, p)
-        assert result_marcus.satisfied
+        assert check_person(PRINCIPAL_ARCHITECT, p)["satisfied"]
+        assert check_person(ENGINEERING_VP, p)["satisfied"]
 
-    def test_implies_description_mentions_antecedent(self):
-        """Implies failure description explains the conditional."""
+    def test_implies_violation_mentions_vars(self):
+        """Implies violation string mentions the antecedent and consequent variables."""
         p = self._base_perceptions(
             module_count=2,
-            module_separation=30.0,    # triggers Implies(module_count>=2, sep>=40) but fails
-            silhouette_by_module=0.10, # fails Fatima's silhouette threshold
+            module_separation=30.0,
+            silhouette_by_module=0.10,
             spatial_cluster_purity=0.10,
         )
         result = check_person(PRINCIPAL_ARCHITECT, p)
-        assert not result.satisfied
-        assert any("module_count" in d or "module_separation" in d
-                   for d in result.failed_descriptions)
+        assert not result["satisfied"]
+        assert any("module_count" in v or "module_separation" in v
+                   for v in result["violations"])

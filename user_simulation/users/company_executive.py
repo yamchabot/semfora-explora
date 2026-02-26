@@ -1,5 +1,5 @@
-from ..judgement import P, Person
-from ..z3_compat import And, Implies
+from ..judgement import Person
+from usersim.judgement.z3_compat import Implies
 
 # A CTO reviewing the graph to get a structural read on the codebase.
 # Doesn't trace individual functions. Cares about whether the overall shape

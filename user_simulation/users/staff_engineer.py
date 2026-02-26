@@ -1,5 +1,5 @@
-from ..judgement import P, Person
-from ..z3_compat import And, Implies
+from ..judgement import Person
+from usersim.judgement.z3_compat import Implies
 
 # Staff engineer hunting for architectural problems and refactoring opportunities.
 # Technically sophisticated — uses the graph to find over-coupled modules,

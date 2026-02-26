@@ -100,7 +100,10 @@ def print_report(results_by_scenario: dict):
     """
     Print results grouped by person, not by scenario.
     Satisfied people get one line. Unhappy people get a narrative block
-    with deduplicated failing constraint descriptions and which scenarios failed.
+    with deduplicated violation strings and which scenarios failed.
+
+    Each result is a usersim-format dict:
+        {"person": str, "satisfied": bool, "score": float, "violations": [str]}
     """
     from user_simulation.users import ALL
 
@@ -114,7 +117,7 @@ def print_report(results_by_scenario: dict):
 
     # Header
     total_checks = len(ALL) * len(scenarios)
-    total_happy  = sum(1 for pr in by_person for r in pr.values() if r.satisfied)
+    total_happy  = sum(1 for pr in by_person for r in pr.values() if r["satisfied"])
     print(f"\n{'─' * 60}")
     print(f"  {total_happy}/{total_checks} person×scenario checks satisfied")
     print(f"  scenarios: {', '.join(scenarios)}")
@@ -126,22 +129,21 @@ def print_report(results_by_scenario: dict):
         Pro    = pro.capitalize()
         sv     = "" if pro == "they" else "s"
 
-        failing = {s: r for s, r in person_results.items() if not r.satisfied}
+        failing = {s: r for s, r in person_results.items() if not r["satisfied"]}
 
         if not failing:
             print(f"✅  {person.name} ({person.role}) — satisfied in all scenarios\n")
             continue
 
-        # Deduplicate failing constraints across scenarios by constraint key
-        # (the sexpr of the conjunct). Keep the worst-case description — the
-        # one where the measured value is furthest from the threshold, which
-        # corresponds to the longest description string as a simple heuristic.
-        best: dict[str, str] = {}
+        # Deduplicate violation strings across scenarios (same constraint may fire
+        # in multiple scenarios — show it once).
+        seen: set[str] = set()
+        descs: list[str] = []
         for r in failing.values():
-            for key, desc in r.failed_constraints:
-                if key not in best or len(desc) > len(best[key]):
-                    best[key] = desc
-        descs = list(best.values())
+            for v in r["violations"]:
+                if v not in seen:
+                    seen.add(v)
+                    descs.append(v)
 
         goal_lc      = person.goal[0].lower() + person.goal[1:]
         failing_names = ", ".join(failing.keys())
@@ -184,7 +186,7 @@ def main():
         print(f"\n⚠  HTML report skipped: {e}")
 
     any_fail = any(
-        not r.satisfied
+        not r["satisfied"]
         for scenario_results in results.values()
         for r in scenario_results
     )

@@ -1,5 +1,5 @@
-from ..judgement import P, Person
-from ..z3_compat import And, Implies
+from ..judgement import Person
+from usersim.judgement.z3_compat import Implies
 
 # Principal software architect verifying the implementation matches the design.
 # Looks for layer violations, unexpected coupling, and module drift.

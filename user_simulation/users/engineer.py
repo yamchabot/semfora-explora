@@ -1,5 +1,5 @@
-from ..judgement import P, Person
-from ..z3_compat import And, Implies
+from ..judgement import Person
+from usersim.judgement.z3_compat import Implies
 
 # Engineer (mid-level) understanding the module they're currently working in.
 # Needs to see what their module connects to and understand local call structure.
