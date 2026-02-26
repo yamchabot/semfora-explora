@@ -179,7 +179,7 @@ export function AddDimMenu({ available, currentDims = [], onAdd }) {
     <div ref={ref} style={{ position:"relative" }}>
       <button className="btn btn-sm btn-ghost" style={{ fontSize:12 }} onClick={() => setOpen(v => !v)}>+ Add dimension ▾</button>
       {open && (
-        <div style={{ position:"absolute", top:"calc(100% + 4px)", left:0, zIndex:50, background:"var(--bg2)", border:"1px solid var(--border2)", borderRadius:6, boxShadow:"0 4px 16px #0006", minWidth:190 }}>
+        <div style={{ position:"absolute", top:"calc(100% + 4px)", left:0, zIndex:50, background:"var(--bg2)", border:"1px solid var(--border2)", borderRadius:6, boxShadow:"0 4px 16px #0006", minWidth:190, maxHeight:"calc(100vh - 180px)", overflowY:"auto" }}>
 
           {/* Grouped categorical dims */}
           {DIM_GROUPS.map(group => {
