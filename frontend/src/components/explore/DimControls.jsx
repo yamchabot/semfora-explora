@@ -119,6 +119,23 @@ export function SortableDimChip({ id, label, index, onRemove, onChangeMode, enab
   );
 }
 
+// Dim grouping for the AddDimMenu
+const DIM_GROUPS = [
+  {
+    label: "Hierarchy",
+    dims:  ["module", "directory", "file", "class", "symbol"],
+  },
+  {
+    label: "Analysis",
+    dims:  ["risk", "kind", "dead", "high_risk", "in_cycle", "community"],
+  },
+  {
+    label: "Schema ◈",
+    dims:  ["framework", "async", "exported"],
+    title: "Requires semfora-engine schema enrichment v2+",
+  },
+];
+
 // ── AddDimMenu ─────────────────────────────────────────────────────────────────
 
 export function AddDimMenu({ available, currentDims = [], onAdd }) {
@@ -130,16 +147,24 @@ export function AddDimMenu({ available, currentDims = [], onAdd }) {
     return () => document.removeEventListener("mousedown", h);
   }, []);
 
-  function SectionHeader({ children }) {
-    return <div style={{ padding:"5px 12px 2px", fontSize:10, fontWeight:700, color:"var(--text3)", textTransform:"uppercase", letterSpacing:"0.08em" }}>{children}</div>;
+  const availableSet = new Set(available);
+
+  function SectionHeader({ children, title }) {
+    return (
+      <div title={title} style={{ padding:"5px 12px 2px", fontSize:10, fontWeight:700, color:"var(--text3)", textTransform:"uppercase", letterSpacing:"0.08em" }}>
+        {children}
+      </div>
+    );
   }
-  function Item({ label, onClick }) {
+  function Item({ label, dim, onClick }) {
     return (
       <div onClick={onClick}
-        style={{ padding:"5px 14px", fontSize:12, cursor:"pointer", fontFamily:"monospace", color:"var(--text)" }}
+        style={{ padding:"5px 14px", fontSize:12, cursor:"pointer", fontFamily:"monospace", color:"var(--text)", display:"flex", alignItems:"center", gap:6 }}
         onMouseEnter={e => e.currentTarget.style.background = "var(--bg3)"}
         onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-      >{label}</div>
+      >
+        {label}
+      </div>
     );
   }
 
@@ -148,29 +173,62 @@ export function AddDimMenu({ available, currentDims = [], onAdd }) {
     ([field]) => !currentDims.some(d => d === field || d.startsWith(`${field}:`))
   );
 
-  const hasDims = available.length > 0;
   const hasBucketed = availableBucketed.length > 0;
+
   return (
     <div ref={ref} style={{ position:"relative" }}>
       <button className="btn btn-sm btn-ghost" style={{ fontSize:12 }} onClick={() => setOpen(v => !v)}>+ Add dimension ▾</button>
       {open && (
-        <div style={{ position:"absolute", top:"calc(100% + 4px)", left:0, zIndex:50, background:"var(--bg2)", border:"1px solid var(--border2)", borderRadius:6, boxShadow:"0 4px 16px #0006", minWidth:180 }}>
-          {hasDims && <SectionHeader>Structural</SectionHeader>}
-          {available.map(d => (
-            <Item key={d} label={dimDisplayLabel(d)} onClick={() => { onAdd(d); setOpen(false); }} />
-          ))}
+        <div style={{ position:"absolute", top:"calc(100% + 4px)", left:0, zIndex:50, background:"var(--bg2)", border:"1px solid var(--border2)", borderRadius:6, boxShadow:"0 4px 16px #0006", minWidth:190 }}>
+
+          {/* Grouped categorical dims */}
+          {DIM_GROUPS.map(group => {
+            const groupDims = group.dims.filter(d => availableSet.has(d) && !currentDims.includes(d));
+            if (!groupDims.length) return null;
+            return (
+              <div key={group.label}>
+                <SectionHeader title={group.title}>{group.label}</SectionHeader>
+                {groupDims.map(d => (
+                  <Item key={d} dim={d} label={dimDisplayLabel(d)} onClick={() => { onAdd(d); setOpen(false); }} />
+                ))}
+              </div>
+            );
+          })}
+
+          {/* Ungrouped dims (not in any category above) */}
+          {(() => {
+            const grouped = DIM_GROUPS.flatMap(g => g.dims);
+            const ungrouped = available.filter(d => !grouped.includes(d) && !currentDims.includes(d));
+            if (!ungrouped.length) return null;
+            return (
+              <div>
+                <SectionHeader>Other</SectionHeader>
+                {ungrouped.map(d => (
+                  <Item key={d} dim={d} label={dimDisplayLabel(d)} onClick={() => { onAdd(d); setOpen(false); }} />
+                ))}
+              </div>
+            );
+          })()}
+
+          {/* Bucketed measure dims */}
           {hasBucketed && (
-            <div style={{ borderTop: hasDims ? "1px solid var(--border)" : undefined, marginTop: hasDims ? 4 : 0 }}>
+            <div style={{ borderTop:"1px solid var(--border)", marginTop:4 }}>
               <SectionHeader>Bucketed measures</SectionHeader>
+              {availableBucketed.map(([field, label]) => (
+                <Item
+                  key={field}
+                  dim={field}
+                  label={label}
+                  onClick={() => { onAdd(`${field}:quartile`); setOpen(false); }}
+                />
+              ))}
             </div>
           )}
-          {availableBucketed.map(([field, label]) => (
-            <Item
-              key={field}
-              label={label}
-              onClick={() => { onAdd(`${field}:quartile`); setOpen(false); }}
-            />
-          ))}
+
+          {/* Legend for special markers */}
+          <div style={{ borderTop:"1px solid var(--border)", padding:"6px 12px", fontSize:10, color:"var(--text3)" }}>
+            ✦ needs enriched  ·  ◈ needs schema v2
+          </div>
         </div>
       )}
     </div>

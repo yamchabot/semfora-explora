@@ -26,13 +26,22 @@ export const BUCKET_MODES = ["median", "quartile", "decile"];
 
 export const DIM_LABELS = {
   module:    "module",
+  class:     "class",
   risk:      "risk",
   kind:      "kind",
   symbol:    "symbol",
+  // File / path dims
+  file:      "file",
+  directory: "directory",
+  // Derived
   dead:      "dead/alive",
   high_risk: "high-risk",
   in_cycle:  "in-cycle ✦",
   community: "community ✦",
+  // New-schema dims (require enrichment v2)
+  framework: "framework ◈",
+  async:     "async ◈",
+  exported:  "exported ◈",
 };
 
 export const BUCKET_FIELDS_META = {
