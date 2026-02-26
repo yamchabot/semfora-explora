@@ -416,6 +416,29 @@ def _has_node_features(conn: sqlite3.Connection) -> bool:
     return row is not None
 
 
+def _has_new_schema(conn: sqlite3.Connection) -> bool:
+    """True if the DB has the enriched-schema columns (is_async, arity, etc.)."""
+    try:
+        conn.execute("SELECT is_async FROM nodes LIMIT 0")
+        return True
+    except sqlite3.OperationalError:
+        return False
+
+
+def _has_imports_table(conn: sqlite3.Connection) -> bool:
+    row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='imports'"
+    ).fetchone()
+    return row is not None
+
+
+def _has_inheritance_table(conn: sqlite3.Connection) -> bool:
+    row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='inheritance'"
+    ).fetchone()
+    return row is not None
+
+
 def _kinds_clause(kinds: list[str] | None, alias: str = "n") -> tuple[str, list]:
     if not kinds:
         return "", []
@@ -678,11 +701,18 @@ def fetch_nodes(
     limit:    int = 300,
     kinds:    list[str] | None = None,
 ) -> dict:
-    has_nf = _has_node_features(conn)
+    has_nf     = _has_node_features(conn)
+    has_schema = _has_new_schema(conn)
+
+    schema_cols = (
+        ", n.is_async, n.arity, n.is_exported, n.is_self_recursive, "
+        "n.decorators, n.base_classes, n.return_type, n.framework_entry_point"
+    ) if has_schema else ""
 
     base_cols   = (
         "n.hash, n.name, n.module, n.kind, n.risk, "
         "n.complexity, n.caller_count, n.callee_count, n.file_path, n.line_start"
+        + schema_cols
     )
     enrich_cols = (
         ", nf.utility_score, nf.pagerank, nf.xmod_fan_in, nf.xmod_fan_out, "

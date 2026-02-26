@@ -34,6 +34,9 @@ export const api = {
     return get(`/repos/${id}/graph${qs ? "?" + qs : ""}`);
   },
   node: (id, hash) => get(`/repos/${id}/nodes/${hash}`),
+  lookupNode: (id, sym) => get(`/repos/${id}/nodes/lookup?sym=${encodeURIComponent(sym)}`),
+  nodeFlags: (id) => get(`/repos/${id}/node-flags`),
+  inheritanceGraph: (id) => get(`/repos/${id}/inheritance-graph`),
   blastRadius: (id, hash, depth = 4) =>
     get(`/repos/${id}/blast-radius/${hash}?max_depth=${depth}`),
   deadCode: (id) => get(`/repos/${id}/dead-code`),

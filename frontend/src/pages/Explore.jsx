@@ -40,6 +40,7 @@ import { FilterWizard }                   from "../components/explore/FilterWiza
 import { KindFilter }                     from "../components/explore/KindFilter.jsx";
 import { PivotTable }                     from "../components/explore/PivotTable.jsx";
 import { GraphNodeDetails }               from "../components/explore/GraphNodeDetails.jsx";
+import { NodeMetaPanel }                  from "../components/explore/NodeMetaPanel.jsx";
 import { NodeTable }                      from "../components/explore/NodeTable.jsx";
 import { PatternPanel }                   from "../components/explore/PatternPanel.jsx";
 import GraphRenderer                      from "../components/GraphRenderer.jsx";
@@ -227,6 +228,15 @@ export default function Explore() {
   });
 
   const hasEnriched = pivotQuery.data?.has_enriched ?? false;
+
+  // ── Node flags (async/recursive/exported badges in graph) ─────────────────
+  const { data: nodeFlagsData } = useQuery({
+    queryKey: ["node-flags", repoId],
+    queryFn:  () => api.nodeFlags(repoId),
+    enabled:  renderer === "graph" && !!repoId,
+    staleTime: 60_000,
+  });
+  const nodeFlags = nodeFlagsData?.flags ?? null;
 
   // ── Repos list for the compare selector ──────────────────────────────────
   const { data: reposData } = useQuery({ queryKey: ["repos"], queryFn: api.repos });
@@ -569,6 +579,7 @@ export default function Explore() {
           highlightSet={highlightSet}
           edgeColorOverrides={diffEdgeOverrides}
           nodeColorOverrides={patternNodeColors}
+          nodeFlags={nodeFlags}
           controlsH={0} fillViewport={true}
           onAddFilter={handleAddFilter}
         />
@@ -581,6 +592,40 @@ export default function Explore() {
           onHighlight={handlePatternHighlight}
           activePatternKey={activePatternKey}
         />
+      )}
+
+      {/* Node meta panel — symbol-level node details, shown on click */}
+      {selectedNode && stableFilteredData?.dimensions?.slice(-1)[0] === "symbol" && (
+        <div style={{
+          position: "absolute",
+          top: showPatterns ? 280 : 12,
+          right: 12,
+          zIndex: 10,
+          width: 240,
+          maxHeight: "calc(100vh - 300px)",
+          overflowY: "auto",
+          background: "var(--bg2)",
+          border: "1px solid var(--border2)",
+          borderRadius: 8,
+          padding: "12px 14px",
+          boxShadow: "0 4px 20px rgba(0,0,0,0.55)",
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text3)" }}>
+              Node Details
+            </span>
+            <button
+              onClick={() => setSelectedNode(null)}
+              style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text3)", fontSize: 14, lineHeight: 1, padding: 0 }}
+              title="Close"
+            >×</button>
+          </div>
+          <NodeMetaPanel
+            repoId={repoId}
+            sym={selectedNode?.id}
+            nodeModule={selectedNode?.group}
+          />
+        </div>
       )}
 
       {/* Diff legend — bottom-right, only shown when compare is active */}

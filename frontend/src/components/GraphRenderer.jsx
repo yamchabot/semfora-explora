@@ -333,6 +333,7 @@ export default function GraphRenderer({ data, measures, onNodeClick, onAddFilter
   nodeColorOverrides = null,   // Map<nodeId, cssColor> — bypasses metric gradient (Diff page)
   edgeColorOverrides = null,   // Map<"src|tgt", cssColor> — bypasses step/chain colors
   highlightSet = null,         // Set<nodeId> — draws glow ring; color = node's own gradient color
+  nodeFlags = null,            // {[sym]: {async,recursive,exported,test}} — badge indicators
 }) {
   const containerRef  = useRef(null);
   const fgRef         = useRef(null);
@@ -1322,7 +1323,13 @@ export default function GraphRenderer({ data, measures, onNodeClick, onAddFilter
                 // ── Pill mode (default) ───────────────────────────────────────
                 const full  = node.name || "";
                 const short = full.includes("::") ? full.split("::").slice(1).join("::") : full;
-                const label = short.length > MAX_LABEL ? short.slice(0, MAX_LABEL - 1) + "…" : short;
+                const truncShort = short.length > MAX_LABEL ? short.slice(0, MAX_LABEL - 1) + "…" : short;
+                // Append flag indicators (⚡ async, ↺ recursive, ⊕ exported)
+                const flags = nodeFlags?.[node.id];
+                const indicator = flags
+                  ? (flags.async ? "⚡" : "") + (flags.recursive ? "↺" : "") + (flags.test ? "✓" : "")
+                  : "";
+                const label = truncShort + (indicator ? " " + indicator : "");
                 const fs    = 11;
                 ctx.font    = `600 ${fs}px monospace`;
                 const tw    = ctx.measureText(label).width;
