@@ -8,17 +8,21 @@ from ..z3_compat import And, Implies
 # (cross_edge_ratio > 40%), she accepts that it will look tangled — that
 # IS the signal she needs.
 
-COMPANY_EXECUTIVE = Person(
-    name    = "Sarah",
-    role    = "Company Executive (CTO)",
-    pronoun = "she",
-    goal    = "Understand the scale and health of the codebase at a glance — "
-              "how many components, are there obvious structural problems.",
-    formula = And(
-        P.node_overlap    <= 0.02,   # shouldn't look like a dense smear
-        # Crossing budget only applies when the graph isn't inherently tangled
-        Implies(P.cross_edge_ratio <= 0.40, P.edge_crossings <= 0.40),
-        # Multi-module codebases must show at least some visual separation
-        Implies(P.module_count >= 2, P.module_separation >= 15.0),
-    ),
-)
+class CompanyExecutive(Person):
+    name    = "Sarah"
+    role    = "Company Executive (CTO)"
+    pronoun = "she"
+    goal    = ("Understand the scale and health of the codebase at a glance — "
+               "how many components, are there obvious structural problems.")
+
+    def constraints(self, P):
+        return [
+            P.node_overlap    <= 0.02,   # shouldn't look like a dense smear
+            # Crossing budget only applies when the graph isn't inherently tangled
+            Implies(P.cross_edge_ratio <= 0.40, P.edge_crossings <= 0.40),
+            # Multi-module codebases must show at least some visual separation
+            Implies(P.module_count >= 2, P.module_separation >= 15.0),
+        ]
+
+
+COMPANY_EXECUTIVE = CompanyExecutive()

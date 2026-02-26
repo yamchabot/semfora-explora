@@ -1,17 +1,21 @@
 """
 judgement.py  —  Layer 3: User satisfaction via Z3
 
-A Person is satisfied when their Z3 formula evaluates to `sat` given
-the current perceptions.
+A Person is satisfied when all of their Z3 constraints evaluate to `sat`
+given the current perceptions.
 
-Formulas are written directly in Z3's expression language over the
-numeric perception variables defined in P below. No custom DSL.
+Constraints are written directly in Z3's expression language over the
+numeric perception variables defined in P below.  No custom DSL.
 
 Users express real constraints:
   P.module_count >= 3
   P.blob_integrity >= 0.92
   Implies(P.cross_edge_count >= 3, P.module_separation >= 50.0)
   Implies(P.layout_stress > 1.20, P.cross_edge_visibility >= 0.90)
+
+The Person base class is provided by `usersim.judgement.person`.  The local
+`Person` subclass adds semfora-specific metadata fields (role, goal, pronoun)
+used for narrative output.
 
 Usage:
     from judgement import P, Person, check_person
@@ -25,14 +29,42 @@ from __future__ import annotations
 import dataclasses
 from dataclasses import dataclass, field
 
+from usersim.judgement.person import Person as _UsersimPerson
+
 from .z3_compat import Real, Int, And, Or, Not, Implies, If, Solver, sat, unsat, BoolRef, ArithRef
 from .perceptions import Perceptions
+
+
+# ── Person base class ──────────────────────────────────────────────────────────
+#
+# Extends usersim's Person with semfora-specific metadata (role, goal, pronoun).
+# User files subclass this and implement constraints(self, P).
+
+class Person(_UsersimPerson):
+    """
+    Semfora user persona.  Subclass this and implement constraints(self, P).
+
+    Extends usersim.Person with:
+      role    — job title for narrative output
+      goal    — what this person wants to accomplish
+      pronoun — for grammatical agreement in failure messages (he/she/they)
+    """
+    role:    str = ""
+    goal:    str = ""
+    pronoun: str = "they"
+
+    def constraints(self, P) -> list:
+        raise NotImplementedError(
+            f"{self.__class__.__name__} must implement constraints(self, P)."
+        )
 
 
 # ── Symbolic perception variables ─────────────────────────────────────────────
 #
 # One Z3 variable per field in Perceptions — named identically.
-# User formulas are written over these variables.
+# User constraint methods are called with this P object so they receive
+# symbolic variables, not concrete values.  check_person then fixes each
+# variable to its measured value before checking satisfiability.
 
 class P:
     """Symbolic numeric variables, one per perception field."""
@@ -118,22 +150,6 @@ class P:
     layout_conformance     = Real("layout_conformance")
 
 
-# ── Person ─────────────────────────────────────────────────────────────────────
-
-@dataclass(frozen=True)
-class Person:
-    """
-    A person who uses the graph for a specific purpose.
-    `formula` is a Z3 expression over P.* variables.
-    `pronoun` is used in narrative output (he/she/they).
-    """
-    name:    str
-    role:    str
-    goal:    str
-    formula: object    # Z3 boolean expression
-    pronoun: str = "they"
-
-
 # ── Satisfaction check ─────────────────────────────────────────────────────────
 
 @dataclass
@@ -153,19 +169,8 @@ class CheckResult:
         return self.summary
 
 
-def _conjuncts(formula):
-    """Yield atomic conjuncts from a (possibly nested) And expression."""
-    # Works with both real Z3 and the shim
-    op = getattr(formula, '_op', None)
-    if op == "and":
-        for arg in formula._args:
-            yield from _conjuncts(arg)
-    else:
-        yield formula
-
-
 def _eval_conjunct(conjunct, assignment: dict) -> bool:
-    """Evaluate a single conjunct against a fixed assignment."""
+    """Evaluate a single constraint against a fixed variable assignment."""
     s = Solver()
     for name, val in assignment.items():
         var = getattr(P, name, None)
@@ -179,38 +184,31 @@ def check_person(person: Person, perceptions: Perceptions) -> CheckResult:
     """
     Check whether `person` is satisfied by the given perceptions.
 
-    Fixes each perception variable to its measured value, then asks Z3
-    whether the person's formula is satisfiable.
-
-    For unsatisfied results, each top-level conjunct of the formula is
-    evaluated individually to produce human-readable failure descriptions.
+    Calls person.constraints(P) to get the list of constraints, then
+    fixes each perception variable to its measured value and evaluates
+    each constraint individually.  Produces human-readable failure
+    descriptions for any unsatisfied constraints.
     """
     assignment = dataclasses.asdict(perceptions)
 
-    # Fix every perception variable to its measured value
-    s = Solver()
-    for name, val in assignment.items():
-        var = getattr(P, name, None)
-        if var is not None:
-            s.add(var == val)
+    # Get constraints from the person using the symbolic P namespace
+    constraints = person.constraints(P)
 
-    s.add(person.formula)
-    satisfied = (s.check() == sat)
+    # Evaluate each constraint independently to identify failures
+    satisfied = True
+    failed_constraints = []   # list of (sexpr_key, description)
+
+    for conjunct in constraints:
+        if not _eval_conjunct(conjunct, assignment):
+            satisfied = False
+            key  = conjunct.sexpr() if hasattr(conjunct, 'sexpr') else str(conjunct)
+            desc = conjunct.describe(assignment) if hasattr(conjunct, 'describe') else key
+            failed_constraints.append((key, desc))
 
     # Build narrative
     pro  = person.pronoun
     Pro  = pro.capitalize()
     sv   = "" if pro == "they" else "s"
-
-    failed_constraints = []   # list of (sexpr_key, description)
-
-    if not satisfied:
-        for conjunct in _conjuncts(person.formula):
-            if not _eval_conjunct(conjunct, assignment):
-                key  = conjunct.sexpr() if hasattr(conjunct, 'sexpr') else str(conjunct)
-                desc = conjunct.describe(assignment) if hasattr(conjunct, 'describe') else key
-                failed_constraints.append((key, desc))
-
     descs = [desc for _, desc in failed_constraints]
 
     if satisfied:
