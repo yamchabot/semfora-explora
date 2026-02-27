@@ -30,8 +30,11 @@ class PrincipalArchitect(Person):
             # K4 (fully-connected 4-module) has a theoretical minimum of ~0.33 in any
             # circular arrangement, so the threshold is set above that floor.
             Implies(P.module_count >= 3, P.inter_module_crossings <= 0.40),
-            # When layout stress is elevated, edge visibility must compensate
-            Implies(P.layout_stress > 1.20, P.cross_edge_visibility >= 0.90),
+            # When layout stress is elevated (perEdge > 0.13 = top ~10% of scenarios,
+            # e.g. diamond or hub_20), edge visibility must compensate.
+            # Note: D3 force simulation settles to max ~0.16; threshold 1.2 would be
+            # unreachable — lowered to 0.13 to fire for genuinely stressed layouts.
+            Implies(P.layout_stress > 0.13, P.cross_edge_visibility >= 0.90),
             # When degree distribution is highly skewed, the hub must be visually central
             Implies(P.degree_gini > 0.50, P.hub_centrality_error <= 0.25),
         ]

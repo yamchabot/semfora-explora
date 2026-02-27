@@ -551,6 +551,39 @@ function mkStar(prefix, g, n) {
   };
 }
 
+/**
+ * Complete graph (K_n): every node connected to every other.
+ * All intra-module pairs have d=1 (ideal=120px) but D3 physically spreads
+ * them far apart — the circular arrangement required forces many pairs to
+ * actual distances of 200-400px vs the 120px ideal, giving high layout_stress.
+ * Models: tightly-coupled utility class, circular-dependency cluster.
+ */
+function mkClique(prefix, g, n) {
+  const ids = Array.from({ length: n }, (_, i) => `${prefix}${i}`);
+  const links = [];
+  for (let i = 0; i < ids.length; i++)
+    for (let j = i + 1; j < ids.length; j++)
+      links.push({ source: ids[i], target: ids[j] });
+  return { nodes: ids.map(id => node(id, g)), links };
+}
+
+/**
+ * Hub + orphaned dead-code nodes (degree=0).
+ * The isolated nodes drag the mean degree down, making the hub's high
+ * degree extremely anomalous → degree_gini > 0.5.
+ * Models: active subsystem surrounded by unreachable / dead-code functions.
+ */
+function mkDeadCodeHub(prefix, g, nSpokes, nDead) {
+  const hub    = node(`${prefix}hub`, g, 12);
+  const spokes = Array.from({ length: nSpokes }, (_, i) => node(`${prefix}s${i}`, g));
+  const dead   = Array.from({ length: nDead },   (_, i) => node(`${prefix}d${i}`, g));
+  return {
+    nodes: [hub, ...spokes, ...dead],
+    links: spokes.map(s => ({ source: hub.id, target: s.id })),
+    // dead nodes have no edges → degree=0
+  };
+}
+
 /** Tree: binary tree of depth d. */
 function mkTree(prefix, g, depth) {
   const nodes = [], links = [];
@@ -874,6 +907,45 @@ const SCENARIOS = {
       ["a2","b2"],["a2","c2"],["a3","b3"],["a3","c3"],
       ["b0","c0"],["b1","c1"],["b2","c2"],
     ]
+  ),
+
+  // ── Constraint-coverage scenarios ────────────────────────────────────────
+  //
+  // These exist specifically to fire antecedents that are never triggered by
+  // normal topology scenarios, ensuring the Implies bodies get tested:
+  //
+  //   Kenji/Fatima: Implies(degree_gini > 0.5, hub_centrality_error <= 0.25)
+  //     → needs degree_gini > 0.5
+  //     → IMPOSSIBLE for any pure connected graph (pure star → gini → 0.5⁻)
+  //     → requires degree-0 (orphaned) nodes to cross the threshold
+  //
+  //   Fatima: Implies(layout_stress > 1.2, cross_edge_visibility >= 0.9)
+  //     → needs layout_stress > 1.2
+  //     → complete graph K_n: all pairs d=1 (ideal=120px) but layout forces
+  //       them into a large ring → many pairs at 2–4× ideal distance
+
+  // Dead code hub: active hub + 8 orphaned dead-code nodes.
+  // Computed gini = 0.658 (hub_10 + 8 isolates):
+  //   n=19, degrees=[10, 1×10, 0×8] → gini = 250/380 ≈ 0.66 > 0.5  ✓
+  dead_code_hub: () => mkDeadCodeHub("dc", "M", 10, 8),
+
+  // Larger dead-code variant for extra margin.
+  dead_code_hub_large: () => mkDeadCodeHub("dc", "M", 15, 10),
+
+  // Complete graph K_10: layout_stress via circular arrangement.
+  // All 45 pairs have d=1 (ideal=120px); D3 spreads into ring of r≈190px,
+  // giving 3-apart pairs at ~310px and opposite pairs at ~390px vs 120 ideal.
+  // Estimated perEdge ≈ 2.3 >> 1.2  ✓
+  clique_10: () => mkClique("k", "M", 10),
+
+  // Smaller clique for comparison (borderline stress).
+  clique_8:  () => mkClique("k", "M", 8),
+
+  // Dense clique with stress AND cross-module context: clique in one module,
+  // chain in another.  Tests Fatima's layout_stress Implies with multi-module.
+  clique_with_chain: () => combine(
+    [mkClique("k","Clique",8), mkChain("c","Chain",4)],
+    [["k0","c0"], ["k1","c0"]]
   ),
 };
 

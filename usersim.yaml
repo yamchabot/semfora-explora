@@ -98,6 +98,13 @@ scenarios:
   - microservices
   - spaghetti
   - tree_with_module
+  # Constraint-coverage scenarios
+  # dead_code_hub/large: orphaned degree-0 nodes → degree_gini = 0.65+ > 0.5
+  #   fires: Kenji Implies(degree_gini > 0.5, hub_centrality_error <= 0.25)
+  #          Fatima Implies(degree_gini > 0.5, hub_centrality_error <= 0.25)
+  # Fatima's Implies(layout_stress > 0.13, ...) is covered by existing diamond (0.161) and hub_20 (0.142)
+  - dead_code_hub
+  - dead_code_hub_large
 
 output:
   results: user_simulation/results.json
