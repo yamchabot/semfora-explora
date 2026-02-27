@@ -21,6 +21,10 @@ dependencies = [
 test = ["pytest>=7"]
 dev  = ["pytest>=7"]
 
+[tool.setuptools.packages.find]
+where = ["backend"]
+include = ["*"]
+
 [tool.pytest.ini_options]
 pythonpath = ["usersim"]
 testpaths  = ["tests", "usersim"]
