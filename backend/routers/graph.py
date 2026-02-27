@@ -179,23 +179,39 @@ def get_inheritance_graph(repo_id: str):
         return {"nodes": [], "edges": [], "has_inheritance": False}
 
     cur = conn.cursor()
-    # All nodes involved in inheritance
+    # Resolved child nodes
     node_rows = cur.execute(
         "SELECT DISTINCT n.hash, n.name, n.module, n.file_path, n.kind "
         "FROM inheritance i "
-        "JOIN nodes n ON n.hash = i.child_hash OR n.hash = i.parent_hash "
+        "JOIN nodes n ON n.hash = i.child_hash "
         "WHERE n.hash NOT LIKE 'unresolved:%' "
         "LIMIT 500"
     ).fetchall()
     nodes = [row_to_dict(r) for r in node_rows]
 
+    # All edges — child must be resolved; parent may be unresolved (external lib)
+    edge_rows = cur.execute(
+        "SELECT child_hash, parent_hash, parent_name FROM inheritance "
+        "WHERE child_hash NOT LIKE 'unresolved:%'"
+    ).fetchall()
+
+    # Synthesise stub nodes for unresolved (external) parents so edges can render
+    seen_ids = {n["hash"] for n in nodes}
+    for child_hash, parent_hash, parent_name in edge_rows:
+        if parent_hash not in seen_ids:
+            nodes.append({
+                "hash":      parent_hash,
+                "name":      parent_name,
+                "module":    "external",
+                "file_path": None,
+                "kind":      "ExternalClass",
+                "external":  True,
+            })
+            seen_ids.add(parent_hash)
+
     edges = [
         {"source": r[0], "target": r[1], "parent_name": r[2]}
-        for r in cur.execute(
-            "SELECT child_hash, parent_hash, parent_name FROM inheritance "
-            "WHERE child_hash NOT LIKE 'unresolved:%' "
-            "  AND parent_hash NOT LIKE 'unresolved:%'"
-        ).fetchall()
+        for r in edge_rows
     ]
     conn.close()
     return {"nodes": nodes, "edges": edges, "has_inheritance": True}
