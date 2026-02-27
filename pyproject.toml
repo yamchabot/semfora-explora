@@ -26,5 +26,5 @@ where = ["backend"]
 include = ["*"]
 
 [tool.pytest.ini_options]
-pythonpath = ["usersim"]
-testpaths  = ["tests", "usersim"]
+pythonpath = ["user_simulation"]
+testpaths  = ["tests", "user_simulation"]

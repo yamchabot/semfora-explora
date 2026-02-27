@@ -6,22 +6,22 @@ version: 1
 # Layer 2: Python perceptions → 52 derived quantities (timing, topology, ML)
 # Layer 3: Z3 judgement → per-user satisfaction across all scenarios
 
-instrumentation: "python3 usersim/instrumentation.py"
-perceptions:     "python3 usersim/perceptions.py"
+instrumentation: "python3 user_simulation/instrumentation.py"
+perceptions:     "python3 user_simulation/perceptions.py"
 
 users:
-  - usersim/users/company_executive.py
-  - usersim/users/engineering_vp.py
-  - usersim/users/engineering_manager.py
-  - usersim/users/people_manager.py
-  - usersim/users/staff_engineer.py
-  - usersim/users/principal_architect.py
-  - usersim/users/senior_engineer.py
-  - usersim/users/engineer.py
-  - usersim/users/junior_engineer.py
+  - user_simulation/users/company_executive.py
+  - user_simulation/users/engineering_vp.py
+  - user_simulation/users/engineering_manager.py
+  - user_simulation/users/people_manager.py
+  - user_simulation/users/staff_engineer.py
+  - user_simulation/users/principal_architect.py
+  - user_simulation/users/senior_engineer.py
+  - user_simulation/users/engineer.py
+  - user_simulation/users/junior_engineer.py
 
 # All graph topology scenarios (pre-simulated by run_scenarios.js)
-# Run `node usersim/instrumentation/run_scenarios.js` to regenerate output files.
+# Run `node user_simulation/instrumentation/run_scenarios.js` to regenerate output files.
 scenarios:
   # Single-module: chains
   - chain_3
@@ -100,5 +100,5 @@ scenarios:
   - tree_with_module
 
 output:
-  results: usersim/results.json
-  report:  usersim/report.html
+  results: user_simulation/results.json
+  report:  user_simulation/report.html

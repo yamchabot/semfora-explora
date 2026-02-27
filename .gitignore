@@ -1,4 +1,7 @@
 node_modules/
+build/
+*.egg-info/
+.claude/
 frontend/dist/
 frontend/.vite/
 venv*/

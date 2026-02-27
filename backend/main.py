@@ -66,7 +66,7 @@ app.include_router(patterns.router)
 
 # ── User simulation report ────────────────────────────────────────────────────
 REPO_ROOT   = Path(__file__).parent.parent
-REPORT_HTML = REPO_ROOT / "usersim" / "report.html"
+REPORT_HTML = REPO_ROOT / "user_simulation" / "report.html"
 
 _NO_CACHE = {"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache"}
 

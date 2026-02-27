@@ -1,0 +1,296 @@
+{
+  "moduleCount": 2,
+  "crossEdgeRatio": 0.1111111111111111,
+  "nodeList": [
+    {
+      "x": 432.63929110389984,
+      "y": 0.2926834933493286,
+      "g": "A"
+    },
+    {
+      "x": 510.3088370260954,
+      "y": 98.17768486516295,
+      "g": "A"
+    },
+    {
+      "x": 358.8286656351535,
+      "y": 104.97089372723286,
+      "g": "A"
+    },
+    {
+      "x": 353.31263456739106,
+      "y": -101.80086749816242,
+      "g": "A"
+    },
+    {
+      "x": 508.10702886568686,
+      "y": -100.17697705609422,
+      "g": "A"
+    },
+    {
+      "x": -432.6392911009427,
+      "y": -0.2926835100444783,
+      "g": "B"
+    },
+    {
+      "x": -351.2391250150427,
+      "y": 99.08914057247006,
+      "g": "B"
+    },
+    {
+      "x": -507.8069911669582,
+      "y": 99.73298637911954,
+      "g": "B"
+    },
+    {
+      "x": -514.5341204520272,
+      "y": -95.0059274084318,
+      "g": "B"
+    },
+    {
+      "x": -356.9769294660483,
+      "y": -104.98693354818052,
+      "g": "B"
+    }
+  ],
+  "degreeDist": {
+    "values": [
+      5,
+      1,
+      1,
+      1,
+      1,
+      5,
+      1,
+      1,
+      1,
+      1
+    ],
+    "mean": 1.8,
+    "max": 5,
+    "gini": 0.35555555555555557
+  },
+  "chainNodePos": [],
+  "edgeAngles": [
+    51.568790964596204,
+    125.18840203174604,
+    -127.84719536489564,
+    -53.08797334499347,
+    50.68029744373128,
+    126.92427963204449,
+    -130.8486867695576,
+    -54.14442262914444,
+    -179.9612390109568
+  ],
+  "edgeVisibility": {
+    "ratio": 1,
+    "avgGap": 175.2479504915935,
+    "minGap": 92.95611972736667,
+    "invisible": []
+  },
+  "nodeOverlap": {
+    "ratio": 0,
+    "maxOverlap": 0,
+    "overlapping": []
+  },
+  "edgeCrossings": {
+    "count": 0,
+    "ratio": 0,
+    "normalised": 0
+  },
+  "layoutStress": {
+    "stress": 129.82845305507414,
+    "perEdge": 2.885076734557203
+  },
+  "intraModuleStress": {
+    "stress": 0.648937627443541,
+    "perEdge": 0.03244688137217705
+  },
+  "hubCentrality": {
+    "hubs": [
+      {
+        "nodeId": "ahub",
+        "error": 4.199938849414411e-7,
+        "normalised": 3.307127880799859e-9
+      },
+      {
+        "nodeId": "bhub",
+        "error": 4.241674096680518e-7,
+        "normalised": 3.3401210662595057e-9
+      }
+    ],
+    "avgNormalised": 3.3236244735296822e-9
+  },
+  "chainLinearity": {
+    "ratio": 1,
+    "straightness": 1,
+    "chains": []
+  },
+  "blobIntegrity": {
+    "ratio": 1,
+    "violations": [],
+    "blobRadii": {}
+  },
+  "blobSeparation": {
+    "minClearance": 606.8160800400202,
+    "avgClearance": 606.8160800400202,
+    "separationRatio": 2.3477897509490195,
+    "overlapping": []
+  },
+  "gestaltProximity": {
+    "withinAvg": 172.84707225988677,
+    "betweenAvg": 874.6844414664712,
+    "ratio": 0.19761077717364706,
+    "cohesion": 0.8023892228263529
+  },
+  "angularResolution": {
+    "minAngle": 50.641536454688065,
+    "avgMinAngle": 51.377790050374614,
+    "poorNodes": []
+  },
+  "edgeLengthUniformity": {
+    "mean": 209.02572826937129,
+    "stddev": 232.02671681716237,
+    "cv": 1.110039030784525,
+    "min": 124.95611972736667,
+    "max": 865.2787802072528
+  },
+  "crossModuleEdgeVisibility": {
+    "ratio": 1,
+    "count": 1,
+    "visible": 1
+  },
+  "nodeSizeVariation": {
+    "cv": 0.5714285714285716,
+    "mean": 11.2,
+    "stddev": 6.400000000000001,
+    "min": 8,
+    "max": 24
+  },
+  "prominentNodeVisibility": {
+    "ratio": 1,
+    "topN": [
+      {
+        "id": "ahub",
+        "group": "A",
+        "groupPath": [
+          "A"
+        ],
+        "val": 24,
+        "x": 432.63929110389984,
+        "y": 0.2926834933493286,
+        "vx": -8.205462027485408e-8,
+        "vy": -1.8046298937062472e-9,
+        "index": 0
+      },
+      {
+        "id": "bhub",
+        "group": "B",
+        "groupPath": [
+          "B"
+        ],
+        "val": 24,
+        "x": -432.6392911009427,
+        "y": -0.2926835100444783,
+        "vx": 8.253842254827546e-8,
+        "vy": -8.347344362672231e-10,
+        "index": 5
+      },
+      {
+        "id": "as0",
+        "group": "A",
+        "groupPath": [
+          "A"
+        ],
+        "val": 8,
+        "x": 510.3088370260954,
+        "y": 98.17768486516295,
+        "vx": 1.697116907353799e-8,
+        "vy": 9.604064724395777e-9,
+        "index": 1
+      },
+      {
+        "id": "as1",
+        "group": "A",
+        "groupPath": [
+          "A"
+        ],
+        "val": 8,
+        "x": 358.8286656351535,
+        "y": 104.97089372723286,
+        "vx": 1.224803572029393e-8,
+        "vy": -7.266908637063164e-9,
+        "index": 2
+      },
+      {
+        "id": "as2",
+        "group": "A",
+        "groupPath": [
+          "A"
+        ],
+        "val": 8,
+        "x": 353.31263456739106,
+        "y": -101.80086749816242,
+        "vx": 1.5531469342951242e-8,
+        "vy": 1.0195887208042971e-8,
+        "index": 3
+      }
+    ],
+    "obscured": []
+  },
+  "qualityScore": {
+    "score": 78,
+    "components": {
+      "edgeVisibility": 1,
+      "noOverlap": 1,
+      "fewCrossings": 1,
+      "lowStress": 0,
+      "gestaltCohesion": 0.8023892228263529,
+      "blobIntegrity": 1
+    },
+    "raw": {
+      "vis": {
+        "ratio": 1,
+        "avgGap": 175.2479504915935,
+        "minGap": 92.95611972736667,
+        "invisible": []
+      },
+      "ovlp": {
+        "ratio": 0,
+        "maxOverlap": 0,
+        "overlapping": []
+      },
+      "cross": {
+        "count": 0,
+        "ratio": 0,
+        "normalised": 0
+      },
+      "stress": {
+        "stress": 129.82845305507414,
+        "perEdge": 2.885076734557203
+      },
+      "prox": {
+        "withinAvg": 172.84707225988677,
+        "betweenAvg": 874.6844414664712,
+        "ratio": 0.19761077717364706,
+        "cohesion": 0.8023892228263529
+      },
+      "integ": {
+        "ratio": 1,
+        "violations": [],
+        "blobRadii": {}
+      }
+    }
+  },
+  "blobEdgeRouting": {
+    "ratio": 1,
+    "violatingPairs": 0,
+    "totalPairs": 0
+  },
+  "interModuleCrossings": {
+    "crossingPairs": 0,
+    "totalPairs": 0,
+    "ratio": 0,
+    "weightedRatio": 0
+  }
+}
