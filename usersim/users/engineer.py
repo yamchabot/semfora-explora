@@ -1,4 +1,4 @@
-from judgement import Person
+from usersim import Person
 from usersim.judgement.z3_compat import Implies
 
 # Engineer (mid-level) understanding the module they're currently working in.
