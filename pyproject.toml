@@ -1,0 +1,5 @@
+[tool.pytest.ini_options]
+# Add usersim/ to sys.path so its modules can import each other without
+# being a Python package (avoids shadowing the installed usersim library).
+pythonpath = ["usersim"]
+testpaths  = ["tests", "usersim"]

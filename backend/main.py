@@ -66,7 +66,7 @@ app.include_router(patterns.router)
 
 # ── User simulation report ────────────────────────────────────────────────────
 REPO_ROOT   = Path(__file__).parent.parent
-REPORT_HTML = REPO_ROOT / "user_simulation_report.html"
+REPORT_HTML = REPO_ROOT / "usersim" / "report.html"
 
 _NO_CACHE = {"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache"}
 
@@ -139,7 +139,7 @@ async def regenerate_simulation_report():
     node = (os.environ.get("NODE")
             or shutil.which("node")
             or "/workspace/node-v22.13.0-linux-arm64/bin/node")
-    cmd = ["python3", str(REPO_ROOT / "user_simulation" / "run.py")]
+    cmd = ["python3", "-m", "usersim.cli", "run", "--quiet"]
     env = {**os.environ, "NODE": node}
     _log.info("generate: starting pipeline node=%s", node)
     try:

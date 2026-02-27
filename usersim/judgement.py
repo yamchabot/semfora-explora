@@ -20,7 +20,7 @@ import dataclasses
 from usersim.judgement.person import Person as _UsersimPerson
 from usersim.judgement.engine import evaluate_person
 
-from .perceptions import Perceptions
+from perceptions import Perceptions
 
 
 # ── Person base class ──────────────────────────────────────────────────────────

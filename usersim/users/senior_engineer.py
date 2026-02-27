@@ -1,4 +1,4 @@
-from ..judgement import Person
+from judgement import Person
 from usersim.judgement.z3_compat import Implies
 
 # Senior engineer debugging a production issue or tracing a call chain.

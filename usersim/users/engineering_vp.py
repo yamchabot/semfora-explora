@@ -1,4 +1,4 @@
-from ..judgement import Person
+from judgement import Person
 from usersim.judgement.z3_compat import Implies
 
 # Engineering VP responsible for org-level architecture decisions.
