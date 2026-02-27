@@ -10,7 +10,15 @@ instrumentation: "python3 usersim/instrumentation.py"
 perceptions:     "python3 usersim/perceptions.py"
 
 users:
-  - usersim/users/*.py
+  - usersim/users/company_executive.py
+  - usersim/users/engineering_vp.py
+  - usersim/users/engineering_manager.py
+  - usersim/users/people_manager.py
+  - usersim/users/staff_engineer.py
+  - usersim/users/principal_architect.py
+  - usersim/users/senior_engineer.py
+  - usersim/users/engineer.py
+  - usersim/users/junior_engineer.py
 
 # All graph topology scenarios (pre-simulated by run_scenarios.js)
 # Run `node usersim/instrumentation/run_scenarios.js` to regenerate output files.
