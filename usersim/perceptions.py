@@ -519,7 +519,7 @@ def _z3_eval(assignment: dict, formula) -> float:
     Uses the shim's Solver as the SAT oracle.
     Returns 1.0 (SAT) or 0.0 (UNSAT).
     """
-    from .z3_compat import Real, Int, Solver, sat as z3_sat
+    from z3_compat import Real, Int, Solver, sat as z3_sat
     s = Solver()
     for name, val in assignment.items():
         if isinstance(val, int):
@@ -535,7 +535,7 @@ def _archetypes(assignment: dict) -> dict:
     Evaluate archetype formulas against the current perception assignment.
     All formulas are written in Z3's expression language.
     """
-    from .z3_compat import Real, Int, And
+    from z3_compat import Real, Int, And
 
     chain_elo = Real("chain_elongation")
     chain_r2v = Real("chain_r2")
@@ -600,7 +600,7 @@ def _z3_bisect_min(
 
     Returns float('inf') if never SAT across the full range.
     """
-    from .z3_compat import Real, Solver, sat as z3_sat
+    from z3_compat import Real, Solver, sat as z3_sat
 
     var = Real(var_name)
 
@@ -636,7 +636,7 @@ def _z3_bisect_max(
 
     Returns float('-inf') if never SAT across the full range.
     """
-    from .z3_compat import Real, Solver, sat as z3_sat
+    from z3_compat import Real, Solver, sat as z3_sat
 
     var = Real(var_name)
 
@@ -999,3 +999,24 @@ def compute_perceptions(facts: dict) -> Perceptions:
         violation_score        = conf["violation_score"],
         layout_conformance     = conf["layout_conformance"],
     )
+
+
+# ── usersim entry points ──────────────────────────────────────────────────────
+
+def compute(metrics: dict, **_) -> dict:
+    """
+    usersim perceptions entry point.
+
+    The usersim runner calls compute(metrics, scenario=...) in-process.
+    Converts the raw JS layout metrics → Perceptions dataclass → flat dict
+    so the judgement engine can evaluate user constraints.
+    """
+    import dataclasses
+    return dataclasses.asdict(compute_perceptions(metrics))
+
+
+if __name__ == "__main__":
+    # Standalone stdin→stdout mode:
+    #   python3 usersim/perceptions.py < metrics.json
+    from usersim.perceptions.library import run_perceptions
+    run_perceptions(compute)

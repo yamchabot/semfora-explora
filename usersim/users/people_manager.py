@@ -1,4 +1,4 @@
-from ..judgement import Person
+from judgement import Person
 from usersim.judgement.z3_compat import Implies
 
 # People manager (lightly technical) planning a hire or team restructure.

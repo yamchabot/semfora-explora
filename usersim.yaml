@@ -1,0 +1,96 @@
+version: 1
+
+# Run from the repo root: usersim run
+#
+# Layer 1: JS D3 simulation → raw layout measurements per scenario
+# Layer 2: Python perceptions → 52 derived quantities (timing, topology, ML)
+# Layer 3: Z3 judgement → per-user satisfaction across all scenarios
+
+instrumentation: "python3 usersim/instrumentation.py"
+perceptions:     "python3 usersim/perceptions.py"
+
+users:
+  - usersim/users/*.py
+
+# All graph topology scenarios (pre-simulated by run_scenarios.js)
+# Run `node usersim/instrumentation/run_scenarios.js` to regenerate output files.
+scenarios:
+  # Single-module: chains
+  - chain_3
+  - chain_4
+  - chain_5
+  - chain_7
+  - chain_8
+  - chain_10
+  - chain_12
+  - chain_15
+  - bushy_chain_4
+  - bushy_chain_6
+  - pipeline
+  - pipeline_20
+  # Single-module: hubs
+  - hub_3
+  - hub_4
+  - hub_6
+  - hub_7
+  - hub_8
+  - hub_10
+  - hub_15
+  - hub_20
+  - hub_and_spoke
+  # Single-module: trees / stars
+  - star_5
+  - star_8
+  - star_12
+  - tree_2
+  - tree_3
+  - diamond
+  - funnel
+  - hourglass
+  # Two-module topologies
+  - two_modules_small
+  - two_modules_medium
+  - two_modules_large
+  - two_modules_coupled
+  - two_modules_deep
+  - two_modules_asymmetric
+  - two_modules_hub_chain
+  - two_modules_hub_hub
+  - two_modules_star_chain
+  - two_modules_trees
+  # Three-module topologies
+  - three_modules
+  - three_modules_small
+  - three_modules_large
+  - three_modules_coupled
+  - three_modules_mixed
+  - three_modules_asymmetric
+  - three_modules_hubs
+  - three_modules_star
+  # Four-module topologies
+  - four_modules_small
+  - four_modules_medium
+  - four_modules_large
+  - four_modules_coupled
+  - four_modules_mixed
+  - four_modules_pipeline
+  - four_modules_hubs
+  - four_modules_star
+  - four_modules_cross
+  # Five-module topologies
+  - five_modules_small
+  - five_modules_medium
+  - five_modules_gateway
+  - five_modules_hub
+  - five_modules_ring
+  - five_modules_star
+  # Real-world-shaped
+  - enterprise_6
+  - layered_arch
+  - microservices
+  - spaghetti
+  - tree_with_module
+
+output:
+  results: usersim/results.json
+  report:  usersim/report.html

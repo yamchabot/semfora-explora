@@ -1,4 +1,4 @@
-from ..judgement import Person
+from judgement import Person
 from usersim.judgement.z3_compat import Implies
 
 # Principal software architect verifying the implementation matches the design.

@@ -18,14 +18,14 @@ Fixture inventory:
 """
 
 import pytest
-from .perceptions import Perceptions
-from .judgement   import check_person, check_all
-from .users       import (
+from perceptions import Perceptions
+from judgement import check_person, check_all
+from users import (
     ALL, COMPANY_EXECUTIVE, ENGINEERING_VP, ENGINEERING_MANAGER,
     PEOPLE_MANAGER, STAFF_ENGINEER, PRINCIPAL_ARCHITECT,
     SENIOR_ENGINEER, ENGINEER, JUNIOR_ENGINEER,
 )
-from .z3_compat import And, Or, Not, Real, Int, Solver, sat, unsat
+from z3_compat import And, Or, Not, Real, Int, Solver, sat, unsat
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -333,7 +333,7 @@ class TestZ3ArithLayer:
 
     def test_implies_antecedent_false(self):
         """Implies is trivially satisfied when the antecedent is false."""
-        from .z3_compat import Implies
+        from z3_compat import Implies
         n = Int("n")
         x = Real("x")
         s = Solver()
@@ -344,7 +344,7 @@ class TestZ3ArithLayer:
 
     def test_implies_antecedent_true_consequent_fails(self):
         """Implies fails when antecedent holds but consequent does not."""
-        from .z3_compat import Implies
+        from z3_compat import Implies
         n = Int("n")
         x = Real("x")
         s = Solver()
