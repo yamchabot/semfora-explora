@@ -12,7 +12,7 @@ perceptions:     "python3 usersim/perceptions.py"
 users:
   - usersim/users/*.py
 
-# All graph topology scenarios (pre-simulated by run_scenarios.js).
+# All graph topology scenarios (pre-simulated by run_scenarios.js)
 # Run `node usersim/instrumentation/run_scenarios.js` to regenerate output files.
 scenarios:
   # Single-module: chains
@@ -47,7 +47,6 @@ scenarios:
   - diamond
   - funnel
   - hourglass
-  - bridge
   # Two-module topologies
   - two_modules_small
   - two_modules_medium

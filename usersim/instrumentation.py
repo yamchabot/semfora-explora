@@ -13,7 +13,7 @@ Usage (via usersim run):
     USERSIM_SCENARIO=chain_10 python3 usersim/instrumentation.py
 
 Usage (generate all scenarios at once):
-    node usersim/instrumentation/run_scenarios.js
+    node usersim/instrumentation.py
 """
 
 import json
@@ -24,11 +24,12 @@ import sys
 from pathlib import Path
 
 HERE      = Path(__file__).parent
-OUT_DIR   = HERE / "instrumentation" / "output"
-SCRIPT    = HERE / "instrumentation" / "run_scenarios.js"
+OUT_DIR   = HERE / "output"
+SCRIPT    = HERE / "run_scenarios.js"
 
 
 def find_node() -> str:
+    """Resolve the node binary from NODE env var or PATH."""
     override = os.environ.get("NODE")
     if override and Path(override).is_file():
         return override
@@ -38,25 +39,34 @@ def find_node() -> str:
     raise RuntimeError("node not found.  Install Node.js or set NODE=/path/to/node.")
 
 
-def run_js_if_needed(scenario: str) -> None:
-    """Run run_scenarios.js if the target output file is missing."""
+def run_js_if_needed(script: Path, scenario: str) -> None:
+    """Run the JS script if the target output file is missing."""
     target = OUT_DIR / f"{scenario}.json"
     if not target.exists():
         node = find_node()
-        subprocess.run([node, str(SCRIPT)], check=True, cwd=str(HERE.parent))
+        subprocess.run([node, str(script)], check=True, cwd=str(script.parent))
 
 
 def main() -> None:
-    scenario = os.environ.get("USERSIM_SCENARIO", "chain_10")
+    scenario = os.environ.get("USERSIM_SCENARIO", "chain_10") # Default to a common scenario
 
-    run_js_if_needed(scenario)
+    # Ensure the output directory and the specific scenario file exist
+    run_js_if_needed(SCRIPT.parent, scenario) # Pass the script's parent directory to ensure correct cwd
 
     target = OUT_DIR / f"{scenario}.json"
     if not target.exists():
         print(f"error: scenario file not found: {target}", file=sys.stderr)
         sys.exit(1)
 
-    facts = json.loads(target.read_text())
+    try:
+        facts = json.loads(target.read_text())
+    except json.JSONDecodeError as e:
+        print(f"error: Invalid JSON in {target}: {e}", file=sys.stderr)
+        sys.exit(1)
+    except FileNotFoundError:
+        print(f"error: Output file not found after running script: {target}", file=sys.stderr)
+        sys.exit(1)
+
 
     # Emit usersim metrics document
     doc = {
