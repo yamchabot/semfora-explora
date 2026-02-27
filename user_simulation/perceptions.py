@@ -519,7 +519,7 @@ def _z3_eval(assignment: dict, formula) -> float:
     Uses the shim's Solver as the SAT oracle.
     Returns 1.0 (SAT) or 0.0 (UNSAT).
     """
-    from z3_compat import Real, Int, Solver, sat as z3_sat
+    from usersim.judgement.z3_compat import Real, Int, Solver, sat as z3_sat
     s = Solver()
     for name, val in assignment.items():
         if isinstance(val, int):
@@ -535,7 +535,7 @@ def _archetypes(assignment: dict) -> dict:
     Evaluate archetype formulas against the current perception assignment.
     All formulas are written in Z3's expression language.
     """
-    from z3_compat import Real, Int, And
+    from usersim.judgement.z3_compat import Real, Int, And
 
     chain_elo = Real("chain_elongation")
     chain_r2v = Real("chain_r2")
@@ -600,7 +600,7 @@ def _z3_bisect_min(
 
     Returns float('inf') if never SAT across the full range.
     """
-    from z3_compat import Real, Solver, sat as z3_sat
+    from usersim.judgement.z3_compat import Real, Solver, sat as z3_sat
 
     var = Real(var_name)
 
@@ -636,7 +636,7 @@ def _z3_bisect_max(
 
     Returns float('-inf') if never SAT across the full range.
     """
-    from z3_compat import Real, Solver, sat as z3_sat
+    from usersim.judgement.z3_compat import Real, Solver, sat as z3_sat
 
     var = Real(var_name)
 
