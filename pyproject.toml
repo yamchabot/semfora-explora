@@ -3,21 +3,20 @@ name = "semfora-explora"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi>=0.110",
-    "uvicorn[standard]>=0.29",
-    "networkx>=3.0",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "networkx>=3.3",
     "numpy>=1.26",
     "scikit-learn>=1.4",
     "pydantic>=2.0",
+    "z3-solver>=4.12",
     "usersim @ git+https://github.com/yamchabot/usersim@main",
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=7", "z3-solver>=4.12"]
-dev  = ["pytest>=7", "z3-solver>=4.12"]
+test = ["pytest>=7"]
+dev  = ["pytest>=7"]
 
 [tool.pytest.ini_options]
-# Add usersim/ to sys.path so its modules can import each other without
-# being a Python package (avoids shadowing the installed usersim library).
 pythonpath = ["usersim"]
 testpaths  = ["tests", "usersim"]
