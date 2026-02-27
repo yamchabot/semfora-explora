@@ -1,4 +1,7 @@
 fastapi>=0.115
 uvicorn[standard]>=0.30
 networkx>=3.3
-z3-solver>=4.12           # user satisfaction constraint solver (see user_simulation/)
+numpy>=1.26
+scikit-learn>=1.4
+z3-solver>=4.12
+usersim @ git+https://github.com/yamchabot/usersim@main
