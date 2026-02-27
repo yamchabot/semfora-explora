@@ -1,0 +1,7 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+networkx>=3.0
+numpy>=1.26
+scikit-learn>=1.4
+pydantic>=2.0
+usersim @ git+https://github.com/yamchabot/usersim@main
